@@ -5,6 +5,8 @@ DEPLOYMENT_GUIDE.md
 # Autogen Serverless Framework
 .serverless/
 .node_modules/
+slack-bot/node_modules/
+./slack-bot/node_modules/
 # CDK specific
 cdk.out/
 .cdk.staging/
