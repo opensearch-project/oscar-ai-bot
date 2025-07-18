@@ -4,80 +4,107 @@ This directory contains the AWS Cloud Development Kit (CDK) code for deploying t
 
 ## Architecture
 
-The CDK stack creates the following AWS resources:
+The CDK deployment creates a modular, serverless architecture for the OSCAR Slack bot with the following components:
 
-- **Lambda Function**: Serverless execution environment for the Slack bot
-- **API Gateway**: HTTP endpoint for receiving Slack events
+### Storage Resources
 - **DynamoDB Tables**:
-  - `oscar-sessions`: Stores active Bedrock sessions (1 hour TTL)
-  - `oscar-context`: Stores conversation context (48 hour TTL)
+  - `oscar-sessions`: Stores active Bedrock sessions with 1-hour TTL
+  - `oscar-context`: Stores conversation context with configurable TTL (default 48 hours)
 - **S3 Bucket**: Stores documentation for the knowledge base
+
+### Serverless Compute
+- **Lambda Function**: Processes Slack events and interacts with the knowledge base
+- **API Gateway**: HTTP endpoint for receiving Slack events
+
+### Security
 - **Secrets Manager**: Securely stores Slack credentials
-- **IAM Roles**: Provides necessary permissions for all components
+- **IAM Roles**: Provides least-privilege permissions for all components
+
+## Stack Organization
+
+The CDK code is organized into modular stacks for better maintainability:
+
+- **OscarSlackBotStack** (`oscar_slack_bot_stack.py`): Main stack that combines all components
+- **OscarStorageStack** (`storage_stack.py`): DynamoDB tables and S3 bucket for data storage
+- **OscarLambdaStack** (`lambda_stack.py`): Lambda function and API Gateway for request processing
 
 ## Prerequisites
 
 1. **AWS Account** with appropriate permissions
 2. **AWS CLI** installed and configured
-3. **Node.js and npm** installed
+3. **Node.js and npm** installed (for CDK)
 4. **Python 3.9+** installed
 5. **Slack Workspace** where you have permissions to create apps
 
+## Environment Variables
+
+The deployment uses the following environment variables, which can be set in a `.env` file in the root directory:
+
+### Required Variables
+- `KNOWLEDGE_BASE_ID`: ID of your Amazon Bedrock knowledge base
+- `MODEL_ARN`: ARN of the Bedrock model to use (e.g., Claude)
+- `SLACK_BOT_TOKEN`: Bot token from your Slack app
+- `SLACK_SIGNING_SECRET`: Signing secret from your Slack app
+
+### Optional Variables
+- `SESSIONS_TABLE_NAME`: Name of the DynamoDB table for sessions (default: "oscar-sessions")
+- `CONTEXT_TABLE_NAME`: Name of the DynamoDB table for context (default: "oscar-context")
+- `DEDUP_TTL`: Time-to-live for deduplication records in seconds (default: 300)
+- `SESSION_TTL`: Time-to-live for session records in seconds (default: 3600)
+- `CONTEXT_TTL`: Time-to-live for context records in seconds (default: 172800)
+- `MAX_CONTEXT_LENGTH`: Maximum length of context summary (default: 3000)
+- `CONTEXT_SUMMARY_LENGTH`: Length of context summary for each interaction (default: 500)
+- `PROMPT_TEMPLATE`: Custom prompt template for the Bedrock model
+
 ## Deployment Instructions
 
-### Step 1: Create Slack App
+### Option 1: Using the Deployment Script
 
-1. Go to https://api.slack.com/apps
-2. Click "Create New App" > "From scratch"
-3. Enter app name (e.g., "OSCAR") and select your workspace
-4. Click "Create App"
-5. Note down the "Signing Secret" from the "Basic Information" page
-6. Go to "OAuth & Permissions" and add the following scopes:
-   - `app_mentions:read`
-   - `chat:write`
-   - `channels:history`
-   - `im:history`
-   - `reactions:write` (for emoji reactions)
-7. Click "Install App to Workspace" and authorize
-8. Note down the "Bot User OAuth Token" (starts with `xoxb-`)
-
-### Step 2: Configure Environment
-
-1. Create a `.env` file in the `slack-bot` directory:
-   ```bash
-   cd slack-bot
-   cp .env.example .env
-   ```
-
-2. Edit the `.env` file with your Slack credentials:
-   ```
-   SLACK_BOT_TOKEN=xoxb-your-token
-   SLACK_SIGNING_SECRET=your-signing-secret
-   KNOWLEDGE_BASE_ID=your-knowledge-base-id
-   MODEL_ARN=arn:aws:bedrock:region:account:inference-profile/model-id
-   ```
-
-### Step 3: Deploy with CDK
-
-Run the deployment script with your AWS account ID and region:
+The easiest way to deploy is using the provided script:
 
 ```bash
-./deploy_cdk.sh -a YOUR_AWS_ACCOUNT_ID -r YOUR_AWS_REGION
+# From the root directory
+./deploy_cdk.sh
 ```
 
-For example:
+This script will:
+1. Load environment variables from `.env`
+2. Run tests to ensure everything is working correctly
+3. Bootstrap the CDK environment if needed
+4. Deploy all required AWS resources
+5. Update the Lambda function with the full code
+6. Configure Secrets Manager with your Slack credentials
+
+### Option 2: Manual Deployment
+
+If you prefer to deploy manually:
+
 ```bash
-./deploy_cdk.sh -a 123456789012 -r us-west-2
+# Install dependencies
+cd cdk
+pip install -r requirements.txt
+
+# Bootstrap CDK (if not already done)
+cdk bootstrap aws://ACCOUNT-NUMBER/REGION
+
+# Deploy the stack
+cdk deploy
 ```
 
-The script will:
-1. Bootstrap the CDK environment
-2. Deploy all required AWS resources
-3. Upload the Lambda function code
-4. Configure Secrets Manager with your Slack credentials
-5. Provide you with the webhook URL for Slack configuration
+### Command Line Options
 
-### Step 4: Complete Slack App Configuration
+The `deploy_cdk.sh` script supports the following options:
+
+- `-a, --account ACCOUNT_ID`: AWS Account ID (default: extracted from .env)
+- `-r, --region REGION`: AWS Region (default: extracted from .env)
+- `--enable-dm`: Enable direct message functionality (overrides .env setting)
+- `-h, --help`: Show help message
+
+## Configuration
+
+### Slack App Configuration
+
+After deployment, you'll need to configure your Slack app:
 
 1. Go to your Slack App configuration at https://api.slack.com/apps
 2. Select your OSCAR app
@@ -86,41 +113,40 @@ The script will:
 5. Enter the webhook URL from the deployment output as the Request URL
 6. Under "Subscribe to bot events", add:
    - `app_mention`
-   - `message.im`
+   - `message.im` (if DM functionality is enabled)
 7. Click "Save Changes"
-8. Go to "App Home" and enable "Messages Tab"
-9. Check "Allow users to send Slash commands and messages from the messages tab"
-10. Click "Save Changes"
 
-### Step 5: Test Your Bot
+### Environment Variable Behavior
 
-1. In Slack, invite the bot to a channel: `/invite @oscar`
-2. Mention the bot: `@oscar What's the status of OpenSearch 2.11?`
-3. The bot should respond with information from your knowledge base
-4. Try replying in a thread to test context preservation
-5. Try sending a direct message to the bot
-6. Notice the emoji reactions (👀 while processing, ✅ when complete)
-
-## Stack Details
-
-The `OscarSlackBotStack` class in `stacks/oscar_slack_bot_stack.py` defines all the AWS resources:
-
-- **Secrets Manager**: Stores Slack credentials securely
-- **DynamoDB Tables**: Store session and context information
-- **S3 Bucket**: Stores documentation for the knowledge base
-- **Lambda Function**: Runs the Slack bot code
-- **API Gateway**: Provides HTTP endpoint for Slack events
-- **IAM Roles**: Grants necessary permissions
+- Values in the `.env` file are used as defaults
+- Command-line flags (like `--enable-dm`) override the corresponding `.env` settings
+- Default values are used for any variables not specified
 
 ## Customization
 
-You can customize the deployment by modifying:
+### Lambda Function
 
-- **Memory and Timeout**: Adjust Lambda function resources in `oscar_slack_bot_stack.py`
-- **Region and Account**: Specify different values when running `deploy_cdk.sh`
-- **TTL Settings**: Change the time-to-live values for DynamoDB tables
-- **Model Selection**: Use a different Bedrock model by updating the MODEL_ARN
-- **Emoji Reactions**: Modify the emoji reactions in `app.py`
+You can customize the Lambda function by modifying `lambda_stack.py`:
+
+- **Memory**: Change `memory_size` (default: 512 MB)
+- **Timeout**: Adjust `timeout` (default: 30 seconds)
+- **Environment Variables**: Add or modify variables in `_get_lambda_environment_variables()`
+
+### Storage
+
+You can customize the storage resources by modifying `storage_stack.py`:
+
+- **Table Names**: Change the table names
+- **Billing Mode**: Switch between PAY_PER_REQUEST and PROVISIONED
+- **S3 Configuration**: Add lifecycle rules, encryption, etc.
+
+### API Gateway
+
+You can customize the API Gateway by modifying the `api` resource in `lambda_stack.py`:
+
+- **Throttling**: Add rate limiting (the reason an intermediate API gateway is so useful)
+- **Authorization**: Add API key or other authorization methods
+- **CORS**: Configure cross-origin resource sharing
 
 ## Troubleshooting
 
@@ -144,11 +170,52 @@ You can customize the deployment by modifying:
    - Verify that the KNOWLEDGE_BASE_ID environment variable is set correctly
    - Check that the knowledge base exists and is active
 
+### Debugging
+
+To debug deployment issues:
+
+```bash
+# Get detailed logs during deployment
+cdk deploy --debug
+
+# Check the status of the stack
+aws cloudformation describe-stacks --stack-name OscarSlackBotStack
+
+# Check Lambda logs
+aws logs filter-log-events --log-group-name /aws/lambda/oscar-slack-bot
+```
+
 ## Clean Up
 
 To remove all deployed resources:
 
 ```bash
+# Using CDK
 cd cdk
 cdk destroy
+
+# Or using the AWS CLI
+aws cloudformation delete-stack --stack-name OscarSlackBotStack
 ```
+
+## Development
+
+### Adding New Resources
+
+To add new AWS resources to the stack:
+
+1. Decide which stack the resource belongs to (storage, lambda, or main)
+2. Add the resource definition to the appropriate file
+3. Update any dependencies or references in other stacks
+4. Deploy the changes with `cdk deploy`
+
+### Testing Changes
+
+Before deploying changes, you can synthesize the CloudFormation template to check for errors:
+
+```bash
+cd cdk
+cdk synth
+```
+
+This will generate a CloudFormation template in the `cdk.out` directory that you can review.

@@ -241,7 +241,12 @@ AWS_REGION=$AWS_REGION AWS_DEFAULT_REGION=$AWS_REGION cdk deploy --require-appro
 cd ..
 LAMBDA_FUNCTION_NAME=$(AWS_DEFAULT_REGION=$AWS_REGION aws cloudformation describe-stacks --stack-name OscarSlackBotStack --query "Stacks[0].Outputs[?OutputKey=='LambdaFunctionName'].OutputValue" --output text --region $AWS_REGION)
 SECRETS_ARN=$(AWS_DEFAULT_REGION=$AWS_REGION aws cloudformation describe-stacks --stack-name OscarSlackBotStack --query "Stacks[0].Outputs[?OutputKey=='SlackSecretsArn'].OutputValue" --output text --region $AWS_REGION)
-WEBHOOK_URL=$(AWS_DEFAULT_REGION=$AWS_REGION aws cloudformation describe-stacks --stack-name OscarSlackBotStack --query "Stacks[0].Outputs[?OutputKey=='SlackWebhookUrl'].OutputValue" --output text --region $AWS_REGION)
+WEBHOOK_URL=$(AWS_DEFAULT_REGION=$AWS_REGION aws cloudformation describe-stacks --stack-name OscarSlackBotStack --query "Stacks[0].Outputs[?contains(OutputKey, 'SlackWebhookUrl')].OutputValue" --output text --region $AWS_REGION)
+
+# If webhook URL is empty, try alternative output key pattern
+if [ -z "$WEBHOOK_URL" ]; then
+    WEBHOOK_URL=$(AWS_DEFAULT_REGION=$AWS_REGION aws cloudformation describe-stacks --stack-name OscarSlackBotStack --query "Stacks[0].Outputs[?contains(OutputKey, 'LambdaStackSlackWebhookUrl')].OutputValue" --output text --region $AWS_REGION)
+fi
 
 # Update the Lambda function with the full code
 echo "Updating Lambda function with full code..."
@@ -273,13 +278,19 @@ fi
 
 echo "Deployment complete!"
 echo ""
+echo "=============================================================="
+echo "                   SLACK BOT REQUEST URL                       "
+echo "=============================================================="
+echo "$WEBHOOK_URL"
+echo "=============================================================="
+echo ""
 echo "=== Configuration Steps ==="
 echo "1. Slack secrets have been automatically configured in AWS Secrets Manager"
 echo ""
 echo "2. Configure Slack App:"
 echo "   - Go to https://api.slack.com/apps"
 echo "   - Create a new app or update your existing app"
-echo "   - Under 'Event Subscriptions', enable events and set the Request URL to: $WEBHOOK_URL"
+echo "   - Under 'Event Subscriptions', enable events and set the Request URL to the URL above"
 echo "   - Subscribe to 'app_mention' and 'message.im' events"
 echo "   - Under 'OAuth & Permissions', add the required scopes:"
 echo "     * app_mentions:read"
