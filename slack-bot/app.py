@@ -7,10 +7,10 @@ Lambda handler for Slack events.
 import logging
 from slack_bolt import App
 from slack_bolt.adapter.aws_lambda import SlackRequestHandler
-from oscar.config import config
-from oscar.slack_handler import SlackHandler
-from oscar.storage import get_storage
-from oscar.bedrock import get_knowledge_base
+from .config import config
+from .slack_handler import SlackHandler
+from .storage import get_storage
+from .bedrock import get_knowledge_base
 
 # Configure logging
 logger = logging.getLogger()

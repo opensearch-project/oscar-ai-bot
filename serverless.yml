@@ -60,10 +60,10 @@ resources:
       Properties:
         TableName: oscar-sessions
         AttributeDefinitions:
-          - AttributeName: session_key
+          - AttributeName: event_id
             AttributeType: S
         KeySchema:
-          - AttributeName: session_key
+          - AttributeName: event_id
             KeyType: HASH
         TimeToLiveSpecification:
           AttributeName: ttl

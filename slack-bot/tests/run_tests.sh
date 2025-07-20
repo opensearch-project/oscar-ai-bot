@@ -45,4 +45,4 @@ fi
 
 # Run tests with coverage
 echo "Running tests with coverage..."
-python -m pytest tests/ -v --cov=oscar --cov-report=term-missing
+python -m pytest tests/ -v --cov=. --cov-report=term-missing --cov-exclude=tests/

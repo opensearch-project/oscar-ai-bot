@@ -27,7 +27,7 @@ class OscarStorageStack(Construct):
             self, "OscarSessionsTable",
             table_name="oscar-sessions",
             partition_key=dynamodb.Attribute(
-                name="session_key",
+                name="event_id",
                 type=dynamodb.AttributeType.STRING
             ),
             time_to_live_attribute="ttl",

@@ -3,8 +3,9 @@ Tests for the storage module.
 """
 
 import unittest
+import time
 from unittest.mock import patch, MagicMock
-from oscar.storage import InMemoryStorage, DynamoDBStorage
+from slack_bot.storage import InMemoryStorage, DynamoDBStorage, StorageInterface
 
 class TestInMemoryStorage(unittest.TestCase):
     """Test cases for the InMemoryStorage class."""
@@ -13,63 +14,55 @@ class TestInMemoryStorage(unittest.TestCase):
         """Set up test environment."""
         self.storage = InMemoryStorage()
     
-    def test_is_duplicate_event(self):
-        """Test duplicate event detection."""
-        # First time should not be a duplicate
-        self.assertFalse(self.storage.is_duplicate_event('test-event-1'))
+    def test_store_and_get_context(self):
+        """Test storing and retrieving context."""
+        # Create test context
+        context = {
+            'session_id': 'test-session',
+            'history': [{'query': 'test query', 'response': 'test response'}],
+            'summary': 'test summary'
+        }
         
-        # Second time should be a duplicate
-        self.assertTrue(self.storage.is_duplicate_event('test-event-1'))
+        # Store context
+        result = self.storage.store_context('thread-1', context)
+        self.assertTrue(result)
         
-        # Different event ID should not be a duplicate
-        self.assertFalse(self.storage.is_duplicate_event('test-event-2'))
+        # Retrieve context
+        retrieved = self.storage.get_context('thread-1')
+        self.assertEqual(retrieved, context)
+        
+        # Non-existent thread should return None
+        self.assertIsNone(self.storage.get_context('thread-2'))
     
-    def test_session_context_storage_and_retrieval(self):
-        """Test storing and retrieving session context."""
-        # Initially no session or context
-        session_id, context = self.storage.get_session_context('thread-1', 'channel-1')
-        self.assertIsNone(session_id)
-        self.assertIsNone(context)
+    def test_has_seen_event_and_mark_event_seen(self):
+        """Test event deduplication."""
+        # Initially event should not be seen
+        self.assertFalse(self.storage.has_seen_event('event-1'))
         
-        # Store session ID
-        self.storage.store_session_context('thread-1', 'channel-1', 'session-1', 'test query', 'test response')
+        # Mark event as seen
+        self.storage.mark_event_seen('event-1')
         
-        # Should retrieve session ID
-        session_id, context = self.storage.get_session_context('thread-1', 'channel-1')
-        self.assertEqual(session_id, 'session-1')
-        self.assertIsNone(context)
+        # Now event should be seen
+        self.assertTrue(self.storage.has_seen_event('event-1'))
         
-        # Different thread should have no session
-        session_id, context = self.storage.get_session_context('thread-2', 'channel-1')
-        self.assertIsNone(session_id)
-        self.assertIsNone(context)
+        # Different event should not be seen
+        self.assertFalse(self.storage.has_seen_event('event-2'))
     
-    def test_context_summary_storage_and_retrieval(self):
-        """Test storing and retrieving context summary."""
-        # Store context without session ID
-        self.storage.store_session_context('thread-2', 'channel-1', None, 'test query', 'test response')
+    def test_context_expiration(self):
+        """Test context expiration."""
+        # Store context with short TTL
+        self.storage.context_ttl = 1  # 1 second
+        context = {'test': 'data'}
+        self.storage.store_context('thread-exp', context)
         
-        # Should retrieve context summary
-        session_id, context = self.storage.get_session_context('thread-2', 'channel-1')
-        self.assertIsNone(session_id)
-        self.assertIsNotNone(context)
-        self.assertIn('test query', context)
-        self.assertIn('test response', context)
-    
-    def test_context_appending(self):
-        """Test appending to existing context."""
-        # Store initial context
-        self.storage.store_session_context('thread-3', 'channel-1', None, 'query 1', 'response 1')
+        # Should be available immediately
+        self.assertEqual(self.storage.get_context('thread-exp'), context)
         
-        # Append to context
-        self.storage.store_session_context('thread-3', 'channel-1', None, 'query 2', 'response 2')
+        # Wait for expiration
+        time.sleep(1.1)
         
-        # Should contain both interactions
-        _, context = self.storage.get_session_context('thread-3', 'channel-1')
-        self.assertIn('query 1', context)
-        self.assertIn('response 1', context)
-        self.assertIn('query 2', context)
-        self.assertIn('response 2', context)
+        # Should be expired now
+        self.assertIsNone(self.storage.get_context('thread-exp'))
 
 class TestDynamoDBStorage(unittest.TestCase):
     """Test cases for the DynamoDBStorage class."""
@@ -86,74 +79,143 @@ class TestDynamoDBStorage(unittest.TestCase):
         mock_boto_resource.return_value = mock_dynamodb
         mock_dynamodb.Table.side_effect = [self.mock_sessions_table, self.mock_context_table]
         
-        # Create storage instance
-        self.storage = DynamoDBStorage(region='us-west-2')
+        # Create storage instance with mocked config
+        with patch('slack_bot.storage.config') as mock_config:
+            mock_config.sessions_table_name = 'test-sessions'
+            mock_config.context_table_name = 'test-context'
+            mock_config.dedup_ttl = 300
+            mock_config.context_ttl = 172800
+            mock_config.max_context_length = 3000
+            self.storage = DynamoDBStorage(region='us-west-2')
     
-    def test_is_duplicate_event(self):
-        """Test duplicate event detection with DynamoDB."""
-        # Set up mock for non-duplicate case
+    def test_store_context(self):
+        """Test storing context in DynamoDB."""
+        # Set up mock
+        self.mock_context_table.put_item.return_value = {}
+        
+        # Create test context
+        context = {
+            'session_id': 'test-session',
+            'history': [{'query': 'test query', 'response': 'test response'}],
+            'summary': 'test summary'
+        }
+        
+        # Store context
+        result = self.storage.store_context('thread-1', context)
+        
+        # Verify result
+        self.assertTrue(result)
+        
+        # Verify put_item was called correctly
+        self.mock_context_table.put_item.assert_called_once()
+        args, kwargs = self.mock_context_table.put_item.call_args
+        self.assertEqual(kwargs['Item']['thread_key'], 'thread-1')
+        self.assertEqual(kwargs['Item']['context'], context)
+        self.assertIn('ttl', kwargs['Item'])
+    
+    def test_get_context(self):
+        """Test retrieving context from DynamoDB."""
+        # Set up mock
+        context = {
+            'session_id': 'test-session',
+            'history': [{'query': 'test query', 'response': 'test response'}],
+            'summary': 'test summary'
+        }
+        self.mock_context_table.get_item.return_value = {
+            'Item': {
+                'thread_key': 'thread-1',
+                'context': context
+            }
+        }
+        
+        # Retrieve context
+        retrieved = self.storage.get_context('thread-1')
+        
+        # Verify result
+        self.assertEqual(retrieved, context)
+        
+        # Verify get_item was called correctly
+        self.mock_context_table.get_item.assert_called_once_with(
+            Key={'thread_key': 'thread-1'}
+        )
+    
+    def test_has_seen_event(self):
+        """Test checking if event has been seen."""
+        # Set up mock for seen event
+        self.mock_sessions_table.get_item.return_value = {'Item': {'event_id': 'event-1'}}
+        
+        # Check if event has been seen
+        result = self.storage.has_seen_event('event-1')
+        
+        # Verify result
+        self.assertTrue(result)
+        
+        # Verify get_item was called correctly
+        self.mock_sessions_table.get_item.assert_called_once_with(
+            Key={'event_id': 'event-1'}
+        )
+        
+        # Set up mock for unseen event
+        self.mock_sessions_table.get_item.return_value = {}
+        
+        # Check if event has been seen
+        result = self.storage.has_seen_event('event-2')
+        
+        # Verify result
+        self.assertFalse(result)
+    
+    def test_mark_event_seen(self):
+        """Test marking event as seen."""
+        # Set up mock
         self.mock_sessions_table.put_item.return_value = {}
         
-        # Should not be a duplicate
-        self.assertFalse(self.storage.is_duplicate_event('test-event-1'))
+        # Mark event as seen
+        result = self.storage.mark_event_seen('event-1')
+        
+        # Verify result
+        self.assertTrue(result)
         
         # Verify put_item was called correctly
         self.mock_sessions_table.put_item.assert_called_once()
         args, kwargs = self.mock_sessions_table.put_item.call_args
-        self.assertIn('Item', kwargs)
-        self.assertIn('ConditionExpression', kwargs)
-        self.assertEqual(kwargs['Item']['session_key'], 'dedup_test-event-1')
-        
-        # Set up mock for duplicate case
-        from botocore.exceptions import ClientError
-        error_response = {'Error': {'Code': 'ConditionalCheckFailedException'}}
-        self.mock_sessions_table.put_item.side_effect = ClientError(error_response, 'PutItem')
-        
-        # Should be a duplicate
-        self.assertTrue(self.storage.is_duplicate_event('test-event-1'))
+        self.assertEqual(kwargs['Item']['event_id'], 'event-1')
+        self.assertIn('timestamp', kwargs['Item'])
+        self.assertIn('ttl', kwargs['Item'])
     
-    def test_get_session_context_with_active_session(self):
-        """Test retrieving active session from DynamoDB."""
-        # Set up mock for active session
-        self.mock_sessions_table.get_item.return_value = {
-            'Item': {
-                'session_key': 'channel-1_thread-1',
-                'session_id': 'session-1'
-            }
+    def test_context_truncation(self):
+        """Test context truncation when exceeding max length."""
+        # Set up mock
+        self.mock_context_table.put_item.return_value = {}
+        
+        # Create large context
+        large_history = []
+        for i in range(100):
+            large_history.append({
+                'query': f'query {i}' * 50,
+                'response': f'response {i}' * 50,
+                'timestamp': int(time.time())
+            })
+        
+        large_context = {
+            'session_id': 'test-session',
+            'history': large_history,
+            'summary': 'test summary'
         }
         
-        # Should retrieve session ID
-        session_id, context = self.storage.get_session_context('thread-1', 'channel-1')
-        self.assertEqual(session_id, 'session-1')
-        self.assertIsNone(context)
+        # Store context
+        with patch('slack_bot.storage.config') as mock_config:
+            mock_config.max_context_length = 1000  # Small max length to force truncation
+            self.storage.store_context('thread-large', large_context)
         
-        # Verify get_item was called correctly
-        self.mock_sessions_table.get_item.assert_called_once_with(
-            Key={'session_key': 'channel-1_thread-1'}
-        )
-    
-    def test_get_session_context_with_stored_context(self):
-        """Test retrieving context summary from DynamoDB."""
-        # Set up mock for no active session
-        self.mock_sessions_table.get_item.return_value = {}
+        # Verify put_item was called
+        self.mock_context_table.put_item.assert_called_once()
         
-        # Set up mock for stored context
-        self.mock_context_table.get_item.return_value = {
-            'Item': {
-                'thread_key': 'channel-1_thread-2',
-                'context_summary': 'Q: test query\nA: test response'
-            }
-        }
+        # Get the context that was stored
+        args, kwargs = self.mock_context_table.put_item.call_args
+        stored_context = kwargs['Item']['context']
         
-        # Should retrieve context summary
-        session_id, context = self.storage.get_session_context('thread-2', 'channel-1')
-        self.assertIsNone(session_id)
-        self.assertEqual(context, 'Q: test query\nA: test response')
-        
-        # Verify get_item was called correctly
-        self.mock_context_table.get_item.assert_called_once_with(
-            Key={'thread_key': 'channel-1_thread-2'}
-        )
+        # Verify history was truncated
+        self.assertLess(len(stored_context['history']), len(large_history))
 
 if __name__ == '__main__':
     unittest.main()

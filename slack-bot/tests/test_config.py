@@ -5,7 +5,7 @@ Tests for the config module.
 import os
 import unittest
 from unittest.mock import patch, MagicMock
-from oscar.config import Config
+from slack_bot.config import Config
 
 class TestConfig(unittest.TestCase):
     """Test cases for the Config class."""

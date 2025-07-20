@@ -5,6 +5,7 @@ This module provides classes for interacting with Amazon Bedrock.
 """
 
 import logging
+import json
 import boto3
 from abc import ABC, abstractmethod
 from .config import config
@@ -59,12 +60,7 @@ class BedrockKnowledgeBase(KnowledgeBaseInterface):
         
         # Add query decomposition configuration
         # For inference profiles, the structure is different
-        if is_inference_profile:
-            # For inference profiles, we need to use a different structure
-            # Inference profiles may not support query decomposition in the same way
-            # So we'll skip adding it explicitly for inference profiles
-            pass
-        else:
+        if not is_inference_profile:
             # Standard structure for foundation models
             request['retrieveAndGenerateConfiguration']['knowledgeBaseConfiguration']['orchestrationConfiguration'] = {
                 'queryTransformationConfiguration': {
@@ -73,24 +69,16 @@ class BedrockKnowledgeBase(KnowledgeBaseInterface):
             }
         
         # Add generation configuration
-        # For inference profiles, the prompt template is handled differently
+        # Same configuration for both types, but log differently
+        request['retrieveAndGenerateConfiguration']['knowledgeBaseConfiguration']['generationConfiguration'] = {
+            'promptTemplate': {
+                'textPromptTemplate': self.prompt_template
+            }
+        }
+        
         if is_inference_profile:
-            # For inference profiles, we need to ensure the prompt template is properly formatted
-            request['retrieveAndGenerateConfiguration']['knowledgeBaseConfiguration']['generationConfiguration'] = {
-                'promptTemplate': {
-                    'textPromptTemplate': self.prompt_template
-                }
-            }
-            # Add additional inference profile specific configurations if needed
-            # Inference profiles may have specific requirements for Claude models
+            # Log that we're using inference profile configuration
             logger.info("Using inference profile configuration")
-        else:
-            # Standard configuration for foundation models
-            request['retrieveAndGenerateConfiguration']['knowledgeBaseConfiguration']['generationConfiguration'] = {
-                'promptTemplate': {
-                    'textPromptTemplate': self.prompt_template
-                }
-            }
         
         # Add session ID if available
         if session_id:
@@ -98,7 +86,6 @@ class BedrockKnowledgeBase(KnowledgeBaseInterface):
             logger.info(f"Using session ID: {session_id}")
         
         # Log the full request for debugging
-        import json
         logger.info(f"Full request: {json.dumps(request, indent=2)}")
         
         try:
@@ -139,31 +126,8 @@ class BedrockKnowledgeBase(KnowledgeBaseInterface):
                 logger.error(f"Fallback also failed: {fallback_error}")
                 raise fallback_error
 
-class MockKnowledgeBase(KnowledgeBaseInterface):
-    """Mock implementation of knowledge base interface for testing."""
-    
-    def __init__(self):
-        """Initialize mock knowledge base."""
-        self.session_counter = 0
-    
-    def query(self, query, session_id=None, context_summary=None):
-        """Mock query implementation."""
-        # Generate a mock session ID if none provided
-        if not session_id:
-            self.session_counter += 1
-            session_id = f"mock-session-{self.session_counter}"
-        
-        # Generate a mock response
-        if context_summary:
-            response = f"Mock response to '{query}' with context: {context_summary[:50]}..."
-        else:
-            response = f"Mock response to '{query}'"
-        
-        return response, session_id
-
 # Factory function to create the appropriate knowledge base implementation
 def get_knowledge_base(kb_type='bedrock', region=None):
     """Get knowledge base implementation based on type."""
-    if kb_type == 'mock':
-        return MockKnowledgeBase()
+    # No mock implementation here - moved to tests
     return BedrockKnowledgeBase(region)

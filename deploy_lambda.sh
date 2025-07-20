@@ -13,22 +13,25 @@ echo "Using AWS Region: $AWS_REGION"
 echo "Creating Lambda deployment package..."
 mkdir -p lambda_package
 
-# Copy the app.py file and oscar package
+# Copy the app.py file and other Python modules
 echo "Copying application files..."
 cp slack-bot/app.py lambda_package/
-mkdir -p lambda_package/oscar
-cp -r slack-bot/oscar/* lambda_package/oscar/
+cp slack-bot/__init__.py lambda_package/
+cp slack-bot/bedrock.py lambda_package/
+cp slack-bot/config.py lambda_package/
+cp slack-bot/slack_handler.py lambda_package/
+cp slack-bot/storage.py lambda_package/
 
-# Verify oscar package structure
-if [ ! -f "lambda_package/oscar/__init__.py" ] || [ ! -f "lambda_package/oscar/config.py" ]; then
-    echo "Error: Oscar package files are missing or incomplete!"
-    echo "Please ensure the oscar directory contains all required modules."
+# Verify package structure
+if [ ! -f "lambda_package/app.py" ] || [ ! -f "lambda_package/config.py" ]; then
+    echo "Error: Application files are missing or incomplete!"
+    echo "Please ensure the slack-bot directory contains all required modules."
     exit 1
 fi
 
 # Install dependencies
 echo "Installing dependencies..."
-pip install -r slack-bot/requirements.txt -t lambda_package/
+pip install -r slack-bot/requirements.txt -t lambda_package/ --force-reinstall
 
 # Create the zip file
 echo "Creating zip file..."

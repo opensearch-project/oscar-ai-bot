@@ -1,19 +1,19 @@
 """
 Configuration module for OSCAR.
+
+This module provides configuration management for the OSCAR application.
 """
 
 import os
-import boto3
 import json
 import logging
+import boto3
 from botocore.exceptions import ClientError
 
 # Configure logging
 logger = logging.getLogger(__name__)
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
+logging.basicConfig(level=logging.INFO,
+                   format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 
 class Config:
     """Configuration class for OSCAR."""
@@ -46,7 +46,7 @@ class Config:
         # Feature flags
         self.enable_dm = os.environ.get('ENABLE_DM', 'false').lower() == 'true'
         
-        # Prompt template
+        # Default prompt template
         self.prompt_template = os.environ.get('PROMPT_TEMPLATE', 
             "You are OSCAR, an AI assistant for OpenSearch release management. " +
             "You are a question answering agent. You will be provided with a set of search results. " +
