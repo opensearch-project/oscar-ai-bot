@@ -14,7 +14,7 @@ OSCAR is an AI-powered assistant for OpenSearch release management, leveraging A
 - **Knowledge Base Integration**: Uses Amazon Bedrock to query OpenSearch documentation
 - **Emoji Reactions**: Provides visual feedback on message processing status
 - **Deduplication**: Prevents duplicate responses to the same message
-- **Throttling**: Rate limits requests to prevent overuse
+<!-- - **Throttling**: Rate limits requests to prevent overuse -->
 - **Toggleable DM Support**: Enable or disable direct message functionality
 
 ## Deployment Options
@@ -71,8 +71,8 @@ Create a `.env` file in the root directory with the following variables:
 | `CONTEXT_SUMMARY_LENGTH` | Context summary length | 500 |
 | `ENABLE_DM` | Enable direct messages | false |
 | `PROMPT_TEMPLATE` | Custom prompt template | Default template |
-| `THROTTLE_REQUESTS_PER_MINUTE` | Maximum requests per minute per user | 5 |
-| `THROTTLE_WINDOW_SECONDS` | Throttling window in seconds | 60 |
+<!-- | `THROTTLE_REQUESTS_PER_MINUTE` | Maximum requests per minute per user | 5 |
+| `THROTTLE_WINDOW_SECONDS` | Throttling window in seconds | 60 | -->
 
 ## Usage
 
@@ -120,7 +120,6 @@ chmod +x tests/run_tests.sh
 │   ├── config.py           # Configuration management
 │   ├── slack_handler.py    # Slack event handling
 │   ├── storage.py          # DynamoDB storage
-│   └── throttling.py       # Rate limiting
 ├── deploy_cdk.sh           # CDK deployment script
 ├── deploy_lambda.sh        # Lambda update script
 ├── deploy_serverless.sh    # Serverless Framework deployment script

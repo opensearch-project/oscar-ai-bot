@@ -16,7 +16,7 @@ This Slack bot uses a two-phase processing approach to prevent duplicate respons
 - **Knowledge Base Integration**: Uses Amazon Bedrock to query OpenSearch documentation
 - **Emoji Reactions**: Provides visual feedback on message processing status
 - **Deduplication**: Prevents duplicate responses to the same message
-- **Throttling**: Rate limits requests to prevent overuse
+<!-- - **Throttling**: Rate limits requests to prevent overuse -->
 - **Toggleable DM Support**: Enable or disable direct message functionality
 
 ## Environment Variables
@@ -37,8 +37,8 @@ This Slack bot uses a two-phase processing approach to prevent duplicate respons
 | `CONTEXT_SUMMARY_LENGTH` | Context summary length | No | 500 |
 | `ENABLE_DM` | Enable direct messages | No | false |
 | `PROMPT_TEMPLATE` | Custom prompt template | No | Default template |
-| `THROTTLE_REQUESTS_PER_MINUTE` | Maximum requests per minute per user | No | 5 |
-| `THROTTLE_WINDOW_SECONDS` | Throttling window in seconds | No | 60 |
+<!-- | `THROTTLE_REQUESTS_PER_MINUTE` | Maximum requests per minute per user | No | 5 |
+| `THROTTLE_WINDOW_SECONDS` | Throttling window in seconds | No | 60 | -->
 
 ## Deployment
 
@@ -53,7 +53,6 @@ slack-bot/
 ├── config.py             # Configuration management
 ├── slack_handler.py      # Slack event handling
 ├── storage.py            # DynamoDB storage
-├── throttling.py         # Rate limiting
 ├── requirements.txt      # Python dependencies
 └── tests/                # Unit tests
     ├── run_tests.sh      # Test runner script
