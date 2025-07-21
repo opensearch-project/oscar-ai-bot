@@ -122,17 +122,33 @@ if [ -z "$AWS_ACCOUNT_ID" ] || [ -z "$AWS_REGION" ]; then
     fi
     
     echo "Reading AWS account and region from $ENV_FILE file..."
-    MODEL_ARN=$(grep MODEL_ARN $ENV_FILE | cut -d= -f2)
     
-    # Extract account ID and region from MODEL_ARN if not provided as arguments
+    # First try to read AWS_ACCOUNT_ID directly from .env
     if [ -z "$AWS_ACCOUNT_ID" ]; then
-        AWS_ACCOUNT_ID=$(echo $MODEL_ARN | sed -n 's/.*:bedrock:\([^:]*\):\([^:]*\):.*/\2/p')
-        echo "Using AWS Account ID from .env: $AWS_ACCOUNT_ID"
+        ENV_ACCOUNT_ID=$(grep -E "^AWS_ACCOUNT_ID=" $ENV_FILE | cut -d= -f2)
+        if [ -n "$ENV_ACCOUNT_ID" ]; then
+            AWS_ACCOUNT_ID=$ENV_ACCOUNT_ID
+            echo "Using AWS Account ID from .env: $AWS_ACCOUNT_ID"
+        else
+            # Fall back to extracting from MODEL_ARN if AWS_ACCOUNT_ID not found
+            MODEL_ARN=$(grep MODEL_ARN $ENV_FILE | cut -d= -f2)
+            AWS_ACCOUNT_ID=$(echo $MODEL_ARN | sed -n 's/.*:bedrock:\([^:]*\):\([^:]*\):.*/\2/p')
+            echo "Using AWS Account ID from MODEL_ARN: $AWS_ACCOUNT_ID"
+        fi
     fi
     
+    # Read AWS_REGION directly from .env or extract from MODEL_ARN
     if [ -z "$AWS_REGION" ]; then
-        AWS_REGION=$(echo $MODEL_ARN | sed -n 's/.*:bedrock:\([^:]*\):.*/\1/p')
-        echo "Using AWS Region from .env: $AWS_REGION"
+        ENV_REGION=$(grep -E "^AWS_REGION=" $ENV_FILE | cut -d= -f2)
+        if [ -n "$ENV_REGION" ]; then
+            AWS_REGION=$ENV_REGION
+            echo "Using AWS Region from .env: $AWS_REGION"
+        else
+            # Fall back to extracting from MODEL_ARN
+            MODEL_ARN=$(grep MODEL_ARN $ENV_FILE | cut -d= -f2)
+            AWS_REGION=$(echo $MODEL_ARN | sed -n 's/.*:bedrock:\([^:]*\):.*/\1/p')
+            echo "Using AWS Region from MODEL_ARN: $AWS_REGION"
+        fi
     fi
     
     # Export MODEL_ARN for the stack

@@ -9,9 +9,9 @@ import time
 import re
 from slack_sdk.errors import SlackApiError
 
-from .config import config
-from .storage import get_storage
-from .bedrock import get_knowledge_base
+from config import config
+from storage import get_storage
+from bedrock import get_knowledge_base
 
 # Configure logging
 logger = logging.getLogger(__name__)

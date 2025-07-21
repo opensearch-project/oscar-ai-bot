@@ -42,7 +42,7 @@ provider:
         - dynamodb:DeleteItem
         - dynamodb:Query
       Resource: 
-        - "arn:aws:dynamodb:${self:provider.region}:*:table/oscar-sessions"
+        - "arn:aws:dynamodb:${self:provider.region}:*:table/oscar-sessions-v2"
         - "arn:aws:dynamodb:${self:provider.region}:*:table/oscar-context"
 functions:
   slack-bot:
@@ -58,7 +58,7 @@ resources:
     OscarSessionsTable:
       Type: AWS::DynamoDB::Table
       Properties:
-        TableName: oscar-sessions
+        TableName: oscar-sessions-v2
         AttributeDefinitions:
           - AttributeName: event_id
             AttributeType: S

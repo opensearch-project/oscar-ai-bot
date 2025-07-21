@@ -8,7 +8,7 @@ import logging
 import json
 import boto3
 from abc import ABC, abstractmethod
-from .config import config
+from config import config
 
 # Configure logging
 logger = logging.getLogger(__name__)
