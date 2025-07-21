@@ -17,11 +17,11 @@ OSCAR is an AI-powered assistant for OpenSearch release management, leveraging A
 <!-- - **Throttling**: Rate limits requests to prevent overuse -->
 - **Toggleable DM Support**: Enable or disable direct message functionality
 
-## Deployment Options
+## Deployment
 
-OSCAR can be deployed using either AWS CDK or Serverless Framework:
+OSCAR is deployed using AWS CDK:
 
-### CDK Deployment
+### Deployment Commands
 
 ```bash
 # Deploy using settings from .env file
@@ -30,18 +30,14 @@ OSCAR can be deployed using either AWS CDK or Serverless Framework:
 # Deploy with DM functionality explicitly enabled
 ./deploy_cdk.sh --enable-dm
 
+# Deploy with debug output
+./deploy_cdk.sh --debug
+
+# Perform a dry run without making changes
+./deploy_cdk.sh --dry-run
+
 # Update just the Lambda function
 ./deploy_lambda.sh
-```
-
-### Serverless Framework Deployment
-
-```bash
-# Deploy with Serverless Framework
-./deploy_serverless.sh
-
-# Deploy with DM functionality enabled
-./deploy_serverless.sh --enable-dm
 ```
 
 ## Environment Variables
@@ -73,6 +69,31 @@ Create a `.env` file in the root directory with the following variables:
 | `PROMPT_TEMPLATE` | Custom prompt template | Default template |
 <!-- | `THROTTLE_REQUESTS_PER_MINUTE` | Maximum requests per minute per user | 5 |
 | `THROTTLE_WINDOW_SECONDS` | Throttling window in seconds | 60 | -->
+
+### Important Notes on Region Configuration
+
+**Region Compatibility**: The AWS region used for the Bedrock knowledge base must match the region specified in your environment variables. If your knowledge base is in `us-west-2`, make sure to set `AWS_REGION=us-west-2` in your `.env` file.
+
+**Parameter Precedence**:
+1. Command-line arguments (highest priority)
+2. Environment variables from `.env` file
+3. Extracted from MODEL_ARN (if available)
+4. Default values in code (lowest priority)
+
+For example, if you specify `--region us-west-2` in the command line, it will override any region setting in your `.env` file or defaults.
+
+### Important Notes on Region Configuration
+
+- **Region Compatibility**: The AWS region used for the Bedrock knowledge base must match the region specified in `AWS_REGION` and in the `MODEL_ARN`. Using different regions will result in errors when querying the knowledge base.
+
+### Configuration Precedence
+
+When determining configuration values, the following precedence is used (highest to lowest):
+
+1. Command-line arguments (e.g., `--region`, `--enable-dm`)
+2. Environment variables from `.env` file
+3. Values extracted from other settings (e.g., region from `MODEL_ARN`)
+4. Default values in code
 
 ## Usage
 
@@ -112,18 +133,18 @@ chmod +x tests/run_tests.sh
 ```
 ├── cdk/                    # CDK infrastructure code
 │   ├── stacks/             # CDK stack definitions
-│   └── app.py              # CDK app entry point
+│   ├── tests/              # CDK unit tests
+│   ├── app.py              # CDK app entry point
+│   └── cdk.json            # CDK configuration
 ├── slack-bot/              # Slack bot implementation
 │   ├── tests/              # Unit tests
 │   ├── app.py              # Lambda handler
 │   ├── bedrock.py          # Bedrock integration
 │   ├── config.py           # Configuration management
 │   ├── slack_handler.py    # Slack event handling
-│   ├── storage.py          # DynamoDB storage
+│   └── storage.py          # DynamoDB storage
 ├── deploy_cdk.sh           # CDK deployment script
-├── deploy_lambda.sh        # Lambda update script
-├── deploy_serverless.sh    # Serverless Framework deployment script
-└── serverless.yml          # Serverless Framework configuration
+└── deploy_lambda.sh        # Lambda update script
 ```
 
 ## License

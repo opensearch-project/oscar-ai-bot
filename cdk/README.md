@@ -17,6 +17,7 @@ The CDK deployment creates a modular, serverless architecture for the OSCAR Slac
 
 ### Security
 - **IAM Roles**: Provides least-privilege permissions for all components
+- **Encryption**: AWS-managed encryption for DynamoDB tables
 
 ## Stack Organization
 
@@ -47,8 +48,49 @@ The deployment uses the following environment variables, which can be set in a `
 - `CONTEXT_SUMMARY_LENGTH`: Length of context summary for each interaction (default: 500)
 - `ENABLE_DM`: Enable direct message functionality (default: false)
 - `PROMPT_TEMPLATE`: Custom prompt template for the Bedrock model
-- `THROTTLE_REQUESTS_PER_MINUTE`: Maximum requests per minute per user (default: 5)
-- `THROTTLE_WINDOW_SECONDS`: Throttling window in seconds (default: 60)
+- `ENVIRONMENT`: Deployment environment (default: dev)
+- `LAMBDA_FUNCTION_NAME`: Name of the Lambda function (default: oscar-slack-bot)
+
+### Region Configuration
+
+**Important**: The AWS region used for infrastructure deployment must be compatible with your Bedrock resources. Specifically:
+
+1. The region where your Bedrock knowledge base exists must match the `AWS_REGION` environment variable
+2. The region in your `MODEL_ARN` must match the region where the model is available
+
+For example, if your knowledge base is in `us-west-2`, you should set:
+```
+AWS_REGION=us-west-2
+MODEL_ARN=arn:aws:bedrock:us-west-2::foundation-model/anthropic.claude-3-5-haiku-20241022-v1:0
+```
+
+### Configuration Precedence
+
+When determining which AWS region to use, the deployment script follows this order of precedence:
+
+1. Command-line arguments (`--region` flag) - highest priority
+2. Environment variables from `.env` file (`AWS_REGION` or `AWS_DEFAULT_REGION`)
+3. Region extracted from `MODEL_ARN` environment variable
+4. Default region specified in code (us-east-1) - lowest priority
+
+This allows you to override the region at different levels depending on your needs.
+
+### Region Configuration
+
+**Important**: The AWS region used for infrastructure deployment and the region where your Bedrock knowledge base is located must be compatible:
+
+- The region specified in `AWS_REGION` should match the region in your `MODEL_ARN` and the region where your knowledge base is created
+- If these regions don't match, the Lambda function will not be able to access the knowledge base
+- You can deploy infrastructure in one region while using Bedrock resources from another region by explicitly setting `AWS_REGION` in your `.env` file
+
+### Configuration Precedence
+
+The deployment script uses the following precedence to determine configuration values (highest to lowest):
+
+1. Command-line arguments to `deploy_cdk.sh` (e.g., `--region`, `--account`)
+2. Environment variables from `.env` file
+3. Values extracted from other settings (e.g., region from `MODEL_ARN`)
+4. Default values in code
 
 ## Deployment Instructions
 
@@ -76,6 +118,22 @@ The `deploy_cdk.sh` script supports the following options:
 - `-r, --region REGION`: AWS Region (default: extracted from .env)
 - `--enable-dm`: Enable direct message functionality (overrides .env setting)
 - `-h, --help`: Show help message
+
+## Testing
+
+The CDK code includes unit tests to verify the infrastructure definition:
+
+```bash
+# Run the tests
+cd cdk
+./tests/run_tests.sh
+```
+
+The tests verify:
+- DynamoDB table creation with correct properties
+- Lambda function creation with correct configuration
+- API Gateway creation with correct endpoints
+- IAM role creation with appropriate permissions
 
 ## Configuration
 
@@ -131,3 +189,9 @@ To remove all deployed resources:
 cd cdk
 cdk destroy
 ```
+
+## Configuration Files
+
+- **cdk.json**: Contains CDK app configuration and context values
+- **cdk.context.json**: Contains environment-specific context values like region
+- **requirements.txt**: Python dependencies for the CDK application
