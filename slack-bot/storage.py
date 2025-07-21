@@ -166,7 +166,21 @@ class DynamoDBStorage(StorageInterface):
             response = self.sessions_table.get_item(
                 Key={'event_id': event_id}
             )
-            return 'Item' in response
+            
+            if 'Item' in response:
+                # Check if the item has expired (TTL might not have been processed yet)
+                if 'ttl' in response['Item']:
+                    ttl = response['Item']['ttl']
+                    current_time = int(time.time())
+                    if ttl < current_time:
+                        logger.info(f"Event {event_id} found but TTL expired, treating as new")
+                        return False
+                
+                logger.info(f"Event {event_id} has been seen before")
+                return True
+            
+            logger.info(f"Event {event_id} has not been seen before")
+            return False
         except Exception as e:
             logger.error(f"Error checking event: {e}")
             return False
@@ -182,15 +196,18 @@ class DynamoDBStorage(StorageInterface):
             True if the event was successfully marked as seen, False otherwise
         """
         try:
-            # Store with TTL
+            # Simplified approach: Just try to insert the item
             expiration = int(time.time()) + self.dedup_ttl
+            current_time = int(time.time())
+            
             self.sessions_table.put_item(
                 Item={
                     'event_id': event_id,
-                    'timestamp': int(time.time()),
+                    'timestamp': current_time,
                     'ttl': expiration
                 }
             )
+            logger.info(f"Marked event {event_id} as seen")
             return True
         except Exception as e:
             logger.error(f"Error marking event: {e}")
@@ -202,7 +219,7 @@ class InMemoryStorage(StorageInterface):
     def __init__(self) -> None:
         """Initialize in-memory storage."""
         self.contexts: Dict[str, Dict[str, Union[Dict[str, Any], int]]] = {}
-        self.seen_events: Dict[str, int] = {}
+        self.seen_events: Dict[str, Dict[str, Any]] = {}
         self.dedup_ttl = config.dedup_ttl
         self.context_ttl = config.context_ttl
     
@@ -253,7 +270,7 @@ class InMemoryStorage(StorageInterface):
         """
         if event_id in self.seen_events:
             # Check if expired
-            if self.seen_events[event_id] < int(time.time()):
+            if self.seen_events[event_id]['ttl'] < int(time.time()):
                 del self.seen_events[event_id]
                 return False
             return True
@@ -267,9 +284,16 @@ class InMemoryStorage(StorageInterface):
             event_id: Unique identifier for the event
             
         Returns:
-            True if the event was successfully marked as seen
+            True if the event was successfully marked as seen, False otherwise
         """
-        self.seen_events[event_id] = int(time.time()) + self.dedup_ttl
+        current_time = int(time.time())
+        expiration = current_time + self.dedup_ttl
+        
+        self.seen_events[event_id] = {
+            'timestamp': current_time,
+            'ttl': expiration
+        }
+        logger.info(f"Marked event {event_id} as seen")
         return True
 
 def get_storage(storage_type: str = 'dynamodb', region: Optional[str] = None) -> StorageInterface:

@@ -13,11 +13,8 @@ This module provides configuration management for the OSCAR application.
 """
 
 import os
-import json
 import logging
 from typing import Tuple, Optional
-import boto3
-from botocore.exceptions import ClientError
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -27,26 +24,46 @@ logging.basicConfig(level=logging.INFO,
 class Config:
     """Configuration class for OSCAR."""
     
-    def __init__(self) -> None:
-        """Initialize configuration with environment variables."""
+    def __init__(self, validate_required: bool = True) -> None:
+        """
+        Initialize configuration with environment variables.
+        
+        Args:
+            validate_required: Whether to validate required environment variables
+            
+        Raises:
+            ValueError: If validate_required is True and required environment variables are not set
+        """
         # AWS region
-        self.region = os.environ.get('AWS_REGION', 'us-west-2')
+        self.region = os.environ.get('AWS_REGION', 'us-east-1')
         
         # Bedrock configuration
         self.knowledge_base_id = os.environ.get('KNOWLEDGE_BASE_ID')
-        self.model_arn = os.environ.get('MODEL_ARN')
+        if validate_required and not self.knowledge_base_id:
+            logger.error("KNOWLEDGE_BASE_ID environment variable is required")
+            raise ValueError("KNOWLEDGE_BASE_ID environment variable is required")
+            
+        self.model_arn = os.environ.get('MODEL_ARN', f'arn:aws:bedrock:{self.region}::foundation-model/anthropic.claude-3-5-haiku-20241022-v1:0')
         
         # DynamoDB tables
         self.sessions_table_name = os.environ.get('SESSIONS_TABLE_NAME', 'oscar-sessions-v2')
         self.context_table_name = os.environ.get('CONTEXT_TABLE_NAME', 'oscar-context')
         
-        # Slack secrets ARN
-        self.slack_secrets_arn = os.environ.get('SLACK_SECRETS_ARN')
+        # Slack credentials
+        self.slack_bot_token = os.environ.get('SLACK_BOT_TOKEN')
+        if validate_required and not self.slack_bot_token:
+            logger.error("SLACK_BOT_TOKEN environment variable is required")
+            raise ValueError("SLACK_BOT_TOKEN environment variable is required")
+            
+        self.slack_signing_secret = os.environ.get('SLACK_SIGNING_SECRET')
+        if validate_required and not self.slack_signing_secret:
+            logger.error("SLACK_SIGNING_SECRET environment variable is required")
+            raise ValueError("SLACK_SIGNING_SECRET environment variable is required")
         
         # TTL settings
         self.dedup_ttl = int(os.environ.get('DEDUP_TTL', 300))  # 5 minutes
         self.session_ttl = int(os.environ.get('SESSION_TTL', 3600))  # 1 hour
-        self.context_ttl = int(os.environ.get('CONTEXT_TTL', 604800))  # 7 days (updated from 48 hours)
+        self.context_ttl = int(os.environ.get('CONTEXT_TTL', 604800))  # 7 days
         
         # Context settings
         self.max_context_length = int(os.environ.get('MAX_CONTEXT_LENGTH', 3000))
@@ -71,25 +88,12 @@ class Config:
     
     def get_slack_credentials(self) -> Tuple[Optional[str], Optional[str]]:
         """
-        Get Slack credentials from Secrets Manager or environment variables.
+        Get Slack credentials from environment variables.
         
         Returns:
             A tuple containing (slack_bot_token, slack_signing_secret)
         """
-        if not self.slack_secrets_arn:
-            logger.warning("SLACK_SECRETS_ARN not set, using environment variables for Slack credentials")
-            return os.environ.get('SLACK_BOT_TOKEN'), os.environ.get('SLACK_SIGNING_SECRET')
-        
-        try:
-            secrets_client = boto3.client('secretsmanager', region_name=self.region)
-            response = secrets_client.get_secret_value(SecretId=self.slack_secrets_arn)
-            secrets = json.loads(response['SecretString'])
-            return secrets.get('SLACK_BOT_TOKEN'), secrets.get('SLACK_SIGNING_SECRET')
-        except ClientError as e:
-            logger.error(f"Error retrieving secrets: {e}")
-            # Fall back to environment variables
-            logger.warning("Falling back to environment variables for Slack credentials")
-            return os.environ.get('SLACK_BOT_TOKEN'), os.environ.get('SLACK_SIGNING_SECRET')
+        return self.slack_bot_token, self.slack_signing_secret
 
-# Create a singleton instance
-config = Config()
+# Create a singleton instance with validation enabled for production use
+config = Config(validate_required=True)

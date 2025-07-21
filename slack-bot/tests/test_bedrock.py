@@ -12,8 +12,17 @@ import sys
 parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, parent_dir)
 
-# Import the modules directly
-from bedrock import KnowledgeBaseInterface, BedrockKnowledgeBase, get_knowledge_base
+# Mock the config before importing bedrock
+with patch('config.Config') as MockConfig:
+    # Create a mock config instance that doesn't validate required variables
+    mock_config_instance = MockConfig.return_value
+    mock_config_instance.region = 'us-west-2'
+    mock_config_instance.knowledge_base_id = 'test-kb-id'
+    mock_config_instance.model_arn = 'test-model-arn'
+    mock_config_instance.prompt_template = 'test prompt template'
+    
+    # Import the modules directly
+    from bedrock import KnowledgeBaseInterface, BedrockKnowledgeBase, get_knowledge_base
 
 # Define MockKnowledgeBase in the test file
 class MockKnowledgeBase(KnowledgeBaseInterface):

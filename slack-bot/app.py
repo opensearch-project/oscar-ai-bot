@@ -14,6 +14,8 @@ Lambda handler for Slack events.
 
 import logging
 import json
+import boto3
+import os
 from typing import Dict, Any, Optional
 from slack_bolt import App
 from slack_bolt.adapter.aws_lambda import SlackRequestHandler
@@ -26,13 +28,10 @@ from slack_handler import SlackHandler
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 
-# Get Slack credentials
-slack_token, slack_signing_secret = config.get_slack_credentials()
-
-# Initialize Slack app
+# Initialize Slack app with credentials from config
 app = App(
-    token=slack_token,
-    signing_secret=slack_signing_secret,
+    token=config.slack_bot_token,
+    signing_secret=config.slack_signing_secret,
     process_before_response=True
 )
 
@@ -44,31 +43,115 @@ knowledge_base = get_knowledge_base()
 handler = SlackHandler(app, storage_instance, knowledge_base)
 handler.register_handlers()
 
+# Initialize AWS Lambda client for async invocation
+lambda_client = boto3.client('lambda')
+FUNCTION_NAME = os.environ.get('AWS_LAMBDA_FUNCTION_NAME', 'oscar-slack-bot')
+
 def lambda_handler(event: Dict[str, Any], context: Optional[object]) -> Dict[str, Any]:
     """
     AWS Lambda handler for Slack events.
     
+    This function immediately acknowledges Slack events and then asynchronously
+    processes them to prevent duplicate responses.
+    
     Args:
-        event: The event dict from API Gateway
+        event: The event dict from API Gateway or direct Lambda invocation
         context: The Lambda context object
         
     Returns:
-        API Gateway response object
+        API Gateway response object or processing result
     """
-    logger.info("Received event from API Gateway")
+    logger.info("Received event")
     
-    # Handle URL verification challenge
+    # Check if this is an async processing event
+    if event.get('detail_type') == 'process_slack_event':
+        logger.info("Processing async Slack event")
+        return process_slack_event(event['detail'], context)
+    
+    # Log request ID for tracing
+    request_id = context.aws_request_id if context and hasattr(context, 'aws_request_id') else 'unknown'
+    logger.info(f"Lambda request ID: {request_id}")
+    
+    # Extract event body for processing
+    body = None
     if event.get('body'):
         body = json.loads(event['body']) if isinstance(event['body'], str) else event['body']
-        
-        # Check if this is a URL verification challenge
-        if body.get('type') == 'url_verification':
-            logger.info("Received URL verification challenge")
-            return {
-                'statusCode': 200,
-                'body': json.dumps({'challenge': body['challenge']})
-            }
     
-    # Handle regular Slack events
-    slack_handler = SlackRequestHandler(app=app)
-    return slack_handler.handle(event, context)
+    # Handle URL verification challenge immediately
+    if body and body.get('type') == 'url_verification':
+        logger.info("Received URL verification challenge")
+        return {
+            'statusCode': 200,
+            'body': json.dumps({'challenge': body['challenge']})
+        }
+    
+    # Handle Slack retries - acknowledge but don't process
+    if event.get('headers') and event.get('headers').get('X-Slack-Retry-Num'):
+        retry_count = int(event.get('headers').get('X-Slack-Retry-Num', '0'))
+        retry_reason = event.get('headers').get('X-Slack-Retry-Reason', 'unknown')
+        logger.warning(f"Received retry request from Slack. Count: {retry_count}, Reason: {retry_reason}")
+        
+        # Always acknowledge retries without processing
+        logger.warning(f"Acknowledging retry request without processing")
+        return {
+            'statusCode': 200,
+            'body': json.dumps({'message': 'Retry acknowledged without processing'})
+        }
+    
+    # For all other events, immediately acknowledge and then process asynchronously
+    try:
+        # Invoke this Lambda function asynchronously to process the event
+        if FUNCTION_NAME:
+            logger.info(f"Invoking Lambda function {FUNCTION_NAME} asynchronously")
+            
+            # Create payload for async processing
+            payload = {
+                'detail_type': 'process_slack_event',
+                'detail': event
+            }
+            
+            # Invoke Lambda asynchronously
+            lambda_client.invoke(
+                FunctionName=FUNCTION_NAME,
+                InvocationType='Event',  # Asynchronous invocation
+                Payload=json.dumps(payload)
+            )
+            
+            logger.info("Successfully invoked async processing")
+        else:
+            logger.warning("Function name not available, cannot invoke async processing")
+    
+    except Exception as e:
+        logger.error(f"Error invoking async processing: {e}", exc_info=True)
+    
+    # Always return 200 OK immediately to acknowledge the event
+    return {
+        'statusCode': 200,
+        'body': json.dumps({'message': 'Event received and will be processed asynchronously'})
+    }
+
+def process_slack_event(event: Dict[str, Any], context: Optional[object]) -> Dict[str, Any]:
+    """
+    Process a Slack event asynchronously.
+    
+    Args:
+        event: The Slack event to process
+        context: The Lambda context object
+        
+    Returns:
+        Processing result
+    """
+    logger.info("Processing Slack event asynchronously")
+    
+    try:
+        # Handle the Slack event
+        slack_handler = SlackRequestHandler(app=app)
+        result = slack_handler.handle(event, context)
+        logger.info("Successfully processed Slack event")
+        return result
+    except Exception as e:
+        logger.error(f"Error processing Slack event: {e}", exc_info=True)
+        return {
+            'statusCode': 500,
+            'body': json.dumps({'error': str(e)})
+        }

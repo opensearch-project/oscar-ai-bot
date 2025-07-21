@@ -44,6 +44,12 @@ provider:
       Resource: 
         - "arn:aws:dynamodb:${self:provider.region}:*:table/oscar-sessions-v2"
         - "arn:aws:dynamodb:${self:provider.region}:*:table/oscar-context"
+    # Add permission for Lambda to invoke itself asynchronously
+    - Effect: Allow
+      Action:
+        - lambda:InvokeFunction
+      Resource: "arn:aws:lambda:${self:provider.region}:*:function:${self:service}-${sls:stage}-slack-bot"
+
 functions:
   slack-bot:
     handler: slack-bot/app.lambda_handler
@@ -51,7 +57,8 @@ functions:
       - http:
           path: /slack/events
           method: post
-    reservedConcurrency: 1
+    # Remove reserved concurrency to allow async invocations
+    # reservedConcurrency: 1
 
 resources:
   Resources:

@@ -11,8 +11,15 @@ import sys
 parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, parent_dir)
 
-# Import the SlackHandler class directly
-from slack_handler import SlackHandler
+# Mock the config before importing slack_handler
+with patch('config.Config') as MockConfig:
+    # Create a mock config instance that doesn't validate required variables
+    mock_config_instance = MockConfig.return_value
+    mock_config_instance.enable_dm = False
+    mock_config_instance.context_summary_length = 500
+    
+    # Import the SlackHandler class directly
+    from slack_handler import SlackHandler
 
 class TestSlackHandler(unittest.TestCase):
     """Test cases for the SlackHandler class."""
@@ -35,22 +42,26 @@ class TestSlackHandler(unittest.TestCase):
             self.mock_knowledge_base
         )
     
-    def test_is_duplicate_event(self):
-        """Test duplicate event detection."""
+    def test_check_bot_already_responded(self):
+        """Test checking if bot has already responded."""
         # Set up mock
-        self.mock_storage.has_seen_event.return_value = True
-        
-        event = {
-            'event_ts': '1234567890.123456'
+        self.mock_app.client.conversations_replies.return_value = {
+            'messages': [
+                {'ts': '1234567890.123456', 'user': 'some-user'},  # Original message
+                {'ts': '1234567890.123457', 'user': 'test-bot-id'}  # Bot response
+            ]
         }
         
-        result = self.handler._is_duplicate_event(event)
+        result = self.handler._check_bot_already_responded('C12345', '1234567890.123456')
         
         # Verify result
         self.assertTrue(result)
         
-        # Verify storage check
-        self.mock_storage.has_seen_event.assert_called_once_with('1234567890.123456')
+        # Verify API call
+        self.mock_app.client.conversations_replies.assert_called_once_with(
+            channel='C12345',
+            ts='1234567890.123456'
+        )
 
 if __name__ == '__main__':
     unittest.main()

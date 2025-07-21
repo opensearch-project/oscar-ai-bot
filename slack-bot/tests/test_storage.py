@@ -21,8 +21,8 @@ class TestInMemoryStorage(unittest.TestCase):
     
     def setUp(self):
         """Set up test environment."""
-        # Mock config for testing
-        with patch('config.config') as self.mock_config:
+        # Create a test config instance with mocked values
+        with patch('storage.config') as self.mock_config:
             self.mock_config.dedup_ttl = 300
             self.mock_config.context_ttl = 3600
             self.storage = InMemoryStorage()

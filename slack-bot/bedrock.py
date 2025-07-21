@@ -84,40 +84,33 @@ class BedrockKnowledgeBase(KnowledgeBaseInterface):
         
         # Check if we're using an inference profile ARN
         is_inference_profile = "inference-profile" in self.model_arn
+        if is_inference_profile:
+            logger.info("Using inference profile configuration")
         
-        # Prepare request with query decomposition
+        # Prepare base request structure
         request = {
             'input': {'text': enhanced_query},
             'retrieveAndGenerateConfiguration': {
                 'type': 'KNOWLEDGE_BASE',
                 'knowledgeBaseConfiguration': {
                     'knowledgeBaseId': self.knowledge_base_id,
-                    'modelArn': self.model_arn
+                    'modelArn': self.model_arn,
+                    'generationConfiguration': {
+                        'promptTemplate': {
+                            'textPromptTemplate': self.prompt_template
+                        }
+                    }
                 }
             }
         }
         
-        # Add query decomposition configuration
-        # For inference profiles, the structure is different
+        # Add query decomposition configuration for non-inference profiles
         if not is_inference_profile:
-            # Standard structure for foundation models
             request['retrieveAndGenerateConfiguration']['knowledgeBaseConfiguration']['orchestrationConfiguration'] = {
                 'queryTransformationConfiguration': {
                     'type': 'QUERY_DECOMPOSITION'
                 }
             }
-        
-        # Add generation configuration
-        # Same configuration for both types, but log differently
-        request['retrieveAndGenerateConfiguration']['knowledgeBaseConfiguration']['generationConfiguration'] = {
-            'promptTemplate': {
-                'textPromptTemplate': self.prompt_template
-            }
-        }
-        
-        if is_inference_profile:
-            # Log that we're using inference profile configuration
-            logger.info("Using inference profile configuration")
         
         # Add session ID if available
         if session_id:

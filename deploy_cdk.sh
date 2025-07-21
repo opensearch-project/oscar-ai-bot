@@ -169,7 +169,7 @@ else
     else
         echo "Warning: .env file not found. KNOWLEDGE_BASE_ID and MODEL_ARN will be set to placeholder values."
         export KNOWLEDGE_BASE_ID="PLACEHOLDER_KNOWLEDGE_BASE_ID"
-        export MODEL_ARN="arn:aws:bedrock:$AWS_REGION::foundation-model/anthropic.claude-v2"
+        export MODEL_ARN="arn:aws:bedrock:$AWS_REGION::foundation-model/anthropic.claude-3-5-haiku-20241022-v1:0"
         ENV_FILE=""
     fi
     
@@ -269,28 +269,7 @@ echo "Updating Lambda function with full code..."
 # Pass the ENABLE_DM variable explicitly to deploy_lambda.sh
 ENABLE_DM=$ENABLE_DM LAMBDA_FUNCTION_NAME=$LAMBDA_FUNCTION_NAME AWS_REGION=$AWS_REGION ./deploy_lambda.sh
 
-# Update Secrets Manager with Slack credentials if .env exists
-if [ -f ".env" ]; then
-    ENV_FILE=".env"
-elif [ -f "slack-bot/.env" ]; then
-    ENV_FILE="slack-bot/.env"
-else
-    ENV_FILE=""
-fi
-
-if [ -n "$ENV_FILE" ]; then
-    echo "Updating Secrets Manager with Slack credentials from $ENV_FILE..."
-    SLACK_BOT_TOKEN=$(grep SLACK_BOT_TOKEN $ENV_FILE | cut -d= -f2)
-    SLACK_SIGNING_SECRET=$(grep SLACK_SIGNING_SECRET $ENV_FILE | cut -d= -f2)
-
-    AWS_DEFAULT_REGION=$AWS_REGION aws secretsmanager update-secret \
-      --secret-id $SECRETS_ARN \
-      --secret-string "{\"SLACK_BOT_TOKEN\":\"$SLACK_BOT_TOKEN\",\"SLACK_SIGNING_SECRET\":\"$SLACK_SIGNING_SECRET\"}" \
-      --region $AWS_REGION
-else
-    echo "Warning: .env file not found. Slack credentials not updated in Secrets Manager."
-    echo "You will need to manually update the Slack credentials in the AWS Secrets Manager console."
-fi
+# No need to update Secrets Manager as we're using environment variables directly
 
 echo "Deployment complete!"
 echo ""
@@ -301,9 +280,7 @@ echo "$WEBHOOK_URL"
 echo "=============================================================="
 echo ""
 echo "=== Configuration Steps ==="
-echo "1. Slack secrets have been automatically configured in AWS Secrets Manager"
-echo ""
-echo "2. Configure Slack App:"
+echo "1. Configure Slack App:"
 echo "   - Go to https://api.slack.com/apps"
 echo "   - Create a new app or update your existing app"
 echo "   - Under 'Event Subscriptions', enable events and set the Request URL to the URL above"

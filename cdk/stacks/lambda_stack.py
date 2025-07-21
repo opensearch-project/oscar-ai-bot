@@ -22,8 +22,7 @@ class OscarLambdaStack(Construct):
         scope: Construct, 
         construct_id: str, 
         sessions_table, 
-        context_table, 
-        slack_secrets
+        context_table
     ) -> None:
         """Initialize Lambda resources."""
         super().__init__(scope, construct_id)
@@ -74,14 +73,16 @@ class OscarLambdaStack(Construct):
                 ]
             )
         )
-
-        # Add permissions for Secrets Manager
+        
+        # Add permissions for Lambda to invoke itself asynchronously
         self.lambda_role.add_to_policy(
             iam.PolicyStatement(
                 actions=[
-                    "secretsmanager:GetSecretValue"
+                    "lambda:InvokeFunction"
                 ],
-                resources=[slack_secrets.secret_arn]
+                resources=[
+                    f"arn:aws:lambda:*:*:function:oscar-slack-bot"
+                ]
             )
         )
 
@@ -101,7 +102,7 @@ def lambda_handler(event, context):
 """),
             timeout=Duration.seconds(30),
             memory_size=512,
-            environment=self._get_lambda_environment_variables(slack_secrets),
+            environment=self._get_lambda_environment_variables(),
             role=self.lambda_role
         )
 
@@ -129,21 +130,22 @@ def lambda_handler(event, context):
             description="Name of the Lambda function"
         )
     
-    def _get_lambda_environment_variables(self, slack_secrets):
+    def _get_lambda_environment_variables(self):
         """Get environment variables for Lambda function."""
         env_vars = {
             # Required configuration
             "KNOWLEDGE_BASE_ID": os.environ.get("KNOWLEDGE_BASE_ID", "PLACEHOLDER_KNOWLEDGE_BASE_ID"),
-            "MODEL_ARN": os.environ.get("MODEL_ARN", "arn:aws:bedrock:us-west-2::foundation-model/anthropic.claude-3-5-sonnet-20241022-v2:0"),
-            "SLACK_SECRETS_ARN": slack_secrets.secret_arn,
+            "MODEL_ARN": os.environ.get("MODEL_ARN", f'arn:aws:bedrock:us-west-2::foundation-model/anthropic.claude-3-5-haiku-20241022-v1:0'),
+            "SLACK_BOT_TOKEN": os.environ.get("SLACK_BOT_TOKEN", ""),
+            "SLACK_SIGNING_SECRET": os.environ.get("SLACK_SIGNING_SECRET", ""),
             
             # Optional configuration
             # Note: AWS_REGION is a reserved environment variable in Lambda and cannot be set manually
-            "SESSIONS_TABLE_NAME": os.environ.get("SESSIONS_TABLE_NAME", "oscar-sessions"),
+            "SESSIONS_TABLE_NAME": os.environ.get("SESSIONS_TABLE_NAME", "oscar-sessions-v2"),
             "CONTEXT_TABLE_NAME": os.environ.get("CONTEXT_TABLE_NAME", "oscar-context"),
             "DEDUP_TTL": os.environ.get("DEDUP_TTL", "300"),
             "SESSION_TTL": os.environ.get("SESSION_TTL", "3600"),
-            "CONTEXT_TTL": os.environ.get("CONTEXT_TTL", "172800"),
+            "CONTEXT_TTL": os.environ.get("CONTEXT_TTL", "604800"),  # 7 days
             "MAX_CONTEXT_LENGTH": os.environ.get("MAX_CONTEXT_LENGTH", "3000"),
             "CONTEXT_SUMMARY_LENGTH": os.environ.get("CONTEXT_SUMMARY_LENGTH", "500"),
             
