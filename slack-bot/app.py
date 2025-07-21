@@ -17,6 +17,7 @@ import json
 import boto3
 import os
 import time
+import hashlib
 from typing import Dict, Any, Optional
 
 from slack_bolt import App
@@ -82,7 +83,6 @@ def get_event_id(event: Dict[str, Any]) -> str:
             return f"slack_request_{request_timestamp}_{request_signature[-8:]}"
     
     # Last resort: use a hash of the entire event
-    import hashlib
     event_str = json.dumps(event, sort_keys=True)
     return f"event_hash_{hashlib.md5(event_str.encode()).hexdigest()}"
 

@@ -55,7 +55,9 @@ class SlackHandler:
         self.app.event("app_mention")(self.handle_app_mention)
         
         # Register message handler for DMs if enabled
-        if config.enable_dm:
+        # Use the imported config module for consistency with tests
+        from config import config as config_instance
+        if config_instance.enable_dm:
             self.app.message()(self.handle_message)
         
         logger.info("Registered Slack event handlers")
@@ -106,6 +108,7 @@ class SlackHandler:
         # Process the message
         self._process_message(channel, thread_ts, user_id, text, say, message_ts=event_ts)
     
+    # Keep _is_duplicate_event for test compatibility
     def _is_duplicate_event(self, event: Dict[str, Any]) -> bool:
         """
         Check if this is a duplicate event using event timestamp.
@@ -131,46 +134,6 @@ class SlackHandler:
         self.storage.mark_event_seen(event_id)
         logger.info(f"New event marked as seen: {event_id}")
         return False
-    
-    def _check_bot_already_responded(self, channel: str, thread_ts: str) -> bool:
-        """
-        Check if the bot has already responded in the thread.
-        
-        Args:
-            channel: Slack channel ID
-            thread_ts: Thread timestamp
-            
-        Returns:
-            True if the bot has already responded, False otherwise
-        """
-        try:
-            # Get bot user ID
-            bot_info = self.client.auth_test()
-            bot_user_id = bot_info["user_id"]
-            
-            # Get replies in the thread
-            response = self.client.conversations_replies(
-                channel=channel,
-                ts=thread_ts
-            )
-            
-            # Check if any messages in the thread are from the bot
-            if response and response.get('messages'):
-                for message in response.get('messages', []):
-                    # Skip the first message (the original message)
-                    if message.get('ts') == thread_ts:
-                        continue
-                        
-                    # Check if this message is from the bot
-                    if message.get('user') == bot_user_id:
-                        logger.info(f"Found existing bot response in thread {thread_ts}")
-                        return True
-            
-            return False
-        except Exception as e:
-            logger.error(f"Error checking for bot responses: {e}")
-            # If there's an error, assume no response to be safe
-            return False
     
     def _extract_query(self, text: str) -> str:
         """
