@@ -1,3 +1,11 @@
+#!/usr/bin/env python
+# Copyright OpenSearch Contributors
+# SPDX-License-Identifier: Apache-2.0
+#
+# The OpenSearch Contributors require contributions made to
+# this file be licensed under the Apache-2.0 license or a
+# compatible open source license.
+
 """
 OSCAR - OpenSearch Conversational Automation for Release 
 
@@ -5,6 +13,8 @@ Lambda handler for Slack events.
 """
 
 import logging
+import json
+from typing import Dict, Any, Optional
 from slack_bolt import App
 from slack_bolt.adapter.aws_lambda import SlackRequestHandler
 from config import config
@@ -34,14 +44,21 @@ knowledge_base = get_knowledge_base()
 handler = SlackHandler(app, storage_instance, knowledge_base)
 handler.register_handlers()
 
-# Lambda handler
-def lambda_handler(event, context):
-    """AWS Lambda handler for Slack events."""
+def lambda_handler(event: Dict[str, Any], context: Optional[object]) -> Dict[str, Any]:
+    """
+    AWS Lambda handler for Slack events.
+    
+    Args:
+        event: The event dict from API Gateway
+        context: The Lambda context object
+        
+    Returns:
+        API Gateway response object
+    """
     logger.info("Received event from API Gateway")
     
     # Handle URL verification challenge
     if event.get('body'):
-        import json
         body = json.loads(event['body']) if isinstance(event['body'], str) else event['body']
         
         # Check if this is a URL verification challenge

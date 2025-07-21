@@ -1,3 +1,11 @@
+#!/usr/bin/env python
+# Copyright OpenSearch Contributors
+# SPDX-License-Identifier: Apache-2.0
+#
+# The OpenSearch Contributors require contributions made to
+# this file be licensed under the Apache-2.0 license or a
+# compatible open source license.
+
 """
 Configuration module for OSCAR.
 
@@ -7,6 +15,7 @@ This module provides configuration management for the OSCAR application.
 import os
 import json
 import logging
+from typing import Tuple, Optional
 import boto3
 from botocore.exceptions import ClientError
 
@@ -18,7 +27,7 @@ logging.basicConfig(level=logging.INFO,
 class Config:
     """Configuration class for OSCAR."""
     
-    def __init__(self):
+    def __init__(self) -> None:
         """Initialize configuration with environment variables."""
         # AWS region
         self.region = os.environ.get('AWS_REGION', 'us-west-2')
@@ -28,7 +37,7 @@ class Config:
         self.model_arn = os.environ.get('MODEL_ARN')
         
         # DynamoDB tables
-        self.sessions_table_name = os.environ.get('SESSIONS_TABLE_NAME', 'oscar-sessions')
+        self.sessions_table_name = os.environ.get('SESSIONS_TABLE_NAME', 'oscar-sessions-v2')
         self.context_table_name = os.environ.get('CONTEXT_TABLE_NAME', 'oscar-context')
         
         # Slack secrets ARN
@@ -37,7 +46,7 @@ class Config:
         # TTL settings
         self.dedup_ttl = int(os.environ.get('DEDUP_TTL', 300))  # 5 minutes
         self.session_ttl = int(os.environ.get('SESSION_TTL', 3600))  # 1 hour
-        self.context_ttl = int(os.environ.get('CONTEXT_TTL', 172800))  # 48 hours
+        self.context_ttl = int(os.environ.get('CONTEXT_TTL', 604800))  # 7 days (updated from 48 hours)
         
         # Context settings
         self.max_context_length = int(os.environ.get('MAX_CONTEXT_LENGTH', 3000))
@@ -60,8 +69,13 @@ class Config:
             "Assistant:"
         )
     
-    def get_slack_credentials(self):
-        """Get Slack credentials from Secrets Manager."""
+    def get_slack_credentials(self) -> Tuple[Optional[str], Optional[str]]:
+        """
+        Get Slack credentials from Secrets Manager or environment variables.
+        
+        Returns:
+            A tuple containing (slack_bot_token, slack_signing_secret)
+        """
         if not self.slack_secrets_arn:
             logger.warning("SLACK_SECRETS_ARN not set, using environment variables for Slack credentials")
             return os.environ.get('SLACK_BOT_TOKEN'), os.environ.get('SLACK_SIGNING_SECRET')

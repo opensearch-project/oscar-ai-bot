@@ -1,3 +1,11 @@
+#!/usr/bin/env python
+# Copyright OpenSearch Contributors
+# SPDX-License-Identifier: Apache-2.0
+#
+# The OpenSearch Contributors require contributions made to
+# this file be licensed under the Apache-2.0 license or a
+# compatible open source license.
+
 """
 Bedrock integration module for OSCAR.
 
@@ -6,6 +14,7 @@ This module provides classes for interacting with Amazon Bedrock.
 
 import logging
 import json
+from typing import Tuple, Optional
 import boto3
 from abc import ABC, abstractmethod
 from config import config
@@ -17,23 +26,53 @@ class KnowledgeBaseInterface(ABC):
     """Abstract base class for knowledge base implementations."""
     
     @abstractmethod
-    def query(self, query, session_id=None, context_summary=None):
-        """Query the knowledge base."""
+    def query(self, query: str, session_id: Optional[str] = None, 
+              context_summary: Optional[str] = None) -> Tuple[str, Optional[str]]:
+        """
+        Query the knowledge base.
+        
+        Args:
+            query: The user's query to the knowledge base
+            session_id: Optional session ID for maintaining conversation context
+            context_summary: Optional summary of previous conversation context
+            
+        Returns:
+            A tuple containing (response_text, session_id)
+        """
         pass
 
 class BedrockKnowledgeBase(KnowledgeBaseInterface):
     """Amazon Bedrock implementation of knowledge base interface."""
     
-    def __init__(self, region=None):
-        """Initialize Bedrock knowledge base."""
+    def __init__(self, region: Optional[str] = None) -> None:
+        """
+        Initialize Bedrock knowledge base.
+        
+        Args:
+            region: AWS region for Bedrock service, defaults to config value if None
+        """
         self.region = region or config.region
         self.client = boto3.client('bedrock-agent-runtime', region_name=self.region)
         self.knowledge_base_id = config.knowledge_base_id
         self.model_arn = config.model_arn
         self.prompt_template = config.prompt_template
     
-    def query(self, query, session_id=None, context_summary=None):
-        """Query Bedrock knowledge base with session or context."""
+    def query(self, query: str, session_id: Optional[str] = None, 
+              context_summary: Optional[str] = None) -> Tuple[str, Optional[str]]:
+        """
+        Query Bedrock knowledge base with session or context.
+        
+        Args:
+            query: The user's query to the knowledge base
+            session_id: Optional session ID for maintaining conversation context
+            context_summary: Optional summary of previous conversation context
+            
+        Returns:
+            A tuple containing (response_text, session_id)
+            
+        Raises:
+            Exception: If both the primary query and fallback query fail
+        """
         # Build prompt with context if available
         if context_summary and not session_id:
             enhanced_query = f"Previous conversation context:\n{context_summary}\n\nCurrent question: {query}"
@@ -126,8 +165,16 @@ class BedrockKnowledgeBase(KnowledgeBaseInterface):
                 logger.error(f"Fallback also failed: {fallback_error}")
                 raise fallback_error
 
-# Factory function to create the appropriate knowledge base implementation
-def get_knowledge_base(kb_type='bedrock', region=None):
-    """Get knowledge base implementation based on type."""
+def get_knowledge_base(kb_type: str = 'bedrock', region: Optional[str] = None) -> KnowledgeBaseInterface:
+    """
+    Get knowledge base implementation based on type.
+    
+    Args:
+        kb_type: Type of knowledge base to create ('bedrock' is currently the only supported type)
+        region: AWS region for Bedrock service, defaults to config value if None
+        
+    Returns:
+        An implementation of KnowledgeBaseInterface
+    """
     # No mock implementation here - moved to tests
     return BedrockKnowledgeBase(region)

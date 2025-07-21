@@ -1,3 +1,11 @@
+#!/usr/bin/env python
+# Copyright OpenSearch Contributors
+# SPDX-License-Identifier: Apache-2.0
+#
+# The OpenSearch Contributors require contributions made to
+# this file be licensed under the Apache-2.0 license or a
+# compatible open source license.
+
 """
 Slack event handler module for OSCAR.
 
@@ -7,11 +15,13 @@ This module provides the SlackHandler class for handling Slack events.
 import logging
 import time
 import re
+from typing import Dict, Any, Optional, Callable, Union
+from slack_bolt import App
 from slack_sdk.errors import SlackApiError
 
 from config import config
-from storage import get_storage
-from bedrock import get_knowledge_base
+from storage import StorageInterface
+from bedrock import KnowledgeBaseInterface
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -19,15 +29,27 @@ logger = logging.getLogger(__name__)
 class SlackHandler:
     """Handler for Slack events."""
     
-    def __init__(self, app, storage, knowledge_base):
-        """Initialize Slack handler with app, storage, and knowledge base."""
+    def __init__(self, app: App, storage: StorageInterface, knowledge_base: KnowledgeBaseInterface) -> None:
+        """
+        Initialize Slack handler with app, storage, and knowledge base.
+        
+        Args:
+            app: Slack Bolt app instance
+            storage: Storage implementation for persisting conversation context
+            knowledge_base: Knowledge base implementation for answering queries
+        """
         self.app = app
         self.storage = storage
         self.knowledge_base = knowledge_base
         self.client = app.client
     
-    def register_handlers(self):
-        """Register event handlers with the Slack app."""
+    def register_handlers(self) -> App:
+        """
+        Register event handlers with the Slack app.
+        
+        Returns:
+            The Slack Bolt app instance with handlers registered
+        """
         # Register app_mention handler
         self.app.event("app_mention")(self.handle_app_mention)
         
@@ -36,9 +58,16 @@ class SlackHandler:
             self.app.message()(self.handle_message)
         
         logger.info("Registered Slack event handlers")
+        return self.app
     
-    def handle_app_mention(self, event, say):
-        """Handle app_mention events."""
+    def handle_app_mention(self, event: Dict[str, Any], say: Callable) -> None:
+        """
+        Handle app_mention events.
+        
+        Args:
+            event: Slack event data
+            say: Function to send a message to the channel
+        """
         # Extract message details
         channel = event.get("channel")
         thread_ts = event.get("thread_ts") or event.get("ts")
@@ -53,8 +82,14 @@ class SlackHandler:
         # Process the message
         self._process_message(channel, thread_ts, user_id, text, say)
     
-    def handle_message(self, message, say):
-        """Handle direct message events."""
+    def handle_message(self, message: Dict[str, Any], say: Callable) -> None:
+        """
+        Handle direct message events.
+        
+        Args:
+            message: Slack message data
+            say: Function to send a message to the channel
+        """
         # Only process DM messages
         channel_type = message.get("channel_type")
         if channel_type != "im":
@@ -74,8 +109,18 @@ class SlackHandler:
         # Process the message
         self._process_message(channel, thread_ts, user_id, text, say)
     
-    def _process_message(self, channel, thread_ts, user_id, text, say):
-        """Process a message and generate a response."""
+    def _process_message(self, channel: str, thread_ts: str, user_id: str, 
+                        text: str, say: Callable) -> None:
+        """
+        Process a message and generate a response.
+        
+        Args:
+            channel: Slack channel ID
+            thread_ts: Thread timestamp
+            user_id: User ID of the message sender
+            text: Message text
+            say: Function to send a message to the channel
+        """
         # Add thinking reaction
         try:
             self.client.reactions_add(
@@ -183,8 +228,16 @@ class SlackHandler:
             say(text="Sorry, I encountered an error while processing your request. Please try again later.", 
                 thread_ts=thread_ts)
     
-    def _is_duplicate_event(self, event):
-        """Check if this is a duplicate event."""
+    def _is_duplicate_event(self, event: Dict[str, Any]) -> bool:
+        """
+        Check if this is a duplicate event.
+        
+        Args:
+            event: Slack event data
+            
+        Returns:
+            True if the event is a duplicate, False otherwise
+        """
         event_id = event.get("event_ts") or event.get("ts")
         if not event_id:
             return False
@@ -197,8 +250,17 @@ class SlackHandler:
         self.storage.mark_event_seen(event_id)
         return False
     
-    def _bot_responded(self, channel, thread_ts):
-        """Check if the bot has already responded in this thread."""
+    def _bot_responded(self, channel: str, thread_ts: str) -> bool:
+        """
+        Check if the bot has already responded in this thread.
+        
+        Args:
+            channel: Slack channel ID
+            thread_ts: Thread timestamp
+            
+        Returns:
+            True if the bot has already responded in the thread, False otherwise
+        """
         try:
             # Get replies in thread
             response = self.client.conversations_replies(

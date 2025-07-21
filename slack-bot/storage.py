@@ -1,3 +1,11 @@
+#!/usr/bin/env python
+# Copyright OpenSearch Contributors
+# SPDX-License-Identifier: Apache-2.0
+#
+# The OpenSearch Contributors require contributions made to
+# this file be licensed under the Apache-2.0 license or a
+# compatible open source license.
+
 """
 Storage module for OSCAR.
 
@@ -6,6 +14,7 @@ This module provides storage implementations for session and context data.
 
 import time
 import logging
+from typing import Dict, Any, Optional, Union
 import boto3
 from abc import ABC, abstractmethod
 from config import config
@@ -17,30 +26,68 @@ class StorageInterface(ABC):
     """Abstract base class for storage implementations."""
     
     @abstractmethod
-    def store_context(self, thread_key, context):
-        """Store conversation context for a thread."""
+    def store_context(self, thread_key: str, context: Dict[str, Any]) -> bool:
+        """
+        Store conversation context for a thread.
+        
+        Args:
+            thread_key: Unique identifier for the conversation thread
+            context: Dictionary containing conversation context data
+            
+        Returns:
+            True if storage was successful, False otherwise
+        """
         pass
     
     @abstractmethod
-    def get_context(self, thread_key):
-        """Get conversation context for a thread."""
+    def get_context(self, thread_key: str) -> Optional[Dict[str, Any]]:
+        """
+        Get conversation context for a thread.
+        
+        Args:
+            thread_key: Unique identifier for the conversation thread
+            
+        Returns:
+            Dictionary containing conversation context data, or None if not found
+        """
         pass
     
     @abstractmethod
-    def has_seen_event(self, event_id):
-        """Check if an event has been seen before."""
+    def has_seen_event(self, event_id: str) -> bool:
+        """
+        Check if an event has been seen before.
+        
+        Args:
+            event_id: Unique identifier for the event
+            
+        Returns:
+            True if the event has been seen before, False otherwise
+        """
         pass
     
     @abstractmethod
-    def mark_event_seen(self, event_id):
-        """Mark an event as seen."""
+    def mark_event_seen(self, event_id: str) -> bool:
+        """
+        Mark an event as seen.
+        
+        Args:
+            event_id: Unique identifier for the event
+            
+        Returns:
+            True if the event was successfully marked as seen, False otherwise
+        """
         pass
 
 class DynamoDBStorage(StorageInterface):
     """DynamoDB implementation of storage interface."""
     
-    def __init__(self, region=None):
-        """Initialize DynamoDB storage."""
+    def __init__(self, region: Optional[str] = None) -> None:
+        """
+        Initialize DynamoDB storage.
+        
+        Args:
+            region: AWS region for DynamoDB service, defaults to config value if None
+        """
         self.region = region or config.region
         self.dynamodb = boto3.resource('dynamodb', region_name=self.region)
         self.sessions_table = self.dynamodb.Table(config.sessions_table_name)
@@ -48,8 +95,17 @@ class DynamoDBStorage(StorageInterface):
         self.dedup_ttl = config.dedup_ttl
         self.context_ttl = config.context_ttl
     
-    def store_context(self, thread_key, context):
-        """Store conversation context in DynamoDB."""
+    def store_context(self, thread_key: str, context: Dict[str, Any]) -> bool:
+        """
+        Store conversation context in DynamoDB.
+        
+        Args:
+            thread_key: Unique identifier for the conversation thread
+            context: Dictionary containing conversation context data
+            
+        Returns:
+            True if storage was successful, False otherwise
+        """
         try:
             # Ensure context size is within limits
             if len(str(context)) > config.max_context_length:
@@ -73,8 +129,16 @@ class DynamoDBStorage(StorageInterface):
             logger.error(f"Error storing context: {e}")
             return False
     
-    def get_context(self, thread_key):
-        """Get conversation context from DynamoDB."""
+    def get_context(self, thread_key: str) -> Optional[Dict[str, Any]]:
+        """
+        Get conversation context from DynamoDB.
+        
+        Args:
+            thread_key: Unique identifier for the conversation thread
+            
+        Returns:
+            Dictionary containing conversation context data, or None if not found
+        """
         try:
             response = self.context_table.get_item(
                 Key={'thread_key': thread_key}
@@ -88,8 +152,16 @@ class DynamoDBStorage(StorageInterface):
             logger.error(f"Error retrieving context: {e}")
             return None
     
-    def has_seen_event(self, event_id):
-        """Check if an event has been seen before."""
+    def has_seen_event(self, event_id: str) -> bool:
+        """
+        Check if an event has been seen before in DynamoDB.
+        
+        Args:
+            event_id: Unique identifier for the event
+            
+        Returns:
+            True if the event has been seen before, False otherwise
+        """
         try:
             response = self.sessions_table.get_item(
                 Key={'event_id': event_id}
@@ -99,8 +171,16 @@ class DynamoDBStorage(StorageInterface):
             logger.error(f"Error checking event: {e}")
             return False
     
-    def mark_event_seen(self, event_id):
-        """Mark an event as seen in DynamoDB."""
+    def mark_event_seen(self, event_id: str) -> bool:
+        """
+        Mark an event as seen in DynamoDB.
+        
+        Args:
+            event_id: Unique identifier for the event
+            
+        Returns:
+            True if the event was successfully marked as seen, False otherwise
+        """
         try:
             # Store with TTL
             expiration = int(time.time()) + self.dedup_ttl
@@ -119,33 +199,58 @@ class DynamoDBStorage(StorageInterface):
 class InMemoryStorage(StorageInterface):
     """In-memory implementation of storage interface for testing."""
     
-    def __init__(self):
+    def __init__(self) -> None:
         """Initialize in-memory storage."""
-        self.contexts = {}
-        self.seen_events = {}
+        self.contexts: Dict[str, Dict[str, Union[Dict[str, Any], int]]] = {}
+        self.seen_events: Dict[str, int] = {}
         self.dedup_ttl = config.dedup_ttl
         self.context_ttl = config.context_ttl
     
-    def store_context(self, thread_key, context):
-        """Store conversation context in memory."""
+    def store_context(self, thread_key: str, context: Dict[str, Any]) -> bool:
+        """
+        Store conversation context in memory.
+        
+        Args:
+            thread_key: Unique identifier for the conversation thread
+            context: Dictionary containing conversation context data
+            
+        Returns:
+            True if storage was successful
+        """
         self.contexts[thread_key] = {
             'context': context,
             'expiration': int(time.time()) + self.context_ttl
         }
         return True
     
-    def get_context(self, thread_key):
-        """Get conversation context from memory."""
+    def get_context(self, thread_key: str) -> Optional[Dict[str, Any]]:
+        """
+        Get conversation context from memory.
+        
+        Args:
+            thread_key: Unique identifier for the conversation thread
+            
+        Returns:
+            Dictionary containing conversation context data, or None if not found or expired
+        """
         if thread_key in self.contexts:
             # Check if expired
             if self.contexts[thread_key]['expiration'] < int(time.time()):
                 del self.contexts[thread_key]
                 return None
-            return self.contexts[thread_key]['context']
+            return self.contexts[thread_key]['context']  # type: ignore
         return None
     
-    def has_seen_event(self, event_id):
-        """Check if an event has been seen before."""
+    def has_seen_event(self, event_id: str) -> bool:
+        """
+        Check if an event has been seen before in memory.
+        
+        Args:
+            event_id: Unique identifier for the event
+            
+        Returns:
+            True if the event has been seen before and not expired, False otherwise
+        """
         if event_id in self.seen_events:
             # Check if expired
             if self.seen_events[event_id] < int(time.time()):
@@ -154,14 +259,30 @@ class InMemoryStorage(StorageInterface):
             return True
         return False
     
-    def mark_event_seen(self, event_id):
-        """Mark an event as seen in memory."""
+    def mark_event_seen(self, event_id: str) -> bool:
+        """
+        Mark an event as seen in memory.
+        
+        Args:
+            event_id: Unique identifier for the event
+            
+        Returns:
+            True if the event was successfully marked as seen
+        """
         self.seen_events[event_id] = int(time.time()) + self.dedup_ttl
         return True
 
-# Factory function to create the appropriate storage implementation
-def get_storage(storage_type='dynamodb', region=None):
-    """Get storage implementation based on type."""
+def get_storage(storage_type: str = 'dynamodb', region: Optional[str] = None) -> StorageInterface:
+    """
+    Get storage implementation based on type.
+    
+    Args:
+        storage_type: Type of storage to create ('dynamodb' or 'memory')
+        region: AWS region for DynamoDB service, defaults to config value if None
+        
+    Returns:
+        An implementation of StorageInterface
+    """
     if storage_type == 'memory':
         return InMemoryStorage()
     return DynamoDBStorage(region)
