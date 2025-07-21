@@ -60,7 +60,6 @@ def get_event_id(event: Dict[str, Any]) -> str:
     Returns:
         A unique ID for the event
     """
-    # Extract event body
     body = None
     if event.get('body'):
         body = json.loads(event['body']) if isinstance(event['body'], str) else event['body']

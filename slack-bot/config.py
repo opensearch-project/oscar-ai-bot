@@ -73,6 +73,7 @@ class Config:
         self.enable_dm = os.environ.get('ENABLE_DM', 'false').lower() == 'true'
         
         # Default prompt template
+        # TODO: Consider allowing users to select default prompts through JSON or YAML configuration
         self.prompt_template = os.environ.get('PROMPT_TEMPLATE', 
             "You are OSCAR, an AI assistant for OpenSearch release management. " +
             "You are a question answering agent. You will be provided with a set of search results. " +
