@@ -15,7 +15,7 @@ This module provides the SlackHandler class for handling Slack events.
 import logging
 import time
 import re
-from typing import Dict, Any, Optional, Callable, List, Tuple
+from typing import Dict, Any, Optional, Callable, List, Tuple, Union
 
 from slack_bolt import App
 from slack_sdk.errors import SlackApiError
@@ -196,7 +196,7 @@ class SlackHandler:
         return context
     
     def _manage_reactions(self, channel: str, timestamp: str, add_reaction: Optional[str] = None, 
-                         remove_reaction: Optional[str] = None) -> None:
+                         remove_reaction: Optional[Union[str, List[str]]] = None) -> None:
         """
         Add or remove reactions from a message.
         
@@ -204,27 +204,45 @@ class SlackHandler:
             channel: The Slack channel ID
             timestamp: The message timestamp
             add_reaction: The reaction to add (optional)
-            remove_reaction: The reaction to remove (optional)
+            remove_reaction: The reaction(s) to remove (optional, can be a string or list of strings)
         """
         try:
-            # Remove reaction if specified
+            # Remove reaction(s) if specified
             if remove_reaction:
-                self.client.reactions_remove(
-                    channel=channel,
-                    timestamp=timestamp,
-                    name=remove_reaction
-                )
-                logger.info(f"Removed {remove_reaction} reaction from message {timestamp}")
+                # Handle both single reaction and list of reactions
+                reactions_to_remove = [remove_reaction] if isinstance(remove_reaction, str) else remove_reaction
+                
+                for reaction in reactions_to_remove:
+                    try:
+                        self.client.reactions_remove(
+                            channel=channel,
+                            timestamp=timestamp,
+                            name=reaction
+                        )
+                        logger.info(f"Removed {reaction} reaction from message {timestamp}")
+                    except SlackApiError as e:
+                        # Ignore errors for reactions that don't exist
+                        if "no_reaction" in str(e):
+                            logger.debug(f"Reaction {reaction} not found on message {timestamp}")
+                        else:
+                            logger.warning(f"Error removing reaction {reaction}: {e}")
             
             # Add reaction if specified
             if add_reaction:
-                self.client.reactions_add(
-                    channel=channel,
-                    timestamp=timestamp,
-                    name=add_reaction
-                )
-                logger.info(f"Added {add_reaction} reaction to message {timestamp}")
-        except SlackApiError as e:
+                try:
+                    self.client.reactions_add(
+                        channel=channel,
+                        timestamp=timestamp,
+                        name=add_reaction
+                    )
+                    logger.info(f"Added {add_reaction} reaction to message {timestamp}")
+                except SlackApiError as e:
+                    # Ignore errors for reactions that already exist
+                    if "already_reacted" in str(e):
+                        logger.debug(f"Reaction {add_reaction} already exists on message {timestamp}")
+                    else:
+                        logger.warning(f"Error adding reaction {add_reaction}: {e}")
+        except Exception as e:
             logger.warning(f"Error managing reactions: {e}")
     
     def _process_message(self, channel: str, thread_ts: str, user_id: str, 
@@ -252,6 +270,10 @@ class SlackHandler:
         # Add thinking reaction to the specific message
         self._manage_reactions(channel, reaction_ts, add_reaction="thinking_face")
         
+        # Set timeout threshold (60 seconds)
+        timeout_threshold = 60
+        start_time = time.time()
+        
         try:
             # Extract query from text (remove mentions)
             query = self._extract_query(text)
@@ -262,15 +284,21 @@ class SlackHandler:
             context_summary = context.get("summary") if context else None
             session_id = context.get("session_id") if context else None
             
+            # Check if we're approaching timeout before querying knowledge base
+            current_time = time.time()
+            if current_time - start_time > timeout_threshold * 0.3:  # 30% of timeout threshold
+                # Add timer emoji to indicate potential slow response
+                self._manage_reactions(channel, reaction_ts, add_reaction="timer_clock")
+            
             # Query knowledge base
-            start_time = time.time()
+            kb_start_time = time.time()
             response, new_session_id = self.knowledge_base.query(
                 query, 
                 session_id=session_id,
                 context_summary=context_summary
             )
-            end_time = time.time()
-            logger.info(f"Knowledge base query completed in {end_time - start_time:.2f} seconds")
+            kb_end_time = time.time()
+            logger.info(f"Knowledge base query completed in {kb_end_time - kb_start_time:.2f} seconds")
             
             # Update context with new query and response
             self._update_context(thread_key, query, response, session_id, new_session_id)
@@ -280,30 +308,41 @@ class SlackHandler:
             logger.info(f"Successfully sent response to thread {thread_ts}")
             
             # Log performance
-            logger.info(f"Query processed in {end_time - start_time:.2f} seconds")
+            end_time = time.time()
+            total_elapsed = end_time - start_time
+            logger.info(f"Query processed in {total_elapsed:.2f} seconds")
             
-            # Update reactions: remove thinking_face, add white_check_mark
+            # Update reactions based on processing time
+            reactions_to_remove = ["thinking_face"]
+            if total_elapsed > timeout_threshold:
+                # Keep timer_clock reaction if it was a slow response
+                logger.info(f"Response took longer than timeout threshold: {total_elapsed:.2f}s > {timeout_threshold}s")
+            else:
+                # Remove timer_clock if it was added
+                reactions_to_remove.append("timer_clock")
+                
+            # Add success reaction and remove processing reactions
             self._manage_reactions(
                 channel, 
                 reaction_ts, 
                 add_reaction="white_check_mark", 
-                remove_reaction="thinking_face"
+                remove_reaction=reactions_to_remove
             )
                 
         except Exception as e:
             logger.error(f"Error processing message: {e}", exc_info=True)
             
-            # Update reactions: remove thinking_face, add x
+            # Update reactions: remove thinking_face and timer_clock if present, add x
             self._manage_reactions(
                 channel, 
                 reaction_ts, 
                 add_reaction="x", 
-                remove_reaction="thinking_face"
+                remove_reaction=["thinking_face", "timer_clock"]
             )
             
-            # Send error message
+            # Send user-friendly error message
             try:
-                say(text="Sorry, I encountered an error while processing your request. Please try again later.", 
-                    thread_ts=thread_ts)
+                error_message = "Sorry, I encountered an error while processing your request. Please try again later."
+                say(text=error_message, thread_ts=thread_ts)
             except Exception as say_error:
                 logger.error(f"Error sending error message: {say_error}", exc_info=True)

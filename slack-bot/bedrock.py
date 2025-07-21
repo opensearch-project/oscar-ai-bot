@@ -157,8 +157,9 @@ class BedrockKnowledgeBase(KnowledgeBaseInterface):
                 logger.info("Query without decomposition succeeded")
                 return response['output']['text'], response.get('sessionId')
             except Exception as fallback_error:
-                logger.error(f"Fallback also failed: {fallback_error}")
-                raise fallback_error
+                logger.error(f"Fallback also failed: {fallback_error}", exc_info=True)
+                # Return user-friendly error message instead of raising the exception
+                return "I'm sorry, I couldn't retrieve the information you requested. There might be an issue with the knowledge base or the query format.", None
 
 def get_knowledge_base(kb_type: str = 'bedrock', region: Optional[str] = None) -> KnowledgeBaseInterface:
     """
