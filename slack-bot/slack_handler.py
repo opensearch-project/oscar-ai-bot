@@ -15,7 +15,8 @@ This module provides the SlackHandler class for handling Slack events.
 import logging
 import time
 import re
-from typing import Dict, Any, Optional, Callable
+from typing import Dict, Any, Optional, Callable, List, Tuple
+
 from slack_bolt import App
 from slack_sdk.errors import SlackApiError
 
@@ -171,6 +172,98 @@ class SlackHandler:
             # If there's an error, assume no response to be safe
             return False
     
+    def _extract_query(self, text: str) -> str:
+        """
+        Extract the query from the message text by removing mentions.
+        
+        Args:
+            text: The raw message text
+            
+        Returns:
+            The cleaned query text
+        """
+        # Remove mentions (e.g., <@U12345>)
+        query = re.sub(r'<@[A-Z0-9]+>', '', text).strip()
+        return query
+    
+    def _update_context(self, thread_key: str, query: str, response: str, 
+                       session_id: Optional[str], new_session_id: Optional[str]) -> Dict[str, Any]:
+        """
+        Update the conversation context with the new query and response.
+        
+        Args:
+            thread_key: The unique key for the thread
+            query: The user's query
+            response: The bot's response
+            session_id: The current session ID
+            new_session_id: The new session ID from the knowledge base
+            
+        Returns:
+            The updated context
+        """
+        # Get existing context or create a new one
+        context = self.storage.get_context(thread_key)
+        if not context:
+            context = {
+                "session_id": new_session_id,
+                "history": [],
+                "summary": ""
+            }
+        
+        # Update session ID if it changed
+        if new_session_id and new_session_id != session_id:
+            context["session_id"] = new_session_id
+        
+        # Append to history
+        context["history"].append({
+            "query": query,
+            "response": response,
+            "timestamp": int(time.time())
+        })
+        
+        # Generate summary (simple for now, just the last few exchanges)
+        history_text = ""
+        for entry in context["history"][-3:]:  # Last 3 exchanges
+            history_text += f"User: {entry['query']}\nAssistant: {entry['response']}\n\n"
+        context["summary"] = history_text[:config.context_summary_length]
+        
+        # Store updated context
+        self.storage.store_context(thread_key, context)
+        
+        return context
+    
+    def _manage_reactions(self, channel: str, timestamp: str, add_reaction: Optional[str] = None, 
+                         remove_reaction: Optional[str] = None) -> None:
+        """
+        Add or remove reactions from a message.
+        
+        Args:
+            channel: The Slack channel ID
+            timestamp: The message timestamp
+            add_reaction: The reaction to add (optional)
+            remove_reaction: The reaction to remove (optional)
+        """
+        try:
+            # Remove reaction if specified
+            if remove_reaction:
+                self.client.reactions_remove(
+                    channel=channel,
+                    timestamp=timestamp,
+                    name=remove_reaction
+                )
+                logger.info(f"Removed {remove_reaction} reaction from message {timestamp}")
+            
+            # Add reaction if specified
+            if add_reaction:
+                self.client.reactions_add(
+                    channel=channel,
+                    timestamp=timestamp,
+                    name=add_reaction
+                )
+                logger.info(f"Added {add_reaction} reaction to message {timestamp}")
+        except SlackApiError as e:
+            logger.warning(f"Error managing reactions: {e}")
+    
     def _process_message(self, channel: str, thread_ts: str, user_id: str, 
                         text: str, say: Callable, message_ts: str = None) -> None:
         """
@@ -194,19 +287,11 @@ class SlackHandler:
         logger.info(f"Processing message in channel {channel}, thread {thread_ts}, from user {user_id}")
         
         # Add thinking reaction to the specific message
-        try:
-            self.client.reactions_add(
-                channel=channel,
-                timestamp=reaction_ts,
-                name="thinking_face"
-            )
-            logger.info(f"Added thinking_face reaction to message {reaction_ts}")
-        except SlackApiError as e:
-            logger.warning(f"Error adding thinking reaction: {e}")
+        self._manage_reactions(channel, reaction_ts, add_reaction="thinking_face")
         
         try:
             # Extract query from text (remove mentions)
-            query = re.sub(r'<@[A-Z0-9]+>', '', text).strip()
+            query = self._extract_query(text)
             logger.info(f"Extracted query: {query}")
             
             # Get context from storage
@@ -224,33 +309,8 @@ class SlackHandler:
             end_time = time.time()
             logger.info(f"Knowledge base query completed in {end_time - start_time:.2f} seconds")
             
-            # Update context with new session ID and append to history
-            if not context:
-                context = {
-                    "session_id": new_session_id,
-                    "history": [],
-                    "summary": ""
-                }
-            
-            # Update session ID if it changed
-            if new_session_id and new_session_id != session_id:
-                context["session_id"] = new_session_id
-            
-            # Append to history
-            context["history"].append({
-                "query": query,
-                "response": response,
-                "timestamp": int(time.time())
-            })
-            
-            # Generate summary (simple for now, just the last few exchanges)
-            history_text = ""
-            for entry in context["history"][-3:]:  # Last 3 exchanges
-                history_text += f"User: {entry['query']}\nAssistant: {entry['response']}\n\n"
-            context["summary"] = history_text[:config.context_summary_length]
-            
-            # Store updated context
-            self.storage.store_context(thread_key, context)
+            # Update context with new query and response
+            self._update_context(thread_key, query, response, session_id, new_session_id)
             
             # Send response
             say(text=response, thread_ts=thread_ts)
@@ -259,39 +319,24 @@ class SlackHandler:
             # Log performance
             logger.info(f"Query processed in {end_time - start_time:.2f} seconds")
             
-            # Remove thinking reaction and add done reaction to the specific message
-            try:
-                self.client.reactions_remove(
-                    channel=channel,
-                    timestamp=reaction_ts,
-                    name="thinking_face"
-                )
-                self.client.reactions_add(
-                    channel=channel,
-                    timestamp=reaction_ts,
-                    name="white_check_mark"
-                )
-                logger.info(f"Added white_check_mark reaction to message {reaction_ts}")
-            except SlackApiError as e:
-                logger.warning(f"Error updating reactions: {e}")
+            # Update reactions: remove thinking_face, add white_check_mark
+            self._manage_reactions(
+                channel, 
+                reaction_ts, 
+                add_reaction="white_check_mark", 
+                remove_reaction="thinking_face"
+            )
                 
         except Exception as e:
             logger.error(f"Error processing message: {e}", exc_info=True)
             
-            # Remove thinking reaction and add error reaction to the specific message
-            try:
-                self.client.reactions_remove(
-                    channel=channel,
-                    timestamp=reaction_ts,
-                    name="thinking_face"
-                )
-                self.client.reactions_add(
-                    channel=channel,
-                    timestamp=reaction_ts,
-                    name="x"
-                )
-            except SlackApiError as reaction_error:
-                logger.warning(f"Error updating reactions: {reaction_error}")
+            # Update reactions: remove thinking_face, add x
+            self._manage_reactions(
+                channel, 
+                reaction_ts, 
+                add_reaction="x", 
+                remove_reaction="thinking_face"
+            )
             
             # Send error message
             try:

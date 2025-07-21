@@ -17,6 +17,7 @@ import logging
 from typing import Dict, Any, Optional, Union
 import boto3
 from abc import ABC, abstractmethod
+
 from config import config
 
 # Configure logging
@@ -196,7 +197,7 @@ class DynamoDBStorage(StorageInterface):
             True if the event was successfully marked as seen, False otherwise
         """
         try:
-            # Simplified approach: Just try to insert the item
+            # Store event with TTL
             expiration = int(time.time()) + self.dedup_ttl
             current_time = int(time.time())
             

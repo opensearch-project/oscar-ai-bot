@@ -14,9 +14,10 @@ This module provides classes for interacting with Amazon Bedrock.
 
 import logging
 import json
-from typing import Tuple, Optional
 import boto3
+from typing import Tuple, Optional, Dict, Any
 from abc import ABC, abstractmethod
+
 from config import config
 
 # Configure logging
@@ -57,39 +58,23 @@ class BedrockKnowledgeBase(KnowledgeBaseInterface):
         self.model_arn = config.model_arn
         self.prompt_template = config.prompt_template
     
-    def query(self, query: str, session_id: Optional[str] = None, 
-              context_summary: Optional[str] = None) -> Tuple[str, Optional[str]]:
+    def _create_request(self, query: str, session_id: Optional[str] = None) -> Dict[str, Any]:
         """
-        Query Bedrock knowledge base with session or context.
+        Create a request for the Bedrock knowledge base.
         
         Args:
-            query: The user's query to the knowledge base
+            query: The user's query
             session_id: Optional session ID for maintaining conversation context
-            context_summary: Optional summary of previous conversation context
             
         Returns:
-            A tuple containing (response_text, session_id)
-            
-        Raises:
-            Exception: If both the primary query and fallback query fail
+            A dictionary containing the request parameters
         """
-        # Build prompt with context if available
-        if context_summary and not session_id:
-            enhanced_query = f"Previous conversation context:\n{context_summary}\n\nCurrent question: {query}"
-        else:
-            enhanced_query = query
-        
-        logger.info(f"Querying knowledge base with: {enhanced_query[:100]}...")
-        logger.info(f"Using model ARN: {self.model_arn}")
-        
         # Check if we're using an inference profile ARN
         is_inference_profile = "inference-profile" in self.model_arn
-        if is_inference_profile:
-            logger.info("Using inference profile configuration")
         
         # Prepare base request structure
         request = {
-            'input': {'text': enhanced_query},
+            'input': {'text': query},
             'retrieveAndGenerateConfiguration': {
                 'type': 'KNOWLEDGE_BASE',
                 'knowledgeBaseConfiguration': {
@@ -115,12 +100,42 @@ class BedrockKnowledgeBase(KnowledgeBaseInterface):
         # Add session ID if available
         if session_id:
             request['sessionId'] = session_id
-            logger.info(f"Using session ID: {session_id}")
+        
+        return request
+    
+    def query(self, query: str, session_id: Optional[str] = None, 
+              context_summary: Optional[str] = None) -> Tuple[str, Optional[str]]:
+        """
+        Query Bedrock knowledge base with session or context.
+        
+        Args:
+            query: The user's query to the knowledge base
+            session_id: Optional session ID for maintaining conversation context
+            context_summary: Optional summary of previous conversation context
+            
+        Returns:
+            A tuple containing (response_text, session_id)
+            
+        Raises:
+            Exception: If both the primary query and fallback query fail
+        """
+        # Build prompt with context if available
+        if context_summary and not session_id:
+            enhanced_query = f"Previous conversation context:\n{context_summary}\n\nCurrent question: {query}"
+        else:
+            enhanced_query = query
+        
+        logger.info(f"Querying knowledge base with: {enhanced_query[:100]}...")
+        logger.info(f"Using model ARN: {self.model_arn}")
+        
+        # Create request
+        request = self._create_request(enhanced_query, session_id)
         
         # Log the full request for debugging
         logger.info(f"Full request: {json.dumps(request, indent=2)}")
         
         try:
+            # Try with query decomposition first
             response = self.client.retrieve_and_generate(**request)
             logger.info("Query with decomposition succeeded")
             return response['output']['text'], response.get('sessionId')
@@ -131,24 +146,11 @@ class BedrockKnowledgeBase(KnowledgeBaseInterface):
             logger.info("Retrying without query decomposition...")
             try:
                 # Create a new request without query decomposition
-                request_no_decomp = {
-                    'input': {'text': enhanced_query},
-                    'retrieveAndGenerateConfiguration': {
-                        'type': 'KNOWLEDGE_BASE',
-                        'knowledgeBaseConfiguration': {
-                            'knowledgeBaseId': self.knowledge_base_id,
-                            'modelArn': self.model_arn,
-                            'generationConfiguration': {
-                                'promptTemplate': {
-                                    'textPromptTemplate': self.prompt_template
-                                }
-                            }
-                        }
-                    }
-                }
+                request_no_decomp = self._create_request(enhanced_query, session_id)
                 
-                if session_id:
-                    request_no_decomp['sessionId'] = session_id
+                # Remove orchestration configuration if it exists
+                if 'orchestrationConfiguration' in request_no_decomp['retrieveAndGenerateConfiguration']['knowledgeBaseConfiguration']:
+                    del request_no_decomp['retrieveAndGenerateConfiguration']['knowledgeBaseConfiguration']['orchestrationConfiguration']
                 
                 logger.info(f"Fallback request: {json.dumps(request_no_decomp, indent=2)}")
                 response = self.client.retrieve_and_generate(**request_no_decomp)
@@ -169,5 +171,5 @@ def get_knowledge_base(kb_type: str = 'bedrock', region: Optional[str] = None) -
     Returns:
         An implementation of KnowledgeBaseInterface
     """
-    # No mock implementation here - moved to tests
+    # Currently only supports Bedrock
     return BedrockKnowledgeBase(region)

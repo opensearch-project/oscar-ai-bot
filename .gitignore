@@ -13,6 +13,8 @@ cdk.out/
 cdk-outputs.json
 slack-bot/.pytest_cache
 slack-bot/node_modules
+slack-bot/node_modules/*
+slack-bot/node_modules/
 # Python
 __pycache__/
 *.py[cod]

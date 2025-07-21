@@ -16,7 +16,9 @@ import logging
 import json
 import boto3
 import os
+import time
 from typing import Dict, Any, Optional
+
 from slack_bolt import App
 from slack_bolt.adapter.aws_lambda import SlackRequestHandler
 from config import config
@@ -46,6 +48,69 @@ handler.register_handlers()
 # Initialize AWS Lambda client for async invocation
 lambda_client = boto3.client('lambda')
 FUNCTION_NAME = os.environ.get('AWS_LAMBDA_FUNCTION_NAME', 'oscar-slack-bot')
+
+def get_event_id(event: Dict[str, Any]) -> str:
+    """
+    Generate a unique ID for a Slack event.
+    
+    Args:
+        event: The event dict from API Gateway
+        
+    Returns:
+        A unique ID for the event
+    """
+    # Extract event body
+    body = None
+    if event.get('body'):
+        body = json.loads(event['body']) if isinstance(event['body'], str) else event['body']
+    
+    # If this is a Slack event, use the event ID
+    if body and body.get('event'):
+        slack_event = body.get('event')
+        event_ts = slack_event.get('event_ts') or slack_event.get('ts')
+        channel = slack_event.get('channel')
+        
+        if event_ts and channel:
+            return f"slack_event_{channel}_{event_ts}"
+    
+    # Fallback to request timestamp and signature
+    if event.get('headers'):
+        request_timestamp = event.get('headers').get('X-Slack-Request-Timestamp')
+        request_signature = event.get('headers').get('X-Slack-Signature')
+        
+        if request_timestamp and request_signature:
+            return f"slack_request_{request_timestamp}_{request_signature[-8:]}"
+    
+    # Last resort: use a hash of the entire event
+    import hashlib
+    event_str = json.dumps(event, sort_keys=True)
+    return f"event_hash_{hashlib.md5(event_str.encode()).hexdigest()}"
+
+def process_slack_event(event: Dict[str, Any], context: Optional[object]) -> Dict[str, Any]:
+    """
+    Process a Slack event asynchronously.
+    
+    Args:
+        event: The Slack event to process
+        context: The Lambda context object
+        
+    Returns:
+        Processing result
+    """
+    logger.info("Processing Slack event asynchronously")
+    
+    try:
+        # Handle the Slack event
+        slack_handler = SlackRequestHandler(app=app)
+        result = slack_handler.handle(event, context)
+        logger.info("Successfully processed Slack event")
+        return result
+    except Exception as e:
+        logger.error(f"Error processing Slack event: {e}", exc_info=True)
+        return {
+            'statusCode': 500,
+            'body': json.dumps({'error': str(e)})
+        }
 
 def lambda_handler(event: Dict[str, Any], context: Optional[object]) -> Dict[str, Any]:
     """
@@ -129,29 +194,3 @@ def lambda_handler(event: Dict[str, Any], context: Optional[object]) -> Dict[str
         'statusCode': 200,
         'body': json.dumps({'message': 'Event received and will be processed asynchronously'})
     }
-
-def process_slack_event(event: Dict[str, Any], context: Optional[object]) -> Dict[str, Any]:
-    """
-    Process a Slack event asynchronously.
-    
-    Args:
-        event: The Slack event to process
-        context: The Lambda context object
-        
-    Returns:
-        Processing result
-    """
-    logger.info("Processing Slack event asynchronously")
-    
-    try:
-        # Handle the Slack event
-        slack_handler = SlackRequestHandler(app=app)
-        result = slack_handler.handle(event, context)
-        logger.info("Successfully processed Slack event")
-        return result
-    except Exception as e:
-        logger.error(f"Error processing Slack event: {e}", exc_info=True)
-        return {
-            'statusCode': 500,
-            'body': json.dumps({'error': str(e)})
-        }
