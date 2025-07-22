@@ -15,6 +15,9 @@ slack-bot/.pytest_cache
 slack-bot/node_modules
 slack-bot/node_modules/*
 slack-bot/node_modules/
+build_docs
+build_docs/
+./build_docs/
 # Python
 __pycache__/
 *.py[cod]
