@@ -58,13 +58,15 @@ class BedrockKnowledgeBase(KnowledgeBaseInterface):
         self.model_arn = config.model_arn
         self.prompt_template = config.prompt_template
     
-    def _create_request(self, query: str, session_id: Optional[str] = None) -> Dict[str, Any]:
+    def _create_request(self, query: str, session_id: Optional[str] = None, 
+                      use_decomposition: bool = True) -> Dict[str, Any]:
         """
         Create a request for the Bedrock knowledge base.
         
         Args:
             query: The user's query
             session_id: Optional session ID for maintaining conversation context
+            use_decomposition: Whether to include query decomposition configuration
             
         Returns:
             A dictionary containing the request parameters
@@ -89,8 +91,8 @@ class BedrockKnowledgeBase(KnowledgeBaseInterface):
             }
         }
         
-        # Add query decomposition configuration for non-inference profiles
-        if not is_inference_profile:
+        # Add query decomposition configuration for non-inference profiles when requested
+        if not is_inference_profile and use_decomposition:
             request['retrieveAndGenerateConfiguration']['knowledgeBaseConfiguration']['orchestrationConfiguration'] = {
                 'queryTransformationConfiguration': {
                     'type': 'QUERY_DECOMPOSITION'
@@ -116,8 +118,9 @@ class BedrockKnowledgeBase(KnowledgeBaseInterface):
         Returns:
             A tuple containing (response_text, session_id)
             
-        Raises:
-            Exception: If both the primary query and fallback query fail
+        Note:
+            This method attempts to query with decomposition first (if applicable),
+            then falls back to querying without decomposition if the first attempt fails.
         """
         # Build prompt with context if available
         if context_summary and not session_id:
@@ -128,11 +131,50 @@ class BedrockKnowledgeBase(KnowledgeBaseInterface):
         logger.info(f"Querying knowledge base with: {enhanced_query[:100]}...")
         logger.info(f"Using model ARN: {self.model_arn}")
         
-        # Create request
-        request = self._create_request(enhanced_query, session_id)
+        # Check if we're using an inference profile
+        is_inference_profile = "inference-profile" in self.model_arn
         
-        # Log the full request for debugging
-        logger.info(f"Full request: {json.dumps(request, indent=2)}")
+        # If using inference profile, we don't need to try with decomposition first
+        if is_inference_profile:
+            return self._execute_query(enhanced_query, session_id)
+        
+        # For non-inference profiles, try with decomposition first, then fall back
+        return self._query_with_fallback(enhanced_query, session_id)
+    
+    def _execute_query(self, query: str, session_id: Optional[str] = None) -> Tuple[str, Optional[str]]:
+        """
+        Execute a single query against the knowledge base.
+        
+        Args:
+            query: The user's query
+            session_id: Optional session ID for maintaining conversation context
+            
+        Returns:
+            A tuple containing (response_text, session_id)
+        """
+        try:
+            request = self._create_request(query, session_id)
+            logger.info(f"Request: {json.dumps(request, indent=2)}")
+            response = self.client.retrieve_and_generate(**request)
+            return response['output']['text'], response.get('sessionId')
+        except Exception as e:
+            logger.error(f"Query execution failed: {e}", exc_info=True)
+            return "I'm sorry, I couldn't retrieve the information you requested. There might be an issue with the knowledge base or the query format.", None
+    
+    def _query_with_fallback(self, query: str, session_id: Optional[str] = None) -> Tuple[str, Optional[str]]:
+        """
+        Try querying with decomposition first, then fall back to no decomposition.
+        
+        Args:
+            query: The user's query
+            session_id: Optional session ID for maintaining conversation context
+            
+        Returns:
+            A tuple containing (response_text, session_id)
+        """
+        # Create request with query decomposition
+        request = self._create_request(query, session_id)
+        logger.info(f"Full request with decomposition: {json.dumps(request, indent=2)}")
         
         try:
             # Try with query decomposition first
@@ -145,12 +187,8 @@ class BedrockKnowledgeBase(KnowledgeBaseInterface):
             # If query decomposition fails, try without it
             logger.info("Retrying without query decomposition...")
             try:
-                # Create a new request without query decomposition
-                request_no_decomp = self._create_request(enhanced_query, session_id)
-                
-                # Remove orchestration configuration if it exists
-                if 'orchestrationConfiguration' in request_no_decomp['retrieveAndGenerateConfiguration']['knowledgeBaseConfiguration']:
-                    del request_no_decomp['retrieveAndGenerateConfiguration']['knowledgeBaseConfiguration']['orchestrationConfiguration']
+                # Create a new request explicitly without query decomposition
+                request_no_decomp = self._create_request(query, session_id, use_decomposition=False)
                 
                 logger.info(f"Fallback request: {json.dumps(request_no_decomp, indent=2)}")
                 response = self.client.retrieve_and_generate(**request_no_decomp)
@@ -158,7 +196,6 @@ class BedrockKnowledgeBase(KnowledgeBaseInterface):
                 return response['output']['text'], response.get('sessionId')
             except Exception as fallback_error:
                 logger.error(f"Fallback also failed: {fallback_error}", exc_info=True)
-                # Return user-friendly error message instead of raising the exception
                 return "I'm sorry, I couldn't retrieve the information you requested. There might be an issue with the knowledge base or the query format.", None
 
 def get_knowledge_base(kb_type: str = 'bedrock', region: Optional[str] = None) -> KnowledgeBaseInterface:
