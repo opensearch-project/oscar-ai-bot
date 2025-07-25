@@ -11,6 +11,7 @@ Lambda stack for OSCAR Slack Bot.
 This module defines the Lambda function and API Gateway used by the OSCAR Slack Bot.
 """
 
+import logging
 import os
 from typing import Dict, Any, Optional
 from aws_cdk import (
@@ -22,6 +23,9 @@ from aws_cdk import (
     CfnOutput
 )
 from constructs import Construct
+
+# Configure logging
+logger = logging.getLogger(__name__)
 
 class OscarLambdaStack(Construct):
     """
@@ -151,14 +155,7 @@ class OscarLambdaStack(Construct):
             function_name=function_name,
             runtime=lambda_.Runtime.PYTHON_3_12,
             handler="app.lambda_handler",
-            code=lambda_.Code.from_inline("""
-import os
-def lambda_handler(event, context):
-    return {
-        'statusCode': 200,
-        'body': 'Lambda function deployed successfully. Will be updated with full code.'
-    }
-"""),
+            code=lambda_.Code.from_asset("lambda"),
             timeout=Duration.seconds(30),
             memory_size=512,
             environment=self._get_lambda_environment_variables(),
@@ -224,12 +221,12 @@ def lambda_handler(event, context):
         knowledge_base_id = os.environ.get("KNOWLEDGE_BASE_ID")
         if not knowledge_base_id:
             knowledge_base_id = "PLACEHOLDER_KNOWLEDGE_BASE_ID"
-            print("WARNING: KNOWLEDGE_BASE_ID not set, using placeholder value")
+            logger.warning("KNOWLEDGE_BASE_ID not set, using placeholder value")
             
         model_arn = os.environ.get("MODEL_ARN")
         if not model_arn:
             model_arn = f'arn:aws:bedrock:{region}::foundation-model/anthropic.claude-3-5-haiku-20241022-v1:0'
-            print(f"WARNING: MODEL_ARN not set, using default Claude 3.5 Haiku model: {model_arn}")
+            logger.warning(f"MODEL_ARN not set, using default Claude 3.5 Haiku model: {model_arn}")
         
         env_vars: Dict[str, str] = {
             # Required configuration

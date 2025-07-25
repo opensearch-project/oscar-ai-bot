@@ -1,0 +1,2 @@
+# Placeholder requirements file for OSCAR Slack Bot Lambda function
+# This will be updated when the full bot implementation is deployed
