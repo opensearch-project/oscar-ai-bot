@@ -84,22 +84,22 @@ class OscarLambdaStack(Construct):
             ]
         )
 
-        # Add permissions for Bedrock
+        # Add permissions for Bedrock Knowledge Base operations
         role.add_to_policy(
             iam.PolicyStatement(
                 actions=[
-                    "bedrock:InvokeModel",
+                    # Core Knowledge Base operations
+                    "bedrock-agent-runtime:RetrieveAndGenerate",
                     "bedrock:RetrieveAndGenerate",
                     "bedrock:Retrieve",
-                    "bedrock:GetFoundationModel",
-                    "bedrock:ListFoundationModels",
+                    # Knowledge Base access
                     "bedrock:GetKnowledgeBase",
-                    "bedrock:ListKnowledgeBases",
+                    # Foundation model access
+                    "bedrock:InvokeModel",
+                    "bedrock:GetFoundationModel",
+                    # Required for inference profile support (if using inference profiles)
                     "bedrock:GetInferenceProfile",
-                    "bedrock:ListInferenceProfiles",
-                    "bedrock-agent-runtime:Retrieve",
-                    "bedrock-agent-runtime:RetrieveAndGenerate",
-                    "bedrock-agent-runtime:InvokeAgent"
+                    "bedrock:ListInferenceProfiles"
                 ],
                 resources=["*"]
             )
