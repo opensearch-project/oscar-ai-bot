@@ -27,6 +27,36 @@ The CDK code is organized into modular stacks for better maintainability:
 - **OscarStorageStack** (`storage_stack.py`): DynamoDB tables for data storage
 - **OscarLambdaStack** (`lambda_stack.py`): Lambda function and API Gateway for request processing
 
+## Lambda Code Customization
+
+The Lambda function code is located in the `lambda/` directory and can be easily customized:
+
+### Default Implementation
+- **File**: `lambda/app.py`
+- **Purpose**: Contains a placeholder Lambda handler that returns a success response
+- **Handler**: `app.lambda_handler`
+
+### Customizing the Lambda Code
+To deploy your own Lambda code (such as the full OSCAR Slack bot implementation):
+
+1. **Replace the placeholder code**: Edit or replace `lambda/app.py` with your implementation
+2. **Add dependencies**: Update `lambda/requirements.txt` with any required Python packages
+3. **Maintain the handler signature**: Ensure your main function is named `lambda_handler` and accepts `(event, context)` parameters
+4. **Redeploy**: Run the deployment script to update the Lambda function
+
+Example:
+```python
+# lambda/app.py
+def lambda_handler(event, context):
+    # Your custom implementation here
+    return {
+        'statusCode': 200,
+        'body': 'Your custom response'
+    }
+```
+
+This approach provides maximum flexibility while maintaining a simple deployment process.
+
 ## Environment Variables
 
 The deployment uses the following environment variables, which can be set in a `.env` file in the root directory:

@@ -11,6 +11,14 @@ Placeholder Lambda handler for OSCAR Slack Bot.
 
 This module provides a basic Lambda handler that serves as a placeholder
 until the full bot implementation is deployed.
+
+To customize this Lambda function:
+1. Replace this file with your own implementation
+2. Ensure your main function is named 'lambda_handler'
+3. Update requirements.txt with any additional dependencies
+4. Redeploy using the deployment script
+
+The function signature must remain: lambda_handler(event, context)
 """
 
 import os
