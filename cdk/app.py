@@ -20,7 +20,7 @@ from aws_cdk import (
     Environment,
     Tags
 )
-from stacks.oscar_slack_bot_stack import OscarSlackBotStack
+from stacks.slack_bot_stack import OscarSlackBotStack
 
 # Configure logging
 logging.basicConfig(

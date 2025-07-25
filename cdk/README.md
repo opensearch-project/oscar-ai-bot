@@ -23,7 +23,7 @@ The CDK deployment creates a modular, serverless architecture for the OSCAR Slac
 
 The CDK code is organized into modular stacks for better maintainability:
 
-- **OscarSlackBotStack** (`oscar_slack_bot_stack.py`): Main stack that combines all components
+- **OscarSlackBotStack** (`slack_bot_stack.py`): Main stack that combines all components
 - **OscarStorageStack** (`storage_stack.py`): DynamoDB tables for data storage
 - **OscarLambdaStack** (`lambda_stack.py`): Lambda function and API Gateway for request processing
 
