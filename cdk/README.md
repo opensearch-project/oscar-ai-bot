@@ -57,6 +57,23 @@ def lambda_handler(event, context):
 
 This approach provides maximum flexibility while maintaining a simple deployment process.
 
+## Security Configuration
+
+### CORS (Cross-Origin Resource Sharing)
+The API Gateway is configured with secure CORS settings by default:
+
+- **Default allowed origins**: Slack domains (`https://slack.com`, `https://*.slack.com`, `https://api.slack.com`)
+- **Allowed methods**: POST only (required for Slack events)
+- **Allowed headers**: Content-Type, X-Slack-Request-Timestamp, X-Slack-Signature
+
+To add additional origins (e.g., for testing or custom integrations):
+```bash
+# In your .env file
+CORS_ALLOWED_ORIGINS=https://your-domain.com,https://another-domain.com
+```
+
+**Security Note**: Only add trusted domains to avoid potential security vulnerabilities.
+
 ## Environment Variables
 
 The deployment uses the following environment variables, which can be set in a `.env` file in the root directory:
@@ -80,6 +97,7 @@ The deployment uses the following environment variables, which can be set in a `
 - `PROMPT_TEMPLATE`: Custom prompt template for the Bedrock model
 - `ENVIRONMENT`: Deployment environment (default: dev)
 - `LAMBDA_FUNCTION_NAME`: Name of the Lambda function (default: oscar-slack-bot)
+- `CORS_ALLOWED_ORIGINS`: Comma-separated list of additional CORS origins (default: Slack domains only)
 
 ### Region Configuration
 

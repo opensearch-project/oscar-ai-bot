@@ -169,13 +169,17 @@ class OscarLambdaStack(Construct):
         Returns:
             The created API Gateway
         """
+        # Configure CORS origins with security in mind
+        cors_origins = self._get_cors_origins()
+        
         api = apigateway.LambdaRestApi(
             self, "OscarSlackBotApi",
             handler=self.lambda_function,
             proxy=False,
             default_cors_preflight_options=apigateway.CorsOptions(
-                allow_origins=apigateway.Cors.ALL_ORIGINS,
-                allow_methods=["POST"]
+                allow_origins=cors_origins,
+                allow_methods=["POST"],
+                allow_headers=["Content-Type", "X-Slack-Request-Timestamp", "X-Slack-Signature"]
             )
         )
 
@@ -184,6 +188,31 @@ class OscarLambdaStack(Construct):
         slack_events.add_method("POST")
         
         return api
+    
+    def _get_cors_origins(self) -> list[str]:
+        """
+        Get CORS origins configuration with security best practices.
+        
+        Returns:
+            List of allowed CORS origins
+        """
+        # Default secure origins for Slack bot
+        default_origins = [
+            "https://slack.com",
+            "https://*.slack.com",
+            "https://api.slack.com"
+        ]
+        
+        # Allow users to specify additional origins via environment variable
+        custom_origins = os.environ.get("CORS_ALLOWED_ORIGINS", "")
+        if custom_origins:
+            # Parse comma-separated origins and add to defaults
+            additional_origins = [origin.strip() for origin in custom_origins.split(",") if origin.strip()]
+            default_origins.extend(additional_origins)
+            logger.info(f"Added custom CORS origins: {additional_origins}")
+        
+        logger.info(f"Configured CORS origins: {default_origins}")
+        return default_origins
     
     def _add_outputs(self) -> None:
         """
@@ -253,5 +282,8 @@ class OscarLambdaStack(Construct):
         prompt_template = os.environ.get("PROMPT_TEMPLATE")
         if prompt_template:
             env_vars["PROMPT_TEMPLATE"] = prompt_template
+        
+        # Note: CORS_ALLOWED_ORIGINS is used during CDK deployment, not as a Lambda environment variable
+        # It configures the API Gateway CORS settings, not runtime behavior
             
         return env_vars
