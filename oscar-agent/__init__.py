@@ -7,5 +7,7 @@
 # compatible open source license.
 
 """
-OSCAR - OpenSearch Conversational Automation for Releases
+OSCAR Agent package for Bedrock agent integration.
 """
+
+__version__ = "1.0.0"

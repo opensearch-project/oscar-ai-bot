@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 # Copyright OpenSearch Contributors
 # SPDX-License-Identifier: Apache-2.0
 #
@@ -7,29 +7,37 @@
 # compatible open source license.
 
 """
-Storage module for OSCAR.
+Storage Management for OSCAR Agent.
 
-This module provides storage implementations for session and context data.
+This module provides storage implementations for session and context data
+with support for DynamoDB backend and automatic TTL management.
+
+Classes:
+    StorageInterface: Abstract base class for storage implementations
+    DynamoDBStorage: DynamoDB implementation with TTL and error handling
 """
 
-import time
 import logging
-from typing import Dict, Any, Optional, Union
-import boto3
+import time
 from abc import ABC, abstractmethod
+from typing import Any, Dict, Optional
+
+import boto3
 
 from config import config
 
-# Configure logging
 logger = logging.getLogger(__name__)
 
 class StorageInterface(ABC):
-    """Abstract base class for storage implementations."""
+    """Abstract base class for storage implementations.
+    
+    This interface defines the contract for all storage implementations,
+    ensuring consistent behavior for context and session management.
+    """
     
     @abstractmethod
     def store_context(self, thread_key: str, context: Dict[str, Any]) -> bool:
-        """
-        Store conversation context for a thread.
+        """Store conversation context for a thread.
         
         Args:
             thread_key: Unique identifier for the conversation thread
@@ -38,7 +46,6 @@ class StorageInterface(ABC):
         Returns:
             True if storage was successful, False otherwise
         """
-        pass
     
     @abstractmethod
     def get_context(self, thread_key: str) -> Optional[Dict[str, Any]]:
@@ -80,14 +87,21 @@ class StorageInterface(ABC):
         pass
 
 class DynamoDBStorage(StorageInterface):
-    """DynamoDB implementation of storage interface."""
+    """DynamoDB implementation with automatic TTL and error handling.
+    
+    This implementation provides robust storage for conversation context and
+    session data with features:
+    - Automatic TTL management for data cleanup
+    - Context size limiting to prevent oversized items
+    - Comprehensive error handling and logging
+    - Event deduplication support
+    """
     
     def __init__(self, region: Optional[str] = None) -> None:
-        """
-        Initialize DynamoDB storage.
+        """Initialize DynamoDB storage with configuration.
         
         Args:
-            region: AWS region for DynamoDB service, defaults to config value if None
+            region: AWS region for DynamoDB service, defaults to config value
         """
         self.region = region or config.region
         self.dynamodb = boto3.resource('dynamodb', region_name=self.region)
@@ -213,8 +227,6 @@ class DynamoDBStorage(StorageInterface):
         except Exception as e:
             logger.error(f"Error marking event: {e}")
             return False
-
-
 
 def get_storage(storage_type: str = 'dynamodb', region: Optional[str] = None) -> StorageInterface:
     """

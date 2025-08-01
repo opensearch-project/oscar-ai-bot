@@ -88,19 +88,48 @@ class OscarLambdaStack(Construct):
             ]
         )
 
-        # Add permissions for Bedrock Knowledge Base operations
+        # Add permissions for Bedrock Agent operations
         role.add_to_policy(
             iam.PolicyStatement(
                 actions=[
-                    # Core Knowledge Base operations
+                    # Core Bedrock Agent operations
+                    "bedrock-agent-runtime:InvokeAgent",
+                    "bedrock-agent-runtime:Retrieve",
                     "bedrock-agent-runtime:RetrieveAndGenerate",
-                    "bedrock:RetrieveAndGenerate",
-                    "bedrock:Retrieve",
-                    # Knowledge Base access
+                ],
+                resources=["*"]  # Agent runtime operations need wildcard
+            )
+        )
+        
+        # Add permissions for Bedrock Agent management operations
+        role.add_to_policy(
+            iam.PolicyStatement(
+                actions=[
+                    # Agent access
+                    "bedrock-agent:GetAgent",
+                    "bedrock-agent:ListAgents",
+                    "bedrock-agent:GetAgentAlias",
+                    "bedrock-agent:ListAgentAliases",
+                    "bedrock-agent:GetAgentVersion",
+                    "bedrock-agent:ListAgentVersions",
+                ],
+                resources=["*"]
+            )
+        )
+        
+        # Add permissions for Bedrock Knowledge Base and Foundation Models
+        role.add_to_policy(
+            iam.PolicyStatement(
+                actions=[
+                    # Knowledge Base access (for agent action groups)
                     "bedrock:GetKnowledgeBase",
+                    "bedrock:ListKnowledgeBases",
+                    "bedrock:Retrieve",
+                    "bedrock:RetrieveAndGenerate",
                     # Foundation model access
                     "bedrock:InvokeModel",
                     "bedrock:GetFoundationModel",
+                    "bedrock:ListFoundationModels",
                     # Required for inference profile support (if using inference profiles)
                     "bedrock:GetInferenceProfile",
                     "bedrock:ListInferenceProfiles"
@@ -155,7 +184,7 @@ class OscarLambdaStack(Construct):
             function_name=function_name,
             runtime=lambda_.Runtime.PYTHON_3_12,
             handler="app.lambda_handler",
-            code=lambda_.Code.from_asset("lambda"),
+            code=lambda_.Code.from_asset("../oscar-agent-deploy"),
             timeout=Duration.seconds(30),
             memory_size=512,
             environment=self._get_lambda_environment_variables(),
@@ -247,20 +276,20 @@ class OscarLambdaStack(Construct):
         region = os.environ.get("AWS_REGION", "us-east-1")
         
         # Define required variables with validation
-        knowledge_base_id = os.environ.get("KNOWLEDGE_BASE_ID")
-        if not knowledge_base_id:
-            knowledge_base_id = "PLACEHOLDER_KNOWLEDGE_BASE_ID"
-            logger.warning("KNOWLEDGE_BASE_ID not set, using placeholder value")
+        oscar_bedrock_agent_id = os.environ.get("OSCAR_BEDROCK_AGENT_ID")
+        if not oscar_bedrock_agent_id:
+            oscar_bedrock_agent_id = "PLACEHOLDER_AGENT_ID"
+            logger.warning("OSCAR_BEDROCK_AGENT_ID not set, using placeholder value")
             
-        model_arn = os.environ.get("MODEL_ARN")
-        if not model_arn:
-            model_arn = f'arn:aws:bedrock:{region}::foundation-model/anthropic.claude-3-5-haiku-20241022-v1:0'
-            logger.warning(f"MODEL_ARN not set, using default Claude 3.5 Haiku model: {model_arn}")
+        oscar_bedrock_agent_alias_id = os.environ.get("OSCAR_BEDROCK_AGENT_ALIAS_ID")
+        if not oscar_bedrock_agent_alias_id:
+            oscar_bedrock_agent_alias_id = "TSTALIASID"
+            logger.warning("OSCAR_BEDROCK_AGENT_ALIAS_ID not set, using default test alias")
         
         env_vars: Dict[str, str] = {
-            # Required configuration
-            "KNOWLEDGE_BASE_ID": knowledge_base_id,
-            "MODEL_ARN": model_arn,
+            # Required agent configuration
+            "OSCAR_BEDROCK_AGENT_ID": oscar_bedrock_agent_id,
+            "OSCAR_BEDROCK_AGENT_ALIAS_ID": oscar_bedrock_agent_alias_id,
             "SLACK_BOT_TOKEN": os.environ.get("SLACK_BOT_TOKEN", ""),
             "SLACK_SIGNING_SECRET": os.environ.get("SLACK_SIGNING_SECRET", ""),
             
