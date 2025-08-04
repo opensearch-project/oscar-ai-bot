@@ -1,1 +1,0 @@
-{"status": "success", "message": "Lambda function is working in VPC", "agent_type": "test-minimal", "vpc_id": "vpc-0f2061a1321c2d669", "mock_mode": "true", "event_received": {"test": "connectivity"}, "function_name": "oscar-test-metrics-agent", "aws_region": "us-east-1"}

@@ -27,6 +27,10 @@ from slack_sdk.errors import SlackApiError
 from config import config
 from oscar_agent import OSCARAgentInterface
 from storage import StorageInterface
+import sys
+import os
+sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
+from communication_orchestrator.orchestrator import CommunicationOrchestrator, parse_communication_command
 
 logger = logging.getLogger(__name__)
 
@@ -58,6 +62,12 @@ class SlackHandler:
         self.storage = storage
         self.oscar_agent = oscar_agent
         self.client = app.client
+        
+        # Initialize communication orchestrator
+        self.communication_orchestrator = CommunicationOrchestrator(
+            slack_client=app.client,
+            region=config.region
+        )
     
     def register_handlers(self) -> App:
         """
@@ -265,6 +275,13 @@ class SlackHandler:
             query = self._extract_query(text)
             logger.info(f"Extracted query: {query}")
             
+            # Check if this is a communication orchestrator command
+            comm_command = parse_communication_command(text)
+            if comm_command:
+                logger.info(f"Processing communication command: {comm_command[0]}")
+                self._handle_communication_command(comm_command, channel, thread_ts, say, reaction_ts)
+                return
+            
             # Get context from storage
             context = self.storage.get_context(thread_key)
             context_summary = context.get("summary") if context else None
@@ -332,3 +349,85 @@ class SlackHandler:
                 say(text=error_message, thread_ts=thread_ts)
             except Exception as say_error:
                 logger.error(f"Error sending error message: {say_error}", exc_info=True)
+    
+    def _handle_communication_command(
+        self, 
+        command: Tuple[str, Dict[str, Any]], 
+        channel: str, 
+        thread_ts: str, 
+        say: Callable,
+        reaction_ts: str
+    ) -> None:
+        """Handle communication orchestrator commands.
+        
+        Args:
+            command: Tuple of (command_type, parameters)
+            channel: Slack channel ID
+            thread_ts: Thread timestamp
+            say: Function to send a message to the channel
+            reaction_ts: Timestamp for reactions
+        """
+        command_type, params = command
+        
+        try:
+            if command_type == 'send_notification':
+                result = self.communication_orchestrator.send_notification(
+                    message_type=params['message_type'],
+                    context=params['context']
+                )
+                
+                if result['success']:
+                    response = f"✅ **Notification sent successfully!**\n\n"
+                    response += f"**Message Type:** {params['message_type']}\n"
+                    response += f"**Channels:** {', '.join(result['sent_channels'])}\n\n"
+                    response += f"**Message Preview:**\n```\n{result['message'][:500]}{'...' if len(result['message']) > 500 else ''}\n```"
+                else:
+                    response = f"❌ **Failed to send notification**\n\n**Error:** {result['error']}"
+                
+            elif command_type == 'preview_message':
+                result = self.communication_orchestrator.preview_message(
+                    message_type=params['message_type'],
+                    context=params['context']
+                )
+                
+                if result['success']:
+                    response = f"👀 **Message Preview**\n\n"
+                    response += f"**Type:** {params['message_type']}\n"
+                    response += f"**Target Channels:** {', '.join(result['target_channels'])}\n"
+                    response += f"**Mentions:** {', '.join(result['mentions'])}\n"
+                    response += f"**Priority:** {result['priority']}\n\n"
+                    response += f"**Message:**\n```\n{result['message']}\n```"
+                else:
+                    response = f"❌ **Preview failed**\n\n**Error:** {result['error']}"
+                
+            elif command_type == 'list_templates':
+                result = self.communication_orchestrator.list_available_templates()
+                response = "📋 **Available Message Templates**\n\n"
+                
+                for name, info in result['templates'].items():
+                    response += f"**{name}**\n"
+                    response += f"  • Description: {info['description']}\n"
+                    response += f"  • Channels: {', '.join(info['channels'])}\n"
+                    response += f"  • Priority: {info['priority']}\n\n"
+                
+                response += "\n**Usage Examples:**\n"
+                response += "• `/send_notification build_failure build_name=main-build branch=main`\n"
+                response += "• `/preview_message cve_check_failure component=opensearch severity=high`\n"
+                response += "• `/list_templates`"
+            
+            else:
+                response = f"❓ Unknown communication command: {command_type}"
+            
+            # Send response
+            say(text=response, thread_ts=thread_ts)
+            
+            # Add success reaction
+            self._manage_reactions(channel, reaction_ts, add_reaction="white_check_mark", remove_reaction="thinking_face")
+            
+        except Exception as e:
+            logger.error(f"Error handling communication command: {e}", exc_info=True)
+            error_response = f"❌ **Error processing communication command**\n\n**Error:** {str(e)}"
+            say(text=error_response, thread_ts=thread_ts)
+            
+            # Add error reaction
+            self._manage_reactions(channel, reaction_ts, add_reaction="x", remove_reaction="thinking_face")
