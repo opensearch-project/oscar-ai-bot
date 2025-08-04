@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 # Copyright OpenSearch Contributors
 # SPDX-License-Identifier: Apache-2.0
 #
@@ -7,27 +7,34 @@
 # compatible open source license.
 
 """
-OSCAR - OpenSearch Conversational Automation for Release 
+OSCAR Agent Lambda Handler.
 
-Lambda handler for Slack events.
+Main AWS Lambda handler for OSCAR (OpenSearch Conversational Automation for Release).
+This module handles Slack events, processes them asynchronously, and coordinates
+between Slack, Bedrock agents, and DynamoDB storage.
+
+Functions:
+    lambda_handler: Main AWS Lambda entry point
+    process_slack_event: Async Slack event processor
+    get_event_id: Generate unique event identifiers
 """
 
-import logging
+import hashlib
 import json
-import boto3
+import logging
 import os
 import time
-import hashlib
-from typing import Dict, Any, Optional
+from typing import Any, Dict, Optional
 
+import boto3
 from slack_bolt import App
 from slack_bolt.adapter.aws_lambda import SlackRequestHandler
-from config import config
-from storage import get_storage
-from bedrock import get_knowledge_base
-from slack_handler import SlackHandler
 
-# Configure logging
+from config import config
+from oscar_agent import get_oscar_agent
+from slack_handler import SlackHandler
+from storage import get_storage
+
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 
@@ -38,12 +45,12 @@ app = App(
     process_before_response=True
 )
 
-# Initialize storage and knowledge base
+# Initialize storage and OSCAR agent
 storage_instance = get_storage()
-knowledge_base = get_knowledge_base()
+oscar_agent = get_oscar_agent()
 
 # Initialize and register Slack handler
-handler = SlackHandler(app, storage_instance, knowledge_base)
+handler = SlackHandler(app, storage_instance, oscar_agent)
 handler.register_handlers()
 
 # Initialize AWS Lambda client for async invocation
@@ -96,13 +103,13 @@ def process_slack_event(event: Dict[str, Any], context: Optional[object]) -> Dic
     Returns:
         Processing result
     """
-    logger.info("Processing Slack event asynchronously")
+    logger.info("Processing Slack event asynchronously with OSCAR agent")
     
     try:
         # Handle the Slack event
         slack_handler = SlackRequestHandler(app=app)
         result = slack_handler.handle(event, context)
-        logger.info("Successfully processed Slack event")
+        logger.info("Successfully processed Slack event with OSCAR agent")
         return result
     except Exception as e:
         logger.error(f"Error processing Slack event: {e}", exc_info=True)
@@ -113,7 +120,7 @@ def process_slack_event(event: Dict[str, Any], context: Optional[object]) -> Dic
 
 def lambda_handler(event: Dict[str, Any], context: Optional[object]) -> Dict[str, Any]:
     """
-    AWS Lambda handler for Slack events.
+    AWS Lambda handler for Slack events using OSCAR agent.
     
     This function immediately acknowledges Slack events and then asynchronously
     processes them to prevent duplicate responses.
@@ -125,11 +132,11 @@ def lambda_handler(event: Dict[str, Any], context: Optional[object]) -> Dict[str
     Returns:
         API Gateway response object or processing result
     """
-    logger.info("Received event")
+    logger.info("Received event for OSCAR agent processing")
     
     # Check if this is an async processing event
     if event.get('detail_type') == 'process_slack_event':
-        logger.info("Processing async Slack event")
+        logger.info("Processing async Slack event with OSCAR agent")
         return process_slack_event(event['detail'], context)
     
     # Log request ID for tracing
@@ -166,7 +173,7 @@ def lambda_handler(event: Dict[str, Any], context: Optional[object]) -> Dict[str
     try:
         # Invoke this Lambda function asynchronously to process the event
         if FUNCTION_NAME:
-            logger.info(f"Invoking Lambda function {FUNCTION_NAME} asynchronously")
+            logger.info(f"Invoking Lambda function {FUNCTION_NAME} asynchronously for OSCAR agent processing")
             
             # Create payload for async processing
             payload = {
@@ -181,7 +188,7 @@ def lambda_handler(event: Dict[str, Any], context: Optional[object]) -> Dict[str
                 Payload=json.dumps(payload)
             )
             
-            logger.info("Successfully invoked async processing")
+            logger.info("Successfully invoked async processing for OSCAR agent")
         else:
             logger.warning("Function name not available, cannot invoke async processing")
     
@@ -191,5 +198,5 @@ def lambda_handler(event: Dict[str, Any], context: Optional[object]) -> Dict[str
     # Always return 200 OK immediately to acknowledge the event
     return {
         'statusCode': 200,
-        'body': json.dumps({'message': 'Event received and will be processed asynchronously'})
+        'body': json.dumps({'message': 'Event received and will be processed asynchronously by OSCAR agent'})
     }

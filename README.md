@@ -1,153 +1,187 @@
-# OSCAR - OpenSearch Conversational Automation for Releases
+# OSCAR - OpenSearch Conversational Automation for Release
 
-OSCAR is an AI-powered assistant for OpenSearch release management, leveraging Amazon Bedrock for knowledge base integration and Slack for user interaction.
-
-## Components
-
-- **Slack Bot**: AI-powered Slack bot with thread-based context and knowledge base integration
-- **CDK Infrastructure**: Modular AWS CDK stacks for deploying the required infrastructure
-- **API Gateway**: HTTP endpoint that receives events from Slack and forwards them to Lambda
-- **Knowledge Base**: Amazon Bedrock knowledge base with OpenSearch documentation
+OSCAR is an AI-powered Slack bot that provides intelligent assistance for OpenSearch project management and documentation queries. Built with Amazon Bedrock agents, it delivers accurate, contextual responses from the official OpenSearch knowledge base.
 
 ## Features
 
-- **Thread-Based Context**: Maintains conversation context within Slack threads
-- **Knowledge Base Integration**: Uses Amazon Bedrock to query OpenSearch documentation
-- **Emoji Reactions**: Provides visual feedback on message processing status
-- **Deduplication**: Prevents duplicate responses to the same message
-<!-- - **Throttling**: Rate limits requests to prevent overuse -->
-- **Toggleable DM Support**: Enable or disable direct message functionality
+- **Bedrock Agent Integration**: Uses Amazon Bedrock agents for intelligent query processing
+- **Knowledge Base Access**: Provides accurate information from OpenSearch documentation
+- **Slack Integration**: Responds to mentions and maintains conversation context
+- **Serverless Architecture**: Built on AWS Lambda with DynamoDB for scalability
+- **Context Preservation**: Maintains conversation history across threaded discussions
 
-## Deployment
+## Architecture
 
-OSCAR is deployed using AWS CDK:
+OSCAR uses a modern serverless architecture:
 
-### Deployment Commands
+- **AWS Lambda**: Processes Slack events and coordinates agent interactions
+- **Amazon Bedrock Agent**: Handles intelligent query processing with knowledge base integration
+- **DynamoDB**: Stores conversation context and session management
+- **API Gateway**: Manages Slack webhook requests
+- **CloudWatch**: Provides comprehensive logging and monitoring
+
+## Quick Start
+
+### Prerequisites
+
+- AWS Account with Bedrock and Lambda permissions
+- Slack workspace with app creation capabilities
+- Python 3.12+ and AWS CDK v2 installed
+- AWS CLI configured with appropriate credentials
+
+### 1. Setup
 
 ```bash
-# Deploy using settings from .env file
-./deploy_cdk.sh
-
-# Deploy with DM functionality explicitly enabled
-./deploy_cdk.sh --enable-dm
-
-# Deploy with debug output
-./deploy_cdk.sh --debug
-
-# Perform a dry run without making changes
-./deploy_cdk.sh --dry-run
-
-# Update just the Lambda function
-./deploy_lambda.sh
+git clone <repository-url>
+cd OSCAR
 ```
 
-## Environment Variables
+### 2. Configure Environment
 
-Create a `.env` file in the root directory with the following variables:
+Create and configure your `.env` file:
 
-### Required Variables
+```bash
+# Slack Configuration
+SLACK_BOT_TOKEN=xoxb-your-bot-token
+SLACK_SIGNING_SECRET=your-signing-secret
 
-| Variable | Description |
-|----------|-------------|
-| `SLACK_BOT_TOKEN` | Slack bot token |
-| `SLACK_SIGNING_SECRET` | Slack signing secret |
-| `KNOWLEDGE_BASE_ID` | Bedrock knowledge base ID |
-| `MODEL_ARN` | Bedrock model ARN |
+# AWS Configuration
+AWS_REGION=us-west-2
+AWS_ACCOUNT_ID=your-account-id
 
-### Optional Variables
+# OSCAR Agent Configuration
+OSCAR_BEDROCK_AGENT_ID=your-agent-id
+OSCAR_BEDROCK_AGENT_ALIAS_ID=your-agent-alias-id
+```
 
-| Variable | Description | Default |
-|----------|-------------|---------|
-| `AWS_REGION` | AWS region | us-east-1 |
-| `SESSIONS_TABLE_NAME` | DynamoDB sessions table name | oscar-sessions-v2 |
-| `CONTEXT_TABLE_NAME` | DynamoDB context table name | oscar-context |
-| `DEDUP_TTL` | Deduplication TTL in seconds | 300 (5 minutes) |
-| `SESSION_TTL` | Session TTL in seconds | 3600 (1 hour) |
-| `CONTEXT_TTL` | Context TTL in seconds | 604800 (7 days) |
-| `MAX_CONTEXT_LENGTH` | Maximum context length | 3000 |
-| `CONTEXT_SUMMARY_LENGTH` | Context summary length | 500 |
-| `ENABLE_DM` | Enable direct messages | false |
-| `PROMPT_TEMPLATE` | Custom prompt template | Default template |
-<!-- | `THROTTLE_REQUESTS_PER_MINUTE` | Maximum requests per minute per user | 5 |
-| `THROTTLE_WINDOW_SECONDS` | Throttling window in seconds | 60 | -->
+### 3. Deploy
 
-### Important Notes on Region Configuration
+```bash
+./deploy_oscar_agent.sh
+```
 
-**Region Compatibility**: The AWS region used for the Bedrock knowledge base must match the region specified in your environment variables. If your knowledge base is in `us-west-2`, make sure to set `AWS_REGION=us-west-2` in your `.env` file.
+### 4. Configure Slack App
 
-**Parameter Precedence**:
-1. Command-line arguments (highest priority)
-2. Environment variables from `.env` file
-3. Extracted from MODEL_ARN (if available)
-4. Default values in code (lowest priority)
-
-For example, if you specify `--region us-west-2` in the command line, it will override any region setting in your `.env` file or defaults.
-
-### Important Notes on Region Configuration
-
-- **Region Compatibility**: The AWS region used for the Bedrock knowledge base must match the region specified in `AWS_REGION` and in the `MODEL_ARN`. Using different regions will result in errors when querying the knowledge base.
-
-### Configuration Precedence
-
-When determining configuration values, the following precedence is used (highest to lowest):
-
-1. Command-line arguments (e.g., `--region`, `--enable-dm`)
-2. Environment variables from `.env` file
-3. Values extracted from other settings (e.g., region from `MODEL_ARN`)
-4. Default values in code
+1. Create a Slack app at https://api.slack.com/apps
+2. Set Event Subscriptions URL to your API Gateway endpoint
+3. Subscribe to `app_mention` events
+4. Install the app to your workspace
 
 ## Usage
 
-### Channel Mentions
+### Basic Queries
 
-Mention the bot in any channel:
 ```
-@oscar What's the status of OpenSearch 2.11?
-```
-
-Reply in thread to maintain context:
-```
-@oscar What about security issues?
+@oscar What is OpenSearch?
+@oscar How do I configure OpenSearch security?
+@oscar What are the indexing best practices?
 ```
 
-### Direct Messages (if enabled)
+### Threaded Conversations
 
-Send a direct message to the bot:
+OSCAR maintains context in threads:
+
 ```
-What's new in the latest release?
-```
-
-## Development
-
-For detailed information about the Slack bot implementation, see the [slack-bot README](slack-bot/README.md).
-
-### Running Tests
-
-```bash
-cd slack-bot
-chmod +x tests/run_tests.sh
-./tests/run_tests.sh
+@oscar How do I install OpenSearch?
+  └─ Follow up: What about Docker installation?
+  └─ Follow up: How do I configure it for production?
 ```
 
 ## Project Structure
 
 ```
-├── cdk/                    # CDK infrastructure code
-│   ├── stacks/             # CDK stack definitions
-│   ├── tests/              # CDK unit tests
-│   ├── app.py              # CDK app entry point
-│   └── cdk.json            # CDK configuration
-├── slack-bot/              # Slack bot implementation
-│   ├── tests/              # Unit tests
-│   ├── app.py              # Lambda handler
-│   ├── bedrock.py          # Bedrock integration
-│   ├── config.py           # Configuration management
-│   ├── slack_handler.py    # Slack event handling
-│   └── storage.py          # DynamoDB storage
-├── deploy_cdk.sh           # CDK deployment script
-└── deploy_lambda.sh        # Lambda update script
+OSCAR/
+├── oscar-agent/           # Main agent implementation
+│   ├── app.py            # Lambda handler
+│   ├── oscar_agent.py    # Bedrock agent interface
+│   ├── slack_handler.py  # Slack event processing
+│   ├── storage.py        # DynamoDB storage layer
+│   └── config.py         # Configuration management
+├── cdk/                  # Infrastructure as code
+│   └── stacks/           # CDK stack definitions
+├── .kiro/                # Kiro IDE configuration
+└── deploy_oscar_agent.sh # Deployment script
 ```
+
+## Configuration
+
+### Required Environment Variables
+
+| Variable | Description |
+|----------|-------------|
+| `OSCAR_BEDROCK_AGENT_ID` | Your Bedrock agent ID |
+| `OSCAR_BEDROCK_AGENT_ALIAS_ID` | Your Bedrock agent alias ID |
+| `SLACK_BOT_TOKEN` | Slack bot token (xoxb-...) |
+| `SLACK_SIGNING_SECRET` | Slack app signing secret |
+| `AWS_REGION` | AWS deployment region |
+| `AWS_ACCOUNT_ID` | Your AWS account ID |
+
+### Optional Configuration
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `SESSIONS_TABLE_NAME` | oscar-sessions-v2 | DynamoDB sessions table |
+| `CONTEXT_TABLE_NAME` | oscar-context | DynamoDB context table |
+| `ENABLE_DM` | false | Enable direct message support |
+
+## Monitoring
+
+### CloudWatch Logs
+
+Monitor at: `/aws/lambda/oscar-slack-bot`
+
+### Key Metrics
+
+- Response times and error rates
+- Agent invocation success/failure
+- DynamoDB read/write operations
+- Slack event processing metrics
+
+## Troubleshooting
+
+### Common Issues
+
+| Issue | Solution |
+|-------|----------|
+| Bot not responding | Check CloudWatch logs for errors |
+| Permission denied | Verify Bedrock agent permissions |
+| Slack verification failed | Check signing secret configuration |
+| Agent not found | Verify agent ID and alias are correct |
+
+### Debug Steps
+
+1. Check CloudWatch logs: `/aws/lambda/oscar-slack-bot`
+2. Verify agent status in Bedrock console
+3. Test agent directly in Bedrock console
+4. Validate Slack app configuration
+
+## Development
+
+### Local Testing
+
+The deployment script includes validation and testing:
+
+```bash
+# Test configuration
+python oscar-agent/test_agent.py
+
+# Deploy with validation
+./deploy_oscar_agent.sh
+```
+
+### Code Style
+
+- Python 3.12+ with type hints
+- Comprehensive error handling
+- Structured logging
+- Clean architecture principles
 
 ## License
 
-This project is licensed under the Apache License 2.0.
+Licensed under the Apache 2.0 License. See [LICENSE](LICENSE) for details.
+
+## Support
+
+- Create issues in the GitHub repository
+- Check CloudWatch logs for debugging: `/aws/lambda/oscar-slack-bot`
+- Review the `.kiro/oscar-agent-refactor/` documentation for detailed design information

@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 # Copyright OpenSearch Contributors
 # SPDX-License-Identifier: Apache-2.0
 #
@@ -7,41 +7,56 @@
 # compatible open source license.
 
 """
-Slack event handler module for OSCAR.
+Slack Event Handler for OSCAR Agent.
 
-This module provides the SlackHandler class for handling Slack events.
+This module provides comprehensive Slack event handling with agent integration,
+including message processing, reaction management, and context preservation.
+
+Classes:
+    SlackHandler: Main handler for Slack events with agent integration
 """
 
 import logging
-import time
 import re
-from typing import Dict, Any, Optional, Callable, List, Tuple, Union
+import time
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 from slack_bolt import App
 from slack_sdk.errors import SlackApiError
 
 from config import config
+from oscar_agent import OSCARAgentInterface
 from storage import StorageInterface
-from bedrock import KnowledgeBaseInterface
 
-# Configure logging
 logger = logging.getLogger(__name__)
 
 class SlackHandler:
-    """Handler for Slack events."""
+    """Comprehensive Slack event handler with OSCAR agent integration.
     
-    def __init__(self, app: App, storage: StorageInterface, knowledge_base: KnowledgeBaseInterface) -> None:
-        """
-        Initialize Slack handler with app, storage, and knowledge base.
+    This class manages all Slack interactions including:
+    - Event registration and processing
+    - Message parsing and query extraction
+    - Agent invocation and response handling
+    - Reaction management for user feedback
+    - Context preservation across conversations
+    """
+    
+    def __init__(
+        self, 
+        app: App, 
+        storage: StorageInterface, 
+        oscar_agent: OSCARAgentInterface
+    ) -> None:
+        """Initialize Slack handler with required dependencies.
         
         Args:
             app: Slack Bolt app instance
-            storage: Storage implementation for persisting conversation context
-            knowledge_base: Knowledge base implementation for answering queries
+            storage: Storage implementation for conversation context
+            oscar_agent: OSCAR agent implementation for query processing
         """
         self.app = app
         self.storage = storage
-        self.knowledge_base = knowledge_base
+        self.oscar_agent = oscar_agent
         self.client = app.client
     
     def register_handlers(self) -> App:
@@ -55,11 +70,10 @@ class SlackHandler:
         self.app.event("app_mention")(self.handle_app_mention)
         
         # Register message handler for DMs if enabled
-        from config import config as config_instance
-        if config_instance.enable_dm:
+        if config.enable_dm:
             self.app.message()(self.handle_message)
         
-        logger.info("Registered Slack event handlers")
+        logger.info("Registered Slack event handlers for OSCAR agent")
         return self.app
     
     def handle_app_mention(self, event: Dict[str, Any], say: Callable) -> None:
@@ -107,32 +121,6 @@ class SlackHandler:
         # Process the message
         self._process_message(channel, thread_ts, user_id, text, say, message_ts=event_ts)
     
-    def _is_duplicate_event(self, event: Dict[str, Any]) -> bool:
-        """
-        Check if this is a duplicate event using event timestamp.
-        
-        Args:
-            event: Slack event data
-            
-        Returns:
-            True if the event is a duplicate, False otherwise
-        """
-        # Get primary event identifier
-        event_id = event.get("event_ts") or event.get("ts")
-        if not event_id:
-            logger.warning("Event has no timestamp identifier, cannot deduplicate")
-            return False
-        
-        # Check if we've seen this event before
-        if self.storage.has_seen_event(event_id):
-            logger.info(f"Detected duplicate event: {event_id}")
-            return True
-        
-        # Mark event as seen
-        self.storage.mark_event_seen(event_id)
-        logger.info(f"New event marked as seen: {event_id}")
-        return False
-    
     def _extract_query(self, text: str) -> str:
         """
         Extract the query from the message text by removing mentions.
@@ -155,9 +143,9 @@ class SlackHandler:
         Args:
             thread_key: The unique key for the thread
             query: The user's query
-            response: The bot's response
+            response: The agent's response
             session_id: The current session ID
-            new_session_id: The new session ID from the knowledge base
+            new_session_id: The new session ID from the agent
             
         Returns:
             The updated context
@@ -246,7 +234,7 @@ class SlackHandler:
     def _process_message(self, channel: str, thread_ts: str, user_id: str, 
                         text: str, say: Callable, message_ts: str = None) -> None:
         """
-        Process a message and generate a response.
+        Process a message and generate a response using the OSCAR agent.
         
         Args:
             channel: Slack channel ID
@@ -282,21 +270,21 @@ class SlackHandler:
             context_summary = context.get("summary") if context else None
             session_id = context.get("session_id") if context else None
             
-            # Check if we're approaching timeout before querying knowledge base
+            # Check if we're approaching timeout before querying agent
             current_time = time.time()
             if current_time - start_time > timeout_threshold * 0.3:  # 30% of timeout threshold
                 # Add timer emoji to indicate potential slow response
                 self._manage_reactions(channel, reaction_ts, add_reaction="timer_clock")
             
-            # Query knowledge base
-            kb_start_time = time.time()
-            response, new_session_id = self.knowledge_base.query(
+            # Query OSCAR agent - simplified single call, no routing logic needed
+            agent_start_time = time.time()
+            response, new_session_id = self.oscar_agent.query(
                 query, 
                 session_id=session_id,
                 context_summary=context_summary
             )
-            kb_end_time = time.time()
-            logger.info(f"Knowledge base query completed in {kb_end_time - kb_start_time:.2f} seconds")
+            agent_end_time = time.time()
+            logger.info(f"OSCAR agent query completed in {agent_end_time - agent_start_time:.2f} seconds")
             
             # Update context with new query and response
             self._update_context(thread_key, query, response, session_id, new_session_id)
