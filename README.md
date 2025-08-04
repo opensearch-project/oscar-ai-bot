@@ -1,187 +1,225 @@
 # OSCAR - OpenSearch Conversational Automation for Release
 
-OSCAR is an AI-powered Slack bot that provides intelligent assistance for OpenSearch project management and documentation queries. Built with Amazon Bedrock agents, it delivers accurate, contextual responses from the official OpenSearch knowledge base.
+OSCAR is an AI-powered assistant designed to help with OpenSearch project management, documentation queries, and release coordination through Slack integration.
 
 ## Features
 
-- **Bedrock Agent Integration**: Uses Amazon Bedrock agents for intelligent query processing
-- **Knowledge Base Access**: Provides accurate information from OpenSearch documentation
-- **Slack Integration**: Responds to mentions and maintains conversation context
-- **Serverless Architecture**: Built on AWS Lambda with DynamoDB for scalability
-- **Context Preservation**: Maintains conversation history across threaded discussions
-
-## Architecture
-
-OSCAR uses a modern serverless architecture:
-
-- **AWS Lambda**: Processes Slack events and coordinates agent interactions
-- **Amazon Bedrock Agent**: Handles intelligent query processing with knowledge base integration
-- **DynamoDB**: Stores conversation context and session management
-- **API Gateway**: Manages Slack webhook requests
-- **CloudWatch**: Provides comprehensive logging and monitoring
+- **Slack Integration**: Interact with OSCAR through Slack mentions and direct messages
+- **Knowledge Base**: Access OpenSearch documentation and best practices  
+- **Metrics Analysis**: Get insights on test failures, build performance, and release status
+- **Multi-Agent Architecture**: Specialized agents for different domains with VPC deployment
 
 ## Quick Start
 
-### Prerequisites
+1. **Environment Setup**:
+   ```bash
+   cp .env.example .env
+   # Edit .env with your configuration
+   ```
 
-- AWS Account with Bedrock and Lambda permissions
-- Slack workspace with app creation capabilities
-- Python 3.12+ and AWS CDK v2 installed
-- AWS CLI configured with appropriate credentials
+2. **Complete Deployment**:
+   ```bash
+   ./deploy_oscar_complete.sh
+   ```
 
-### 1. Setup
+3. **Follow Slack Integration Instructions**: The deployment script provides detailed steps
 
-```bash
-git clone <repository-url>
-cd OSCAR
+## Project Structure
+
+```
+oscar-agent/              # Core OSCAR supervisor agent
+├── app.py               # Lambda handler for Slack integration
+├── oscar_agent.py       # Enhanced Bedrock agent interface
+├── slack_handler.py     # Slack event processing
+├── storage.py           # DynamoDB session/context management
+├── config.py            # Configuration management
+└── requirements.txt     # Python dependencies
+
+metrics/                 # VPC-deployed metrics agents
+├── lambda_function.py   # Metrics Lambda handler
+├── opensearch_client.py # OpenSearch VPC connectivity
+├── metrics_service.py   # Metrics data processing
+├── config.py           # Metrics configuration
+└── requirements.txt    # Python dependencies
+
+build_docs/             # Documentation and guides
+├── MANUAL_AGENT_CONFIGURATION.md
+├── METRICS_SYSTEM_OVERVIEW.md
+└── ...
+
+cdk/                    # Infrastructure as Code (optional)
+old_codebase/          # Reference implementation
 ```
 
-### 2. Configure Environment
+## Architecture
 
-Create and configure your `.env` file:
+OSCAR uses an enhanced multi-agent architecture:
+
+### Core Components
+
+- **Supervisor Agent** (`oscar-supervisor-agent`): Main Slack interface with knowledge base integration
+- **VPC Metrics Agents**: Specialized Lambda functions deployed in VPC for OpenSearch access
+  - `oscar-test-metrics-agent`: Test failure analysis
+  - `oscar-build-metrics-agent`: Build performance metrics  
+  - `oscar-release-metrics-agent`: Release status tracking
+  - `oscar-deployment-metrics-agent`: Deployment health monitoring
+
+### Key Features
+
+- **VPC Deployment**: Metrics agents deployed in VPC for secure OpenSearch access
+- **Session Management**: DynamoDB-based conversation context preservation
+- **Mock Mode**: Fallback mode for testing without OpenSearch connectivity
+- **Enhanced Error Handling**: Comprehensive retry logic and user-friendly error messages
+
+## Configuration
+
+Key environment variables in `.env`:
 
 ```bash
 # Slack Configuration
 SLACK_BOT_TOKEN=xoxb-your-bot-token
 SLACK_SIGNING_SECRET=your-signing-secret
 
-# AWS Configuration
-AWS_REGION=us-west-2
-AWS_ACCOUNT_ID=your-account-id
-
-# OSCAR Agent Configuration
+# Bedrock Agent Configuration  
 OSCAR_BEDROCK_AGENT_ID=your-agent-id
-OSCAR_BEDROCK_AGENT_ALIAS_ID=your-agent-alias-id
+OSCAR_BEDROCK_AGENT_ALIAS_ID=your-alias-id
+
+# DynamoDB Tables
+SESSIONS_TABLE_NAME=oscar-sessions
+CONTEXT_TABLE_NAME=oscar-context
+
+# VPC Configuration (for metrics agents)
+VPC_ID=vpc-xxxxxxxxx
+SUBNET_IDS=subnet-xxx,subnet-yyy,subnet-zzz
+SECURITY_GROUP_ID=sg-xxxxxxxxx
+
+# OpenSearch Configuration
+OPENSEARCH_HOST=your-opensearch-endpoint
+OPENSEARCH_VPC_ENDPOINT_ID=vpce-xxxxxxxxx
 ```
 
-### 3. Deploy
+## Deployment
+
+### Prerequisites
+
+- AWS CLI configured with appropriate permissions
+- Python 3.9+
+- Access to AWS Bedrock, Lambda, DynamoDB, VPC services
+
+### Complete Deployment
 
 ```bash
-./deploy_oscar_agent.sh
+# Deploy all components
+./deploy_oscar_complete.sh
 ```
 
-### 4. Configure Slack App
+This script will:
+1. Deploy VPC Lambda functions for metrics
+2. Deploy supervisor agent for Slack integration
+3. Test all deployments
+4. Provide detailed Slack integration instructions
 
-1. Create a Slack app at https://api.slack.com/apps
-2. Set Event Subscriptions URL to your API Gateway endpoint
-3. Subscribe to `app_mention` events
-4. Install the app to your workspace
+### Individual Component Deployment
 
-## Usage
+```bash
+# Deploy only VPC metrics agents
+./deploy_vpc_lambdas.sh
 
-### Basic Queries
-
+# Deploy only supervisor agent
+./deploy_oscar_supervisor.sh
 ```
+
+## Slack Integration Setup
+
+After deployment, complete these manual steps:
+
+### 1. Configure Bedrock Agent
+- Update action group Lambda function to use `oscar-supervisor-agent` ARN
+- Create new agent version and update alias
+
+### 2. Create API Gateway
+- Create REST API for Slack webhook
+- Configure `/slack` POST endpoint
+- Point to `oscar-supervisor-agent` Lambda function
+- Deploy to production stage
+
+### 3. Configure Slack App
+- Set Event Subscriptions URL to API Gateway endpoint
+- Subscribe to `app_mention` and `message.im` events
+- Install app to workspace
+
+### 4. Test Integration
+```bash
+# In Slack channel
 @oscar What is OpenSearch?
-@oscar How do I configure OpenSearch security?
-@oscar What are the indexing best practices?
 ```
 
-### Threaded Conversations
+## Usage Examples
 
-OSCAR maintains context in threads:
+### Knowledge Base Queries
+- `@oscar What is OpenSearch?`
+- `@oscar How do I configure security?`
+- `@oscar Explain OpenSearch architecture`
 
-```
-@oscar How do I install OpenSearch?
-  └─ Follow up: What about Docker installation?
-  └─ Follow up: How do I configure it for production?
-```
+### Metrics Queries  
+- `@oscar Show me current test failures`
+- `@oscar What are the build metrics for last week?`
+- `@oscar Release status for version 2.x`
+- `@oscar Deployment health summary`
 
-## Project Structure
-
-```
-OSCAR/
-├── oscar-agent/           # Main agent implementation
-│   ├── app.py            # Lambda handler
-│   ├── oscar_agent.py    # Bedrock agent interface
-│   ├── slack_handler.py  # Slack event processing
-│   ├── storage.py        # DynamoDB storage layer
-│   └── config.py         # Configuration management
-├── cdk/                  # Infrastructure as code
-│   └── stacks/           # CDK stack definitions
-├── .kiro/                # Kiro IDE configuration
-└── deploy_oscar_agent.sh # Deployment script
-```
-
-## Configuration
-
-### Required Environment Variables
-
-| Variable | Description |
-|----------|-------------|
-| `OSCAR_BEDROCK_AGENT_ID` | Your Bedrock agent ID |
-| `OSCAR_BEDROCK_AGENT_ALIAS_ID` | Your Bedrock agent alias ID |
-| `SLACK_BOT_TOKEN` | Slack bot token (xoxb-...) |
-| `SLACK_SIGNING_SECRET` | Slack app signing secret |
-| `AWS_REGION` | AWS deployment region |
-| `AWS_ACCOUNT_ID` | Your AWS account ID |
-
-### Optional Configuration
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `SESSIONS_TABLE_NAME` | oscar-sessions-v2 | DynamoDB sessions table |
-| `CONTEXT_TABLE_NAME` | oscar-context | DynamoDB context table |
-| `ENABLE_DM` | false | Enable direct message support |
-
-## Monitoring
+## Monitoring and Troubleshooting
 
 ### CloudWatch Logs
+```bash
+# Monitor supervisor agent
+aws logs tail /aws/lambda/oscar-supervisor-agent --follow
 
-Monitor at: `/aws/lambda/oscar-slack-bot`
+# Monitor metrics agents
+aws logs tail /aws/lambda/oscar-test-metrics-agent --follow
+```
 
-### Key Metrics
+### Test Functions
+```bash
+# Test supervisor
+aws lambda invoke --function-name oscar-supervisor-agent \
+  --payload '{"test": "connectivity"}' \
+  --cli-binary-format raw-in-base64-out result.json
 
-- Response times and error rates
-- Agent invocation success/failure
-- DynamoDB read/write operations
-- Slack event processing metrics
-
-## Troubleshooting
+# Test metrics agent
+aws lambda invoke --function-name oscar-test-metrics-agent \
+  --payload '{"test": "connectivity"}' \
+  --cli-binary-format raw-in-base64-out result.json
+```
 
 ### Common Issues
 
-| Issue | Solution |
-|-------|----------|
-| Bot not responding | Check CloudWatch logs for errors |
-| Permission denied | Verify Bedrock agent permissions |
-| Slack verification failed | Check signing secret configuration |
-| Agent not found | Verify agent ID and alias are correct |
-
-### Debug Steps
-
-1. Check CloudWatch logs: `/aws/lambda/oscar-slack-bot`
-2. Verify agent status in Bedrock console
-3. Test agent directly in Bedrock console
-4. Validate Slack app configuration
+1. **Metrics agents timeout**: Functions use mock mode if OpenSearch unreachable
+2. **Slack webhook failures**: Check API Gateway configuration and deployment
+3. **Bedrock agent errors**: Verify agent ID, alias, and Lambda ARN configuration
+4. **VPC connectivity**: Ensure proper security groups and NAT Gateway setup
 
 ## Development
 
 ### Local Testing
-
-The deployment script includes validation and testing:
-
 ```bash
-# Test configuration
-python oscar-agent/test_agent.py
-
-# Deploy with validation
-./deploy_oscar_agent.sh
+cd oscar-agent
+pip install -r requirements.txt
+python -m pytest tests/
 ```
 
-### Code Style
+### Adding New Metrics
+1. Extend `metrics_service.py` with new query methods
+2. Update routing in `lambda_function.py`
+3. Add mock data for testing
+4. Deploy with `./deploy_vpc_lambdas.sh`
 
-- Python 3.12+ with type hints
-- Comprehensive error handling
-- Structured logging
-- Clean architecture principles
+## Contributing
+
+1. Fork the repository
+2. Create a feature branch
+3. Make changes and add tests  
+4. Submit a pull request
 
 ## License
 
-Licensed under the Apache 2.0 License. See [LICENSE](LICENSE) for details.
-
-## Support
-
-- Create issues in the GitHub repository
-- Check CloudWatch logs for debugging: `/aws/lambda/oscar-slack-bot`
-- Review the `.kiro/oscar-agent-refactor/` documentation for detailed design information
+This project is licensed under the Apache 2.0 License - see the LICENSE file for details.

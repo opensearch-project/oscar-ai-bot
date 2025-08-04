@@ -55,7 +55,8 @@ handler.register_handlers()
 
 # Initialize AWS Lambda client for async invocation
 lambda_client = boto3.client('lambda')
-FUNCTION_NAME = os.environ.get('AWS_LAMBDA_FUNCTION_NAME', 'oscar-slack-bot')
+# AWS_LAMBDA_FUNCTION_NAME is automatically set by AWS Lambda runtime
+FUNCTION_NAME = os.environ.get('AWS_LAMBDA_FUNCTION_NAME', 'oscar-supervisor-agent')
 
 def get_event_id(event: Dict[str, Any]) -> str:
     """

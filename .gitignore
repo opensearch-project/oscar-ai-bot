@@ -6,6 +6,7 @@ MIGRATION_GUIDE.md
 PHASE1_COMPLETE.md
 build_docs/
 metrics/docs/
+.kiro/
 
 # Build outputs
 build_docs/

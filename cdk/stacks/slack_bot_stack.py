@@ -11,6 +11,7 @@ Main stack for OSCAR Slack Bot.
 This module defines the main CDK stack that combines all components of the OSCAR Slack Bot.
 """
 
+import os
 from aws_cdk import (
     Stack,
     CfnOutput
@@ -18,6 +19,9 @@ from aws_cdk import (
 from constructs import Construct
 from .storage_stack import OscarStorageStack
 from .lambda_stack import OscarLambdaStack
+from .metrics_lambda_stack import OscarMetricsLambdaStack
+from .multi_agent_stack import OscarMultiAgentStack
+from .vpc_multi_agent_stack import OscarVpcMultiAgentStack
 
 class OscarSlackBotStack(Stack):
     """
@@ -50,6 +54,29 @@ class OscarSlackBotStack(Stack):
             context_table=storage_stack.context_table
         )
         
+        # Create metrics Lambda function (legacy single-agent)
+        metrics_lambda_stack = OscarMetricsLambdaStack(
+            self,
+            "MetricsLambdaStack"
+        )
+        
+        # Create multi-agent infrastructure
+        # Check if VPC deployment is requested
+        use_vpc = os.environ.get("USE_VPC", "false").lower() == "true"
+        vpc_id = os.environ.get("VPC_ID")
+        
+        if use_vpc or vpc_id:
+            multi_agent_stack = OscarVpcMultiAgentStack(
+                self,
+                "VpcMultiAgentStack",
+                vpc_id=vpc_id
+            )
+        else:
+            multi_agent_stack = OscarMultiAgentStack(
+                self,
+                "MultiAgentStack"
+            )
+        
         # Export important outputs
         CfnOutput(
             self, 
@@ -63,4 +90,18 @@ class OscarSlackBotStack(Stack):
             "SlackBotFunctionName",
             value=lambda_stack.lambda_function.function_name,
             description="Name of the Lambda function"
+        )
+        
+        CfnOutput(
+            self, 
+            "MetricsLambdaFunctionName",
+            value=metrics_lambda_stack.lambda_function.function_name,
+            description="Name of the metrics Lambda function (legacy)"
+        )
+        
+        CfnOutput(
+            self, 
+            "AgentRouterFunctionName",
+            value=multi_agent_stack.agent_router_function.function_name,
+            description="Name of the multi-agent router Lambda function"
         )

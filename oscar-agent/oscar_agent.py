@@ -7,15 +7,16 @@
 # compatible open source license.
 
 """
-OSCAR Agent Integration Module.
+Enhanced OSCAR Agent Integration Module.
 
 This module provides the core Bedrock agent interface for OSCAR (OpenSearch 
 Conversational Automation for Release). It handles agent invocation, session 
-management, error handling, and response processing.
+management, error handling, response processing, and coordinates between
+knowledge base queries and metrics analysis.
 
 Classes:
     OSCARAgentInterface: Abstract base class for agent implementations
-    BedrockOSCARAgent: Bedrock agent implementation with retry logic and error handling
+    EnhancedBedrockOSCARAgent: Enhanced Bedrock agent with knowledge base + metrics coordination
 """
 
 import json
@@ -56,10 +57,12 @@ class OSCARAgentInterface(ABC):
             Tuple containing (response_text, session_id)
         """
 
-class BedrockOSCARAgent(OSCARAgentInterface):
-    """Bedrock agent implementation for OSCAR with comprehensive error handling.
+class EnhancedBedrockOSCARAgent(OSCARAgentInterface):
+    """Enhanced Bedrock agent implementation for OSCAR with comprehensive capabilities.
     
     This class provides a robust interface to Amazon Bedrock agents with features:
+    - Knowledge base integration for documentation queries
+    - Metrics coordination through specialized Lambda functions
     - Automatic retry logic with exponential backoff
     - Session management and context preservation
     - Comprehensive error handling and user-friendly messages
@@ -67,20 +70,33 @@ class BedrockOSCARAgent(OSCARAgentInterface):
     """
     
     def __init__(self, region: Optional[str] = None) -> None:
-        """Initialize Bedrock OSCAR agent.
+        """Initialize Enhanced Bedrock OSCAR agent.
         
         Args:
             region: AWS region for Bedrock service, defaults to config value
         """
         self.region = region or config.region
         self.client = boto3.client('bedrock-agent-runtime', region_name=self.region)
+        self.lambda_client = boto3.client('lambda', region_name=self.region)
+        
+        # Primary supervisor agent configuration
         self.agent_id = config.oscar_bedrock_agent_id
         self.agent_alias_id = config.oscar_bedrock_agent_alias_id
+        
+        # Timeout and retry settings
         self.timeout = config.agent_timeout
         self.max_retries = config.agent_max_retries
         
+        # Metrics Lambda function ARNs (from environment or defaults)
+        self.metrics_functions = {
+            'test': 'oscar-test-metrics-agent',
+            'build': 'oscar-build-metrics-agent', 
+            'release': 'oscar-release-metrics-agent',
+            'deployment': 'oscar-deployment-metrics-agent'
+        }
+        
         logger.info(
-            f"Initialized OSCAR agent - ID: {self.agent_id}, "
+            f"Initialized Enhanced OSCAR agent - ID: {self.agent_id}, "
             f"Alias: {self.agent_alias_id}, Region: {self.region}"
         )
     
@@ -103,6 +119,83 @@ class BedrockOSCARAgent(OSCARAgentInterface):
         }
         
         return request
+    
+    def _invoke_metrics_function(self, function_name: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Invoke a metrics Lambda function.
+        
+        Args:
+            function_name: Name of the Lambda function to invoke
+            payload: Payload to send to the function
+            
+        Returns:
+            The response from the Lambda function
+            
+        Raises:
+            Exception: If the function invocation fails
+        """
+        try:
+            logger.info(f"Invoking metrics function: {function_name}")
+            
+            response = self.lambda_client.invoke(
+                FunctionName=function_name,
+                InvocationType='RequestResponse',
+                Payload=json.dumps(payload)
+            )
+            
+            # Parse the response
+            response_payload = json.loads(response['Payload'].read())
+            
+            # Check for function errors
+            if response.get('FunctionError'):
+                logger.error(f"Metrics function error: {response_payload}")
+                raise Exception(f"Metrics function error: {response_payload}")
+            
+            logger.info(f"Successfully invoked metrics function: {function_name}")
+            return response_payload
+            
+        except Exception as e:
+            logger.error(f"Error invoking metrics function {function_name}: {e}")
+            raise
+    
+    def _determine_query_type(self, query: str) -> str:
+        """
+        Determine the type of query to route appropriately.
+        
+        Args:
+            query: The user's query
+            
+        Returns:
+            Query type: 'knowledge', 'metrics', or 'hybrid'
+        """
+        query_lower = query.lower()
+        
+        # Metrics-related keywords
+        metrics_keywords = [
+            'test', 'build', 'release', 'deployment', 'metrics', 'performance',
+            'failure', 'success rate', 'coverage', 'pipeline', 'ci/cd',
+            'current', 'recent', 'last week', 'last month', 'trends'
+        ]
+        
+        # Knowledge-related keywords  
+        knowledge_keywords = [
+            'how to', 'configure', 'setup', 'install', 'documentation',
+            'best practice', 'guide', 'tutorial', 'explain', 'what is',
+            'troubleshoot', 'error', 'issue', 'problem'
+        ]
+        
+        # Count keyword matches
+        metrics_matches = sum(1 for keyword in metrics_keywords if keyword in query_lower)
+        knowledge_matches = sum(1 for keyword in knowledge_keywords if keyword in query_lower)
+        
+        # Determine query type
+        if metrics_matches > knowledge_matches and metrics_matches > 0:
+            return 'metrics'
+        elif knowledge_matches > metrics_matches and knowledge_matches > 0:
+            return 'knowledge'
+        else:
+            # Default to hybrid for complex queries
+            return 'hybrid'
     
     def _invoke_agent(self, query: str, session_id: Optional[str] = None) -> Tuple[str, Optional[str]]:
         """
@@ -213,7 +306,10 @@ class BedrockOSCARAgent(OSCARAgentInterface):
     def query(self, query: str, session_id: Optional[str] = None, 
               context_summary: Optional[str] = None) -> Tuple[str, Optional[str]]:
         """
-        Query the unified OSCAR agent - no client-side routing needed.
+        Query the enhanced OSCAR agent with automatic routing and coordination.
+        
+        This method provides intelligent routing between knowledge base queries
+        and metrics analysis, with the supervisor agent coordinating responses.
         
         Args:
             query: The user's query to the agent
@@ -222,12 +318,12 @@ class BedrockOSCARAgent(OSCARAgentInterface):
             
         Returns:
             A tuple containing (response_text, session_id)
-            
-        Note:
-            This method attempts to query with session ID first, then falls back to 
-            context summary if session is expired, and finally to plain query.
         """
-        logger.info(f"Querying OSCAR agent with: {query[:100]}...")
+        logger.info(f"Querying Enhanced OSCAR agent with: {query[:100]}...")
+        
+        # The supervisor agent handles all routing internally through its
+        # knowledge base integration and collaborator agents, so we just
+        # need to invoke it directly
         
         # First attempt: Try with session_id if available
         if session_id:
@@ -290,12 +386,12 @@ class BedrockOSCARAgent(OSCARAgentInterface):
 
 def get_oscar_agent(region: Optional[str] = None) -> OSCARAgentInterface:
     """
-    Get OSCAR agent implementation.
+    Get Enhanced OSCAR agent implementation.
     
     Args:
         region: AWS region for Bedrock service, defaults to config value if None
         
     Returns:
-        An implementation of OSCARAgentInterface
+        An implementation of OSCARAgentInterface with enhanced capabilities
     """
-    return BedrockOSCARAgent(region)
+    return EnhancedBedrockOSCARAgent(region)
