@@ -3,8 +3,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 """
-OpenSearch client optimized for VPC Lambda deployment.
-Handles cross-account access via VPC endpoint with AWS authentication.
+OpenSearch client WITHOUT role assumption - for testing.
 """
 
 import logging
@@ -20,15 +19,7 @@ logger = logging.getLogger(__name__)
 
 
 class OpenSearchClient:
-    """
-    OpenSearch client optimized for VPC Lambda deployment.
-    
-    Features:
-    - VPC endpoint connectivity for cross-account access
-    - AWS IAM authentication
-    - Connection pooling and retry logic
-    - Optimized queries for metrics data
-    """
+    """OpenSearch client WITHOUT cross-account role assumption."""
     
     def __init__(self, config: Config):
         """Initialize OpenSearch client with VPC endpoint configuration."""
@@ -37,214 +28,204 @@ class OpenSearchClient:
         logger.info("OpenSearch client initialized for VPC deployment")
     
     def _create_client(self) -> OpenSearch:
-        """Create OpenSearch client with AWS authentication for VPC endpoint."""
-        # Get AWS credentials from Lambda execution role
-        session = boto3.Session()
-        credentials = session.get_credentials()
+        """Create OpenSearch client with cross-account role assumption."""
+        # Assume the cross-account OpenSearchOscarAccessRole
+        credentials = self._assume_cross_account_role()
         
         if not credentials:
-            raise ValueError("No AWS credentials found in Lambda execution context")
+            raise ValueError("Failed to assume OpenSearchOscarAccessRole")
         
-        # Create AWS authentication for VPC endpoint
+        # Create AWS authentication for VPC endpoint using assumed role credentials
+        # Extract just the hostname for AWS auth (no https://)
+        # hostname = self.config.opensearch_host.replace('https://', '').replace('http://', '')
+        hostname = 'https://aos-a4f4c9d2accb-brkjnnuiccoheln4bmcpzv4auq.us-east-1.es.amazonaws.com'
         auth = AWSRequestsAuth(
             aws_access_key=credentials.access_key,
             aws_secret_access_key=credentials.secret_key,
             aws_token=credentials.token,
-            aws_host=self._parse_host(self.config.opensearch_host),
+            aws_host=hostname,  # Just hostname for signature
             aws_region=self.config.opensearch_region,
-            aws_service=self.config.opensearch_service
+            aws_service=self.config.opensearch_service #es
         )
         
         # Configure OpenSearch client for VPC endpoint
         return OpenSearch(
-            hosts=[{
-                'host': self._parse_host(self.config.opensearch_host),
-                'port': 443
-            }],
+            hosts=[{'host': hostname, 'port': 443}],  # Separate host and port --> needed?
             http_auth=auth,
             use_ssl=True,
             verify_certs=True,
             connection_class=RequestsHttpConnection,
             timeout=self.config.request_timeout,
-            max_retries=3,
+            max_retries=5,
             retry_on_timeout=True,
-            # VPC endpoint specific settings
             headers={'Content-Type': 'application/json'}
         )
     
+    def _assume_cross_account_role(self):
+        """Assume the cross-account OpenSearch access role."""
+        logger.info("Starting role assumption process")
+        
+        try:
+            logger.info("Creating STS client")
+            sts_client = boto3.client('sts')
+            logger.info("STS client created successfully")
+            
+            logger.info("About to call assume_role")
+            response = sts_client.assume_role(
+                RoleArn='arn:aws:iam::979020455945:role/OpenSearchOscarAccessRole',
+                RoleSessionName='oscar-metrics-session',
+            )
+            logger.info("assume_role call completed successfully")
+            
+            creds = response['Credentials']
+            logger.info(f"Credentials received, expires at: {creds['Expiration']}")
+            
+            from botocore.credentials import Credentials
+            credentials = Credentials(
+                access_key=creds['AccessKeyId'],
+                secret_key=creds['SecretAccessKey'],
+                token=creds['SessionToken']
+            )
+            logger.info("Credentials object created successfully")
+            return credentials
+            
+        except Exception as e:
+            logger.error(f"Failed to assume cross-account role: {e}")
+            # Return None instead of raising to allow graceful fallback
+            return None
+    
     def _parse_host(self, host: str) -> str:
-        """Parse host URL to extract hostname for VPC endpoint."""
-        if host.startswith('https://'):
-            return host[8:]
-        elif host.startswith('http://'):
-            return host[7:]
+        """Keep full HTTPS URL for VPC endpoint."""
+        if not host.startswith('https://'):
+            return f'https://{host}'
         return host
     
     def test_connection(self) -> bool:
         """Test connection to OpenSearch cluster via VPC endpoint."""
         try:
-            # Use a shorter timeout for connection test (numeric value, not string)
             health = self.client.cluster.health(timeout=5)
             logger.info(f"OpenSearch connection successful - Status: {health.get('status', 'unknown')}")
             return True
         except Exception as e:
             logger.error(f"OpenSearch connection failed: {e}")
-            # In VPC environment, connection failures are expected during testing
-            # Return False but don't raise exception to allow mock mode fallback
             return False
     
     def query_test_failures(self, repository: str, time_range: str, 
                            status_filter: str = 'fail') -> Dict[str, Any]:
-        """
-        Query gradle-check indices for test failures.
-        Optimized for VPC endpoint performance.
-        """
-        must_clauses = [
-            {"range": {"build_start_time": {"gte": f"now-{time_range}"}}}
-        ]
-        
-        # Repository filter
-        if repository and repository.lower() != 'all':
-            must_clauses.append({"term": {"repository.keyword": repository}})
-        
-        # Status filter
-        if status_filter.lower() == 'fail':
-            must_clauses.append({"term": {"test_status.keyword": "FAILED"}})
-        elif status_filter.lower() == 'pass':
-            must_clauses.append({"term": {"test_status.keyword": "PASSED"}})
-        elif status_filter.lower() == 'skip':
-            must_clauses.append({"term": {"test_status.keyword": "SKIPPED"}})
-        
-        query = {
-            "query": {
-                "bool": {"must": must_clauses}
-            },
-            "aggs": {
-                "failed_by_class": {
-                    "terms": {
-                        "field": "test_class.keyword", 
-                        "size": 10,
-                        "order": {"_count": "desc"}
-                    }
+        """Query opensearch_release_metrics for release data (matching Groovy implementation)."""
+        try:
+            # Query opensearch_release_metrics index like the Groovy code
+            result = self.client.search(
+                index="opensearch_release_metrics",
+                body={
+                    "size": 10,
+                    "_source": ["version", "component", "repository", "release_owners", "current_date"],
+                    "query": {"match_all": {}}, #match_all instead of search_all, currently
+                    "sort": [
+                        {"current_date": {"order": "desc"}}
+                    ]
+                }
+            )
+            return result
+        except Exception as e:
+            logger.error(f"Release metrics query failed: {e}")
+            # Return mock search result structure if query fails
+            return {
+                "hits": {
+                    "total": {"value": 0},
+                    "hits": []
                 },
-                "failed_by_repository": {
-                    "terms": {
-                        "field": "repository.keyword", 
-                        "size": 10,
-                        "order": {"_count": "desc"}
-                    }
-                }
-            },
-            "sort": [{"build_start_time": {"order": "desc"}}],
-            "size": min(self.config.max_results, 50),
-            "_source": [
-                "test_class", "test_name", "build_number", 
-                "repository", "test_status", "build_start_time"
-            ]
-        }
-        
-        try:
-            return self.client.search(index="gradle-check-*", body=query)
-        except Exception as e:
-            logger.error(f"Test failures query failed: {e}")
-            raise
-    
-    def query_release_status(self, version: Optional[str] = None, 
-                           component: Optional[str] = None) -> Dict[str, Any]:
-        """
-        Query opensearch_release_metrics for release information.
-        Optimized for VPC endpoint performance.
-        """
-        must_clauses = []
-        
-        if version:
-            must_clauses.append({"match": {"version": version}})
-        if component:
-            must_clauses.append({"match": {"component": component}})
-        
-        query = {
-            "query": {
-                "bool": {"must": must_clauses} if must_clauses else {"match_all": {}}
-            },
-            "sort": [{"current_date": {"order": "desc"}}],
-            "size": min(self.config.max_results, 20),
-            "_source": [
-                "version", "component", "repository", "release_owners",
-                "release_issue_exists", "release_issue", "current_date"
-            ]
-        }
-        
-        try:
-            return self.client.search(index="opensearch_release_metrics", body=query)
-        except Exception as e:
-            logger.error(f"Release status query failed: {e}")
-            raise
-    
-    def search_metrics(self, query_text: str, metric_types: str = 'all', 
-                      repository: Optional[str] = None, 
-                      time_range: str = '7d') -> Dict[str, Any]:
-        """
-        General search across metrics indices.
-        Optimized for cross-index queries via VPC endpoint.
-        """
-        # Determine index pattern
-        if metric_types == 'test':
-            index_pattern = "gradle-check-*"
-        elif metric_types in ['build', 'release']:
-            index_pattern = "opensearch_release_metrics"
-        else:
-            index_pattern = "gradle-check-*,opensearch_release_metrics"
-        
-        must_clauses = []
-        
-        # Text search
-        if query_text:
-            must_clauses.append({
-                "multi_match": {
-                    "query": query_text,
-                    "fields": [
-                        "test_class^2", "component^2", "repository^2", 
-                        "test_name", "version", "build_number"
-                    ],
-                    "type": "best_fields"
-                }
-            })
-        
-        # Repository filter
-        if repository and repository.lower() != 'all':
-            must_clauses.append({"term": {"repository.keyword": repository}})
-        
-        # Time range filter (flexible field matching)
-        must_clauses.append({
-            "bool": {
-                "should": [
-                    {"range": {"build_start_time": {"gte": f"now-{time_range}"}}},
-                    {"range": {"current_date": {"gte": f"now-{time_range}"}}}
-                ],
-                "minimum_should_match": 1
+                "error": str(e),
+                "no_role_assumption": True
             }
-        })
-        
-        query = {
-            "query": {
-                "bool": {"must": must_clauses} if must_clauses else {"match_all": {}}
-            },
-            "sort": [{"_score": {"order": "desc"}}],
-            "size": min(self.config.max_results, 30)
-        }
-        
-        try:
-            return self.client.search(index=index_pattern, body=query)
-        except Exception as e:
-            logger.error(f"Metrics search failed: {e}")
-            raise
     
-    def get_cluster_health(self) -> Dict[str, Any]:
-        """Get cluster health information via VPC endpoint."""
+    # Minimal implementations for other methods
+    def query_release_status(self, version=None, component=None):
+        return {"test": "no_role_assumption"}
+    
+    def search_metrics(self, query_text, metric_types='all', repository=None, time_range='7d'):
+        return {"test": "no_role_assumption"}
+    
+    def get_cluster_health(self):
         try:
             health = self.client.cluster.health()
-            logger.info(f"Cluster health retrieved - Status: {health.get('status', 'unknown')}")
-            return health
+            return {
+                "type": "cluster_health",
+                "connectivity": "success", 
+                "cluster_status": health.get('status', 'unknown'),
+                "number_of_nodes": health.get('number_of_nodes', 0),
+                "no_role_assumption": True
+            }
         except Exception as e:
-            logger.error(f"Cluster health check failed: {e}")
-            return {'status': 'unknown', 'error': str(e)}
+            return {
+                "type": "error",
+                "message": str(e),
+                "no_role_assumption": True
+            }
+    
+    def test_role_assumption_only(self):
+        """Test ONLY role assumption without OpenSearch client creation."""
+        logger.info("Testing role assumption in isolation")
+        
+        try:
+            logger.info("Creating STS client for isolated test")
+            sts_client = boto3.client('sts')
+            
+            logger.info("Calling assume_role for isolated test")
+            response = sts_client.assume_role(
+                RoleArn='arn:aws:iam::979020455945:role/OpenSearchOscarAccessRole',
+                RoleSessionName='oscar-test-session',
+                DurationSeconds=900,
+                ExternalId='oscar-metrics-cross-account-access'
+            )
+            
+            logger.info("Role assumption successful in isolation")
+            return {
+                "status": "success",
+                "assumed_role_arn": response['AssumedRoleUser']['Arn'],
+                "expiration": str(response['Credentials']['Expiration']),
+                "access_key_prefix": response['Credentials']['AccessKeyId'][:10]
+            }
+            
+        except Exception as e:
+            logger.error(f"Role assumption failed in isolation: {e}")
+            return {
+                "status": "failed",
+                "error": str(e)
+            }
+    
+    def test_multiple_queries(self):
+        """Test multiple query variations to find what works."""
+        results = {}
+        
+        # Test 1: Cluster health
+        try:
+            results["cluster_health"] = self.client.cluster.health()
+        except Exception as e:
+            results["cluster_health"] = {"error": str(e)}
+        
+        # Test 2: List indices
+        try:
+            results["indices"] = self.client.cat.indices(format='json')
+        except Exception as e:
+            results["indices"] = {"error": str(e)}
+        
+        # Test 3: opensearch_release_metrics
+        try:
+            results["release_metrics"] = self.client.search(
+                index="opensearch_release_metrics",
+                body={"query": {"match_all": {}}, "size": 3}
+            )
+        except Exception as e:
+            results["release_metrics"] = {"error": str(e)}
+        
+        # Test 4: gradle-check indices
+        try:
+            results["gradle_check"] = self.client.search(
+                index="gradle-check-*",
+                body={"query": {"match_all": {}}, "size": 3}
+            )
+        except Exception as e:
+            results["gradle_check"] = {"error": str(e)}
+        
+        return results

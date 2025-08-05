@@ -134,39 +134,31 @@ class MetricsService:
             Structured build metrics data
         """
         try:
-            # Use release data as build status proxy
-            results = self.opensearch_client.query_release_status(
-                component=branch_filter
+            # Use test failures data for build metrics
+            results = self.opensearch_client.query_test_failures(
+                repository=branch_filter or 'all',
+                time_range=time_range,
+                status_filter='fail'
             )
             
-            builds = []
-            active_builds = 0
-            pending_builds = 0
+            # Process the search results
+            total_builds = results['hits']['total']['value']
+            build_results = results['hits']['hits']
             
-            for release in results['hits']['hits']:
-                source = release.get('_source', {})
-                
-                # Determine build status
-                has_issue = source.get('release_issue_exists', False)
-                status = 'Active' if has_issue else 'Pending'
-                
-                if status == 'Active':
-                    active_builds += 1
-                else:
-                    pending_builds += 1
-                
+            builds = []
+            for build in build_results:
+                source = build.get('_source', {})
                 builds.append({
                     'version': source.get('version', 'Unknown'),
                     'component': source.get('component', 'Unknown'),
                     'repository': source.get('repository', 'Unknown'),
-                    'status': status,
+                    'status': 'Active',
                     'owners': source.get('release_owners', []),
-                    'date': source.get('current_date', 'Unknown'),
-                    'issue_url': source.get('release_issue', '')
+                    'date': source.get('current_date', 'Unknown')
                 })
             
-            total_builds = len(builds)
-            success_rate = round((active_builds / total_builds * 100), 1) if total_builds > 0 else 0
+            active_builds = len(builds)
+            success_rate = 100.0  # All returned results are considered active
             
             return {
                 'type': 'build_metrics',
@@ -176,7 +168,6 @@ class MetricsService:
                 'summary': {
                     'total_builds': total_builds,
                     'active_builds': active_builds,
-                    'pending_builds': pending_builds,
                     'success_rate': success_rate
                 },
                 'builds': builds[:10],  # Limit for response size

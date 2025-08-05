@@ -30,16 +30,19 @@ def initialize():
     global config, opensearch_client, metrics_service
     
     if config is None:
+        logger.info("Creating config instance")
         config = Config()
         logger.info(f"Initialized config for agent type: {config.agent_type}")
         
     if opensearch_client is None:
+        logger.info("Creating OpenSearch client - potential timeout point")
         opensearch_client = OpenSearchClient(config)
-        logger.info("Initialized OpenSearch client")
+        logger.info("OpenSearch client created successfully")
         
     if metrics_service is None:
+        logger.info("Creating metrics service")
         metrics_service = MetricsService(opensearch_client)
-        logger.info("Initialized metrics service")
+        logger.info("Metrics service created successfully")
 
 
 def lambda_handler(event: Dict[str, Any], context) -> Dict[str, Any]:
@@ -56,8 +59,10 @@ def lambda_handler(event: Dict[str, Any], context) -> Dict[str, Any]:
     }
     """
     try:
+        logger.info("Lambda handler started")
         # Initialize components
         initialize()
+        logger.info("Initialization completed")
         
         logger.info(f"Processing request for agent type: {config.agent_type}")
         logger.debug(f"Event: {json.dumps(event, default=str)}")
@@ -139,6 +144,10 @@ def handle_build_metrics(function_name: str, params: Dict[str, Any]) -> Dict[str
             time_range=params.get('time_range', '7d'),
             branch_filter=params.get('branch_filter')
         )
+    elif function_name == 'test_multiple_queries':
+        return opensearch_client.test_multiple_queries()
+    elif function_name == 'test_role_only':
+        return opensearch_client.test_role_assumption_only()
     else:
         return {'error': f'Unknown build metrics function: {function_name}', 'type': 'function_error'}
 

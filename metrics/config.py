@@ -30,6 +30,9 @@ class Config:
     subnet_ids: List[str]
     security_group_id: str
     
+    # Role assumption configuration
+    metrics_role_arn: str
+    
     # Application settings
     log_level: str
     request_timeout: int
@@ -51,6 +54,9 @@ class Config:
         self.subnet_ids = [s.strip() for s in subnet_ids_str.split(',') if s.strip()]
         self.security_group_id = os.getenv('SECURITY_GROUP_ID', '')
         
+        # Role assumption configuration  
+        self.metrics_role_arn = os.getenv('METRICS_ROLE_ARN', 'arn:aws:iam::979020455945:role/OpenSearchOscarAccessRole')
+        
         # Application settings
         self.log_level = os.getenv('LOG_LEVEL', 'INFO')
         self.request_timeout = int(os.getenv('REQUEST_TIMEOUT', '30'))
@@ -70,6 +76,7 @@ class Config:
         logger.info(f"  OpenSearch Region: {self.opensearch_region}")
         logger.info(f"  VPC ID: {self.vpc_id}")
         logger.info(f"  Subnets: {len(self.subnet_ids)} configured")
+        logger.info(f"  Metrics Role ARN: {self.metrics_role_arn}")
         logger.info(f"  Mock Mode: {self.mock_mode}")
         
         # Validate configuration

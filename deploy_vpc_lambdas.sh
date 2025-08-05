@@ -195,7 +195,7 @@ EOF
         --policy-arn "arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole" \
         --region "$AWS_REGION"
     
-    # Create custom policy for OpenSearch access
+    # Create custom policy for OpenSearch access and role assumption
     cat > opensearch-policy.json << EOF
 {
     "Version": "2012-10-17",
@@ -212,6 +212,15 @@ EOF
             "Resource": [
                 "$OPENSEARCH_DOMAIN_ARN",
                 "$OPENSEARCH_DOMAIN_ARN/*"
+            ]
+        },
+        {
+            "Effect": "Allow",
+            "Action": [
+                "sts:AssumeRole"
+            ],
+            "Resource": [
+                "arn:aws:iam::979020455945:role/OpenSearchOscarAccessRole"
             ]
         }
     ]
@@ -253,7 +262,8 @@ create_config_files() {
         "REQUEST_TIMEOUT": "$REQUEST_TIMEOUT",
         "MAX_RESULTS": "$MAX_RESULTS",
         "MOCK_MODE": "$MOCK_MODE",
-        "AGENT_TYPE": "$agent_type"
+        "AGENT_TYPE": "$agent_type",
+        "METRICS_ROLE_ARN": "${METRICS_ROLE_ARN:-arn:aws:iam::979020455945:role/OpenSearchOscarAccessRole}"
     }
 }
 EOF
