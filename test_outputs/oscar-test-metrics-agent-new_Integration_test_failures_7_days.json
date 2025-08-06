@@ -1,0 +1,1 @@
+{"statusCode": 200, "body": {"type": "test_metrics", "metric_type": "failures", "time_range": "7d", "summary": {"total_results": 0, "results_returned": 0}, "recent_data": []}, "headers": {"Content-Type": "application/json"}}

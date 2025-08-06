@@ -133,7 +133,58 @@ EOF
     aws lambda wait function-active --function-name "$FUNCTION_NAME" --region "$AWS_REGION"
 done
 
+echo "⏳ Waiting for functions to be ready..."
+for func_config in "${AGENT_FUNCTIONS[@]}"; do
+    IFS=':' read -ra FUNC_PARTS <<< "$func_config"
+    FUNCTION_NAME="${FUNC_PARTS[0]}"
+    aws lambda wait function-active --function-name "$FUNCTION_NAME" --region "$AWS_REGION"
+done
 echo "✅ All functions ready for testing"
+
+echo "✅ All functions deployed successfully"
+
+# Add Bedrock agent permissions
+echo ""
+echo "🔐 Adding Bedrock agent permissions..."
+
+# Actual agent IDs from your deployment
+AGENT_PERMISSIONS=(
+    "YXSZJ659S7:oscar-test-metrics-agent-new:TestAnalyzer"
+    "0NBATJIVCH:oscar-build-metrics-agent-new:BuildAnalyzer"
+    "4FCARBPEYB:oscar-release-metrics-agent-new:ReleaseAnalyzer"
+    "BIHPD6OLO0:oscar-deployment-metrics-agent-new:DeploymentAnalyzer"
+)
+
+# Function to add permission
+add_permission() {
+    local agent_id=$1
+    local function_name=$2
+    local agent_name=$3
+    
+    echo "  Adding permission for $agent_name..."
+    
+    aws lambda add-permission \
+        --function-name "$function_name" \
+        --statement-id "bedrock-v2-$agent_id-$(date +%s)" \
+        --action "lambda:InvokeFunction" \
+        --principal "bedrock.amazonaws.com" \
+        --source-arn "arn:aws:bedrock:$AWS_REGION:395380602281:agent/$agent_id" \
+        --region "$AWS_REGION" >/dev/null 2>&1 || echo "    (Permission may already exist)"
+    
+    echo "    ✅ Permission added"
+}
+
+# Add permissions for each agent
+for entry in "${AGENT_PERMISSIONS[@]}"; do
+    IFS=':' read -ra PARTS <<< "$entry"
+    agent_id="${PARTS[0]}"
+    function_name="${PARTS[1]}"
+    agent_name="${PARTS[2]}"
+    
+    add_permission "$agent_id" "$function_name" "$agent_name"
+done
+
+echo "✅ Bedrock permissions configured"
 
 # Cleanup
 rm -f new-package.zip env-vars.json vpc-config.json

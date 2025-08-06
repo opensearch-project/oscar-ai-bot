@@ -98,11 +98,11 @@ def lambda_handler(event, context):
         else:
             result = {'error': f'Unknown function: {function_name}'}
         
-        return create_response(result)
+        return create_response(event, result)
         
     except Exception as e:
         logger.error(f"Lambda handler error: {e}", exc_info=True)
-        return create_response({'error': str(e), 'type': 'lambda_error'})
+        return create_response(event, {'error': str(e), 'type': 'lambda_error'})
 
 def handle_metrics_query(agent_type, function_name, params):
     """Handle metrics queries using boto3 HTTP requests."""
@@ -421,15 +421,24 @@ def explore_opensearch_indices():
             'error_type': type(e).__name__
         }
 
-def create_response(result):
-    """Create response in appropriate format based on invocation context."""
-    # Check if this is a Bedrock agent invocation by looking for specific event structure
-    # For now, return clean JSON for easier consumption
+def create_response(event, result):
+    """Create a response in the format expected by the Bedrock agent."""
+    action_group = event['actionGroup']
+    function = event['function']
+    response_body_string = json.dumps(result, default=str)
+
     return {
-        'statusCode': 200,
-        'body': result,
-        'headers': {
-            'Content-Type': 'application/json'
+        "messageVersion": "1.0",
+        "response": {
+            "actionGroup": action_group,
+            "function": function,
+            "functionResponse": {
+                "responseBody": {
+                    "TEXT": {
+                        "body": response_body_string
+                    }
+                }
+            }
         }
     }
 

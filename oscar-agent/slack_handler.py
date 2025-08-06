@@ -27,10 +27,11 @@ from slack_sdk.errors import SlackApiError
 from config import config
 from oscar_agent import OSCARAgentInterface
 from storage import StorageInterface
-import sys
-import os
-sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
-from communication_orchestrator.orchestrator import CommunicationOrchestrator, parse_communication_command
+# Communication orchestrator temporarily disabled
+# import sys
+# import os
+# sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
+# from communication_orchestrator.orchestrator import CommunicationOrchestrator, parse_communication_command
 
 logger = logging.getLogger(__name__)
 
@@ -63,11 +64,12 @@ class SlackHandler:
         self.oscar_agent = oscar_agent
         self.client = app.client
         
-        # Initialize communication orchestrator
-        self.communication_orchestrator = CommunicationOrchestrator(
-            slack_client=app.client,
-            region=config.region
-        )
+        # Communication orchestrator temporarily disabled
+        # self.communication_orchestrator = CommunicationOrchestrator(
+        #     slack_client=app.client,
+        #     region=config.region
+        # )
+        self.communication_orchestrator = None
     
     def register_handlers(self) -> App:
         """
@@ -275,12 +277,12 @@ class SlackHandler:
             query = self._extract_query(text)
             logger.info(f"Extracted query: {query}")
             
-            # Check if this is a communication orchestrator command
-            comm_command = parse_communication_command(text)
-            if comm_command:
-                logger.info(f"Processing communication command: {comm_command[0]}")
-                self._handle_communication_command(comm_command, channel, thread_ts, say, reaction_ts)
-                return
+            # Communication orchestrator temporarily disabled
+            # comm_command = parse_communication_command(text)
+            # if comm_command:
+            #     logger.info(f"Processing communication command: {comm_command[0]}")
+            #     self._handle_communication_command(comm_command, channel, thread_ts, say, reaction_ts)
+            #     return
             
             # Get context from storage
             context = self.storage.get_context(thread_key)
