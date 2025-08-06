@@ -151,12 +151,10 @@ setup_iam_role() {
     
     echo -e "${YELLOW}🔑 Setting up IAM role...${NC}"
     
-    # Check if role exists
-    if aws iam get-role --role-name "$role_name" --region "$AWS_REGION" >/dev/null 2>&1; then
-        ROLE_ARN=$(aws iam get-role --role-name "$role_name" --query 'Role.Arn' --output text --region "$AWS_REGION")
-        echo "   Using existing IAM role: $ROLE_ARN"
-        return
-    fi
+    # Use the correct VPC role ARN from .env or fallback
+    ROLE_ARN="${LAMBDA_EXECUTION_ROLE_ARN:-arn:aws:iam::395380602281:role/oscar-metrics-lambda-vpc-role}"
+    echo "   Using IAM role: $ROLE_ARN"
+    return
     
     echo "   Creating new IAM role: $role_name"
     
@@ -333,7 +331,7 @@ deploy_lambda_function() {
         
         aws lambda create-function \
             --function-name "$function_name" \
-            --runtime python3.9 \
+            --runtime python3.12 \
             --role "$ROLE_ARN" \
             --handler lambda_function.lambda_handler \
             --zip-file fileb://lambda-package.zip \

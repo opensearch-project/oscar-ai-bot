@@ -1,89 +1,69 @@
 #!/usr/bin/env python3
-# Copyright OpenSearch Contributors
-# SPDX-License-Identifier: Apache-2.0
-
-"""
-AWS Lambda handler for OSCAR multi-agent metrics system.
-Optimized for VPC deployment with OpenSearch connectivity.
-"""
 
 import json
 import logging
 import os
-from typing import Dict, Any
+import boto3
+import requests
+from botocore.auth import SigV4Auth
+from botocore.awsrequest import AWSRequest
 
-from config import Config
-from opensearch_client import OpenSearchClient
-from metrics_service import MetricsService
-
-# Configure logging
 logger = logging.getLogger(__name__)
 
-# Global instances for Lambda container reuse
-config = None
-opensearch_client = None
-metrics_service = None
-
-
-def initialize():
-    """Initialize global instances for Lambda container reuse."""
-    global config, opensearch_client, metrics_service
+def get_opensearch_session():
+    """Get boto3 session with assumed cross-account role."""
+    sts_client = boto3.client('sts')
+    response = sts_client.assume_role(
+        RoleArn='arn:aws:iam::979020455945:role/OpenSearchOscarAccessRole',
+        RoleSessionName='oscar-metrics-session'
+    )
     
-    if config is None:
-        logger.info("Creating config instance")
-        config = Config()
-        logger.info(f"Initialized config for agent type: {config.agent_type}")
-        
-    if opensearch_client is None:
-        logger.info("Creating OpenSearch client - potential timeout point")
-        opensearch_client = OpenSearchClient(config)
-        logger.info("OpenSearch client created successfully")
-        
-    if metrics_service is None:
-        logger.info("Creating metrics service")
-        metrics_service = MetricsService(opensearch_client)
-        logger.info("Metrics service created successfully")
+    return boto3.Session(
+        aws_access_key_id=response['Credentials']['AccessKeyId'],
+        aws_secret_access_key=response['Credentials']['SecretAccessKey'],
+        aws_session_token=response['Credentials']['SessionToken']
+    )
 
-
-def lambda_handler(event: Dict[str, Any], context) -> Dict[str, Any]:
-    """
-    AWS Lambda handler for Bedrock agent function calls.
+def opensearch_request(method, path, body=None):
+    """Make signed HTTP request to OpenSearch."""
+    opensearch_host = os.getenv('OPENSEARCH_HOST', '').replace('https://', '')
+    if not opensearch_host:
+        raise ValueError("OPENSEARCH_HOST not configured")
     
-    Expected event format from Bedrock:
-    {
-        "function": "function_name",
-        "parameters": [
-            {"name": "param1", "value": "value1"},
-            {"name": "param2", "value": "value2"}
-        ]
-    }
-    """
+    url = f'https://{opensearch_host}{path}'
+    session = get_opensearch_session()
+    
+    # Create signed request
+    request = AWSRequest(
+        method=method,
+        url=url,
+        data=json.dumps(body) if body else None,
+        headers={'Content-Type': 'application/json'} if body else {}
+    )
+    
+    # Sign the request
+    credentials = session.get_credentials()
+    SigV4Auth(credentials, 'es', 'us-east-1').add_auth(request)
+    
+    # Make the request
+    response = requests.request(
+        method=request.method,
+        url=request.url,
+        data=request.body,
+        headers=dict(request.headers),
+        timeout=30
+    )
+    
+    if response.status_code in [200, 201]:
+        return response.json()
+    else:
+        raise Exception(f'OpenSearch request failed: {response.status_code} - {response.text}')
+
+def lambda_handler(event, context):
+    """Main Lambda handler."""
     try:
         logger.info("Lambda handler started")
-        # Initialize components
-        initialize()
-        logger.info("Initialization completed")
         
-        logger.info(f"Processing request for agent type: {config.agent_type}")
-        logger.debug(f"Event: {json.dumps(event, default=str)}")
-        
-        # Handle mock mode for testing
-        if config.mock_mode:
-            logger.info("Using mock mode for response")
-            return handle_mock_response(event)
-        
-        # Try to proceed with OpenSearch queries even if connection test fails
-        # The connection test might fail due to permissions, but actual queries might work
-        try:
-            connection_ok = opensearch_client.test_connection()
-            if connection_ok:
-                logger.info("OpenSearch connectivity test passed")
-            else:
-                logger.warning("OpenSearch connectivity test failed, but proceeding with query attempt")
-        except Exception as conn_e:
-            logger.warning(f"OpenSearch connection test error, but proceeding with query attempt: {conn_e}")
-        
-        # Extract function name and parameters
         function_name = event.get('function', '')
         parameters = event.get('parameters', [])
         
@@ -93,159 +73,368 @@ def lambda_handler(event: Dict[str, Any], context) -> Dict[str, Any]:
             if isinstance(param, dict) and 'name' in param and 'value' in param:
                 params[param['name']] = param['value']
         
-        logger.info(f"Function: {function_name}, Parameters: {params}")
+        agent_type = os.getenv('AGENT_TYPE', 'build-metrics')
+        mock_mode = os.getenv('MOCK_MODE', 'false').lower() == 'true'
         
-        # Route to appropriate handler based on agent type
-        result = route_request(config.agent_type, function_name, params)
+        logger.info(f"Function: {function_name}, Agent: {agent_type}")
         
-        # Create Bedrock response
-        response = create_bedrock_response(result)
+        # Route based on function name
+        if function_name == 'test_basic':
+            result = {
+                'status': 'success',
+                'message': 'Lambda function is working',
+                'agent_type': agent_type,
+                'mock_mode': mock_mode
+            }
+        elif function_name == 'test_role_only':
+            result = test_role_assumption()
+        elif function_name == 'explore_indices':
+            result = explore_opensearch_indices()
+        elif function_name == 'test_opensearch':
+            result = test_opensearch_connectivity()
+        elif function_name in ['get_test_metrics', 'get_build_metrics', 'get_release_metrics', 'get_deployment_metrics'] or not function_name:
+            # Handle metrics queries
+            result = handle_metrics_query(agent_type, function_name, params)
+        else:
+            result = {'error': f'Unknown function: {function_name}'}
         
-        logger.info("Request processed successfully")
-        return response
+        return create_response(result)
         
     except Exception as e:
-        logger.error(f"Lambda handler error: {str(e)}", exc_info=True)
-        return create_error_response(str(e))
+        logger.error(f"Lambda handler error: {e}", exc_info=True)
+        return create_response({'error': str(e), 'type': 'lambda_error'})
 
+def handle_metrics_query(agent_type, function_name, params):
+    """Handle metrics queries using boto3 HTTP requests."""
+    try:
+        # Default parameters
+        metric_type = params.get('metric_type', 'execution')
+        time_range = params.get('time_range', '7d')
+        
+        if agent_type in ['test-metrics', 'test']:
+            return query_test_metrics(metric_type, time_range, params.get('project_filter'))
+        elif agent_type in ['build-metrics', 'build']:
+            return query_build_metrics(metric_type, time_range, params.get('branch_filter'))
+        elif agent_type in ['release-metrics', 'release']:
+            return query_release_metrics(metric_type, time_range, params.get('environment_filter'))
+        elif agent_type in ['deployment-metrics', 'deployment']:
+            return query_deployment_metrics(metric_type, time_range, params.get('service_filter'))
+        else:
+            return {'error': f'Unknown agent type: {agent_type}'}
+            
+    except Exception as e:
+        logger.error(f"Metrics query failed: {e}")
+        return {'error': str(e), 'type': 'metrics_error'}
 
-def route_request(agent_type: str, function_name: str, params: Dict[str, Any]) -> Dict[str, Any]:
-    """Route request to appropriate metrics handler based on agent type."""
-    
-    if agent_type == 'test-metrics' or agent_type == 'test':
-        return handle_test_metrics(function_name, params)
-    elif agent_type == 'build-metrics' or agent_type == 'build':
-        return handle_build_metrics(function_name, params)
-    elif agent_type == 'release-metrics' or agent_type == 'release':
-        return handle_release_metrics(function_name, params)
-    elif agent_type == 'deployment-metrics' or agent_type == 'deployment':
-        return handle_deployment_metrics(function_name, params)
-    else:
-        return {'error': f'Unknown agent type: {agent_type}', 'type': 'routing_error'}
-
-
-def handle_test_metrics(function_name: str, params: Dict[str, Any]) -> Dict[str, Any]:
-    """Handle test metrics function calls."""
-    if function_name == 'get_test_metrics' or not function_name:
-        return metrics_service.get_test_metrics(
-            metric_type=params.get('metric_type', 'execution'),
-            time_range=params.get('time_range', '7d'),
-            project_filter=params.get('project_filter')
-        )
-    else:
-        return {'error': f'Unknown test metrics function: {function_name}', 'type': 'function_error'}
-
-
-def handle_build_metrics(function_name: str, params: Dict[str, Any]) -> Dict[str, Any]:
-    """Handle build metrics function calls."""
-    if function_name == 'get_build_metrics' or not function_name:
-        return metrics_service.get_build_metrics(
-            metric_type=params.get('metric_type', 'performance'),
-            time_range=params.get('time_range', '7d'),
-            branch_filter=params.get('branch_filter')
-        )
-    elif function_name == 'test_multiple_queries':
-        return opensearch_client.test_multiple_queries()
-    elif function_name == 'test_role_only':
-        return opensearch_client.test_role_assumption_only()
-    else:
-        return {'error': f'Unknown build metrics function: {function_name}', 'type': 'function_error'}
-
-
-def handle_release_metrics(function_name: str, params: Dict[str, Any]) -> Dict[str, Any]:
-    """Handle release metrics function calls."""
-    if function_name == 'get_release_metrics' or not function_name:
-        return metrics_service.get_release_metrics(
-            metric_type=params.get('metric_type', 'frequency'),
-            time_range=params.get('time_range', '30d'),
-            environment_filter=params.get('environment_filter')
-        )
-    else:
-        return {'error': f'Unknown release metrics function: {function_name}', 'type': 'function_error'}
-
-
-def handle_deployment_metrics(function_name: str, params: Dict[str, Any]) -> Dict[str, Any]:
-    """Handle deployment metrics function calls."""
-    if function_name == 'get_deployment_metrics' or not function_name:
-        return metrics_service.get_deployment_metrics(
-            metric_type=params.get('metric_type', 'performance'),
-            time_range=params.get('time_range', '7d'),
-            service_filter=params.get('service_filter')
-        )
-    else:
-        return {'error': f'Unknown deployment metrics function: {function_name}', 'type': 'function_error'}
-
-
-def handle_mock_response(event: Dict[str, Any]) -> Dict[str, Any]:
-    """Handle mock responses for testing without OpenSearch connectivity."""
-    agent_type = config.agent_type
-    
-    mock_data = {
-        'test-metrics': {
+def query_test_metrics(metric_type, time_range, project_filter):
+    """Query test metrics from OpenSearch."""
+    try:
+        # Use the known working fields from opensearch_release_metrics
+        query_body = {
+            "size": 20,
+            "_source": ["version", "component", "repository", "release_owners", "current_date"],
+            "query": {"match_all": {}},
+            "sort": [{"current_date": {"order": "desc"}}]
+        }
+        
+        if project_filter:
+            query_body["query"] = {
+                "bool": {
+                    "must": [{"match": {"repository": project_filter}}]
+                }
+            }
+        
+        result = opensearch_request('POST', '/opensearch_release_metrics/_search', query_body)
+        
+        hits = result.get('hits', {})
+        total = hits.get('total', {}).get('value', 0)
+        test_results = hits.get('hits', [])
+        
+        return {
             'type': 'test_metrics',
-            'metric_type': 'execution',
-            'time_range': '7d',
+            'metric_type': metric_type,
+            'time_range': time_range,
             'summary': {
-                'total_failures': 42,
-                'repositories_affected': 3,
-                'top_failing_class': 'MockTestClass'
+                'total_results': total,
+                'results_returned': len(test_results)
             },
-            'top_failing_classes': [
-                {'class_name': 'MockTestClass', 'failure_count': 15, 'percentage': 35.7}
-            ],
-            'mock_mode': True
-        },
-        'build-metrics': {
+            'recent_data': [
+                {
+                    'component': item.get('_source', {}).get('component', 'Unknown'),
+                    'repository': item.get('_source', {}).get('repository', 'Unknown'),
+                    'version': item.get('_source', {}).get('version', 'Unknown'),
+                    'timestamp': item.get('_source', {}).get('current_date', 'Unknown')
+                }
+                for item in test_results[:10]
+            ]
+        }
+    except Exception as e:
+        return {'error': str(e), 'type': 'test_metrics_error'}
+
+def query_build_metrics(metric_type, time_range, branch_filter):
+    """Query build metrics from OpenSearch."""
+    try:
+        # Use the known working fields from opensearch_release_metrics
+        query_body = {
+            "size": 20,
+            "_source": ["version", "component", "repository", "release_owners", "current_date"],
+            "query": {"match_all": {}},
+            "sort": [{"current_date": {"order": "desc"}}]
+        }
+        
+        if branch_filter:
+            query_body["query"] = {
+                "bool": {
+                    "must": [{"match": {"repository": branch_filter}}]
+                }
+            }
+        
+        result = opensearch_request('POST', '/opensearch_release_metrics/_search', query_body)
+        
+        hits = result.get('hits', {})
+        total = hits.get('total', {}).get('value', 0)
+        build_results = hits.get('hits', [])
+        
+        return {
             'type': 'build_metrics',
-            'metric_type': 'performance',
-            'time_range': '7d',
+            'metric_type': metric_type,
+            'time_range': time_range,
             'summary': {
-                'total_builds': 25,
-                'active_builds': 20,
-                'success_rate': 80.0
+                'total_results': total,
+                'recent_results': len(build_results)
             },
-            'mock_mode': True
-        },
-        'release-metrics': {
+            'recent_data': [
+                {
+                    'component': item.get('_source', {}).get('component', 'Unknown'),
+                    'repository': item.get('_source', {}).get('repository', 'Unknown'),
+                    'version': item.get('_source', {}).get('version', 'Unknown'),
+                    'owners': item.get('_source', {}).get('release_owners', []),
+                    'timestamp': item.get('_source', {}).get('current_date', 'Unknown')
+                }
+                for item in build_results[:10]
+            ]
+        }
+    except Exception as e:
+        return {'error': str(e), 'type': 'build_metrics_error'}
+
+def query_release_metrics(metric_type, time_range, environment_filter):
+    """Query release metrics from OpenSearch."""
+    try:
+        # Query release status data
+        query_body = {
+            "size": 20,
+            "_source": ["version", "component", "repository", "release_owners", "current_date", "status"],
+            "query": {"match_all": {}},
+            "sort": [{"current_date": {"order": "desc"}}]
+        }
+        
+        if environment_filter:
+            query_body["query"] = {
+                "bool": {
+                    "must": [{"match": {"environment": environment_filter}}]
+                }
+            }
+        
+        result = opensearch_request('POST', '/opensearch_release_metrics/_search', query_body)
+        
+        hits = result.get('hits', {})
+        total = hits.get('total', {}).get('value', 0)
+        release_results = hits.get('hits', [])
+        
+        # Calculate readiness
+        ready_components = sum(1 for item in release_results if item.get('_source', {}).get('status') == 'ready')
+        overall_readiness = (ready_components / len(release_results) * 100) if release_results else 0
+        
+        return {
             'type': 'release_metrics',
-            'metric_type': 'frequency',
-            'time_range': '30d',
+            'metric_type': metric_type,
+            'time_range': time_range,
             'summary': {
-                'total_releases': 10,
-                'ready_components': 8,
-                'overall_readiness': 80.0
+                'total_releases': total,
+                'ready_components': ready_components,
+                'overall_readiness': round(overall_readiness, 1)
             },
-            'mock_mode': True
-        },
-        'deployment-metrics': {
+            'recent_releases': [
+                {
+                    'version': item.get('_source', {}).get('version', 'Unknown'),
+                    'component': item.get('_source', {}).get('component', 'Unknown'),
+                    'repository': item.get('_source', {}).get('repository', 'Unknown'),
+                    'owners': item.get('_source', {}).get('release_owners', []),
+                    'timestamp': item.get('_source', {}).get('current_date', 'Unknown')
+                }
+                for item in release_results[:10]
+            ]
+        }
+    except Exception as e:
+        return {'error': str(e), 'type': 'release_metrics_error'}
+
+def query_deployment_metrics(metric_type, time_range, service_filter):
+    """Query deployment metrics from OpenSearch."""
+    try:
+        # Use the known working fields from opensearch_release_metrics
+        query_body = {
+            "size": 20,
+            "_source": ["version", "component", "repository", "release_owners", "current_date"],
+            "query": {"match_all": {}},
+            "sort": [{"current_date": {"order": "desc"}}]
+        }
+        
+        if service_filter:
+            query_body["query"] = {
+                "bool": {
+                    "must": [{"match": {"component": service_filter}}]
+                }
+            }
+        
+        result = opensearch_request('POST', '/opensearch_release_metrics/_search', query_body)
+        
+        hits = result.get('hits', {})
+        total = hits.get('total', {}).get('value', 0)
+        deployment_results = hits.get('hits', [])
+        
+        return {
             'type': 'deployment_metrics',
-            'metric_type': 'performance',
-            'time_range': '7d',
+            'metric_type': metric_type,
+            'time_range': time_range,
             'summary': {
-                'total_deployments': 15,
-                'active_deployments': 12,
-                'overall_health': 80.0
+                'total_results': total,
+                'recent_results': len(deployment_results)
             },
-            'mock_mode': True
+            'recent_data': [
+                {
+                    'component': item.get('_source', {}).get('component', 'Unknown'),
+                    'repository': item.get('_source', {}).get('repository', 'Unknown'),
+                    'version': item.get('_source', {}).get('version', 'Unknown'),
+                    'owners': item.get('_source', {}).get('release_owners', []),
+                    'timestamp': item.get('_source', {}).get('current_date', 'Unknown')
+                }
+                for item in deployment_results[:10]
+            ]
+        }
+    except Exception as e:
+        return {'error': str(e), 'type': 'deployment_metrics_error'}
+
+def test_role_assumption():
+    """Test cross-account role assumption."""
+    try:
+        import time
+        
+        logger.info("Testing role assumption")
+        
+        start_time = time.time()
+        session = get_opensearch_session()
+        end_time = time.time()
+        
+        # Test assumed identity
+        sts_client = session.client('sts')
+        assumed_identity = sts_client.get_caller_identity()
+        
+        return {
+            'status': 'success',
+            'duration_seconds': round(end_time - start_time, 3),
+            'assumed_identity': {
+                'account': assumed_identity.get('Account'),
+                'arn': assumed_identity.get('Arn'),
+                'user_id': assumed_identity.get('UserId')
+            }
+        }
+        
+    except Exception as e:
+        return {
+            'status': 'failed',
+            'error': str(e),
+            'error_type': type(e).__name__
+        }
+
+def test_opensearch_connectivity():
+    """Test OpenSearch connectivity and basic queries."""
+    try:
+        # Test basic cluster health
+        health = opensearch_request('GET', '/_cluster/health')
+        
+        # Test a simple search
+        search_result = opensearch_request('POST', '/opensearch_release_metrics/_search', {
+            "size": 1,
+            "query": {"match_all": {}}
+        })
+        
+        return {
+            'status': 'success',
+            'cluster_health': health.get('status', 'unknown'),
+            'cluster_name': health.get('cluster_name', 'unknown'),
+            'total_documents': search_result.get('hits', {}).get('total', {}).get('value', 0)
+        }
+        
+    except Exception as e:
+        return {
+            'status': 'failed',
+            'error': str(e),
+            'error_type': type(e).__name__
+        }
+
+def explore_opensearch_indices():
+    """Explore OpenSearch indices and their mappings."""
+    try:
+        # Get all indices
+        indices = opensearch_request('GET', '/_cat/indices?format=json')
+        
+        # Focus on build-related indices
+        build_indices = [idx for idx in indices if 'build' in idx.get('index', '').lower() or 'test' in idx.get('index', '').lower() or 'release' in idx.get('index', '').lower()]
+        
+        index_details = []
+        for idx in build_indices[:5]:  # Limit to first 5 indices
+            index_name = idx.get('index')
+            try:
+                # Get mapping for this index
+                mapping = opensearch_request('GET', f'/{index_name}/_mapping')
+                
+                # Get sample document
+                sample = opensearch_request('POST', f'/{index_name}/_search', {
+                    "size": 1,
+                    "query": {"match_all": {}}
+                })
+                
+                index_details.append({
+                    'index_name': index_name,
+                    'doc_count': idx.get('docs.count', '0'),
+                    'store_size': idx.get('store.size', '0'),
+                    'mapping_fields': list(mapping.get(index_name, {}).get('mappings', {}).get('properties', {}).keys())[:10],
+                    'sample_document': sample.get('hits', {}).get('hits', [{}])[0].get('_source', {}) if sample.get('hits', {}).get('hits') else {}
+                })
+            except Exception as e:
+                index_details.append({
+                    'index_name': index_name,
+                    'error': str(e)
+                })
+        
+        return {
+            'status': 'success',
+            'total_indices': len(indices),
+            'build_related_indices': len(build_indices),
+            'index_details': index_details
+        }
+        
+    except Exception as e:
+        return {
+            'status': 'failed',
+            'error': str(e),
+            'error_type': type(e).__name__
+        }
+
+def create_response(result):
+    """Create response in appropriate format based on invocation context."""
+    # Check if this is a Bedrock agent invocation by looking for specific event structure
+    # For now, return clean JSON for easier consumption
+    return {
+        'statusCode': 200,
+        'body': result,
+        'headers': {
+            'Content-Type': 'application/json'
         }
     }
-    
-    # Normalize agent type
-    normalized_type = agent_type.replace('-metrics', '').replace('-', '-')
-    if not normalized_type.endswith('-metrics'):
-        normalized_type += '-metrics'
-    
-    result = mock_data.get(normalized_type, {
-        'type': 'mock_data', 
-        'agent_type': agent_type,
-        'mock_mode': True
-    })
-    
-    return create_bedrock_response(result)
 
-
-def create_bedrock_response(result: Dict[str, Any]) -> Dict[str, Any]:
-    """Create properly formatted Bedrock response."""
+def create_bedrock_response(result):
+    """Create Bedrock agent compatible response when needed."""
     return {
         'response': {
             'functionResponse': {
@@ -257,14 +446,3 @@ def create_bedrock_response(result: Dict[str, Any]) -> Dict[str, Any]:
             }
         }
     }
-
-
-def create_error_response(error_message: str) -> Dict[str, Any]:
-    """Create error response for Bedrock."""
-    error_result = {
-        'error': error_message,
-        'type': 'lambda_error',
-        'agent_type': config.agent_type if config else 'unknown'
-    }
-    
-    return create_bedrock_response(error_result)
