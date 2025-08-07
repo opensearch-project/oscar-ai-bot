@@ -69,8 +69,62 @@ def create_slack_event(query: str, channel: str = "C09827S7CEB", user: str = "U0
         "event_time": int(time.time())
     }
 
+def test_bedrock_agent_invocation(agent_type: str, query: str) -> Dict[str, Any]:
+    """Test direct Bedrock agent invocation."""
+    print(f"    🤖 Testing Bedrock agent invocation for {agent_type}")
+    
+    # Map agent types to Bedrock agent IDs (from your .env)
+    agent_map = {
+        "test_metrics": "YXSZJ659S7",
+        "build_metrics": "0NBATJIVCH", 
+        "release_metrics": "4FCARBPEYB",
+        "deployment_metrics": "BIHPD6OLO0"
+    }
+    
+    agent_id = agent_map.get(agent_type)
+    if not agent_id:
+        return {"error": f"Unknown agent type: {agent_type}"}
+    
+    try:
+        bedrock_client = boto3.client('bedrock-agent-runtime', region_name='us-east-1')
+        
+        response = bedrock_client.invoke_agent(
+            agentId=agent_id,
+            agentAliasId='TSTALIASID',  # Test alias
+            sessionId=f'test-session-{int(time.time())}',
+            inputText=query
+        )
+        
+        # Process streaming response
+        response_text = ""
+        if 'completion' in response:
+            for event in response['completion']:
+                if 'chunk' in event:
+                    chunk = event['chunk']
+                    if 'bytes' in chunk:
+                        chunk_text = chunk['bytes'].decode('utf-8')
+                        response_text += chunk_text
+        
+        return {
+            "bedrock_agent_test": {
+                "success": True,
+                "agent_id": agent_id,
+                "response_length": len(response_text),
+                "response_preview": response_text[:200] + "..." if len(response_text) > 200 else response_text
+            }
+        }
+        
+    except Exception as e:
+        return {
+            "bedrock_agent_test": {
+                "success": False,
+                "agent_id": agent_id,
+                "error": str(e)
+            }
+        }
+
 def test_direct_lambda_invocation(agent_type: str, query: str) -> Dict[str, Any]:
-    """Test direct Lambda function invocation for debugging."""
+    """Test direct Lambda function invocation with proper Bedrock format."""
     print(f"    🔧 Testing direct Lambda invocation for {agent_type}")
     
     # Map agent types to function names
@@ -88,12 +142,26 @@ def test_direct_lambda_invocation(agent_type: str, query: str) -> Dict[str, Any]
     try:
         lambda_client = boto3.client('lambda', region_name='us-east-1')
         
-        # Test with different payload formats
+        # Test with Bedrock agent format (what the Lambda actually expects)
         payloads_to_test = [
-            {"parameters": [{"name": "query", "value": query}]},
-            {"function": "get_metrics", "query": query},
-            {"query": query},
-            {"parameters": [{"name": "metric_type", "value": "status"}]}
+            {
+                "actionGroup": "MetricsActionGroup",
+                "function": "get_metrics", 
+                "parameters": [{"name": "metric_type", "value": "status"}]
+            },
+            {
+                "actionGroup": "MetricsActionGroup",
+                "function": "get_test_metrics" if agent_type == "test_metrics" else f"get_{agent_type.replace('_', '_')}",
+                "parameters": [{"name": "query", "value": query}]
+            },
+            {
+                "actionGroup": "MetricsActionGroup", 
+                "function": "get_metrics",
+                "parameters": [
+                    {"name": "metric_type", "value": "execution"},
+                    {"name": "time_range", "value": "7d"}
+                ]
+            }
         ]
         
         results = []
@@ -133,8 +201,9 @@ def send_test_query(query: str, agent_type: str, test_id: int) -> Dict[str, Any]
     start_time = time.time()
     event = create_slack_event(query)
     
-    # Test direct Lambda invocation first
+    # Test both direct Lambda and Bedrock agent invocation
     direct_test = test_direct_lambda_invocation(agent_type, query)
+    bedrock_test = test_bedrock_agent_invocation(agent_type, query)
     
     try:
         # Test via webhook
@@ -160,6 +229,7 @@ def send_test_query(query: str, agent_type: str, test_id: int) -> Dict[str, Any]
             "webhook_response_body": response.text,
             "webhook_success": response.status_code == 200,
             "direct_lambda_test": direct_test,
+            "bedrock_agent_test": bedrock_test,
             "timestamp": datetime.now().isoformat()
         }
         
@@ -171,6 +241,12 @@ def send_test_query(query: str, agent_type: str, test_id: int) -> Dict[str, Any]
             successful_direct = len([r for r in direct_test["direct_lambda_results"] if r["success"]])
             total_direct = len(direct_test["direct_lambda_results"])
             print(f"   🔧 Direct Lambda: {successful_direct}/{total_direct} payloads successful")
+        
+        # Print Bedrock agent results
+        if "bedrock_agent_test" in bedrock_test:
+            bedrock_success = bedrock_test["bedrock_agent_test"]["success"]
+            bedrock_icon = "✅" if bedrock_success else "❌"
+            print(f"   🤖 Bedrock Agent: {bedrock_icon} {'Success' if bedrock_success else 'Failed'}")
         
         return result
         
@@ -184,6 +260,7 @@ def send_test_query(query: str, agent_type: str, test_id: int) -> Dict[str, Any]
             "webhook_response_time": response_time,
             "webhook_success": False,
             "direct_lambda_test": direct_test,
+            "bedrock_agent_test": bedrock_test,
             "timestamp": datetime.now().isoformat()
         }
         

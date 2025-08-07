@@ -92,7 +92,7 @@ def lambda_handler(event, context):
             result = explore_opensearch_indices()
         elif function_name == 'test_opensearch':
             result = test_opensearch_connectivity()
-        elif function_name in ['get_test_metrics', 'get_build_metrics', 'get_release_metrics', 'get_deployment_metrics'] or not function_name:
+        elif function_name in ['get_test_metrics', 'get_build_metrics', 'get_release_metrics', 'get_deployment_metrics', 'get_metrics'] or not function_name:
             # Handle metrics queries
             result = handle_metrics_query(agent_type, function_name, params)
         else:
