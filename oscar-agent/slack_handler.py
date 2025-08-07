@@ -34,6 +34,7 @@ from storage import StorageInterface
 # from communication_orchestrator.orchestrator import CommunicationOrchestrator, parse_communication_command
 
 logger = logging.getLogger(__name__)
+channel_allow_list = ['C096MV7JZ0T', 'C09827S7CEB', 'C091EH1JKCL', 'C088XMSH4DA']
 
 class SlackHandler:
     """Comprehensive Slack event handler with OSCAR agent integration.
@@ -98,6 +99,9 @@ class SlackHandler:
         """
         # Extract message details
         channel = event.get("channel")
+        if channel not in channel_allow_list:
+            logger.info(f"Channel {channel} not in allow list, ignoring event")
+            return
         thread_ts = event.get("thread_ts") or event.get("ts")
         user_id = event.get("user")
         text = event.get("text")
@@ -307,10 +311,10 @@ class SlackHandler:
             
             # Validate response - handle None, empty, or whitespace-only responses
             if response is None:
-                logger.warning("OSCAR agent returned None response")
+                logger.warning(f"OSCAR agent returned None response for query: {query}")
                 response = "I'm having trouble generating a response right now. Please try again."
             elif not response or response.strip() == "":
-                logger.warning("OSCAR agent returned empty response")
+                logger.warning(f"OSCAR agent returned empty response for query: {query}")
                 response = "I'm having trouble generating a response right now. Please try again."
             else:
                 # Ensure response is a string

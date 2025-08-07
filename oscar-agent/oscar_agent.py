@@ -350,7 +350,8 @@ class EnhancedBedrockOSCARAgent(OSCARAgentInterface):
             return self._retry_with_backoff(self._invoke_agent, query, None)
         except Exception as e:
             logger.error(f"All query attempts failed: {e}", exc_info=True)
-            return self._handle_agent_error(e, query), None
+            error_message = self._handle_agent_error(e, query)
+            return error_message, None
     
     def _handle_agent_error(self, error: Exception, query: str) -> str:
         """
@@ -368,8 +369,8 @@ class EnhancedBedrockOSCARAgent(OSCARAgentInterface):
             
             if error_code == 'AccessDeniedException':
                 return "I don't have permission to access that information. Please contact your administrator."
-            elif error_code == 'ThrottlingException':
-                return "I'm currently experiencing high load. Please try again in a moment."
+            elif error_code == 'ThrottlingException' or error_code == 'throttlingException':
+                return "I'm currently experiencing high load. Please wait a moment and try again."
             elif error_code == 'ValidationException':
                 return "There was an issue with your query format. Please try rephrasing your question."
             elif error_code == 'ResourceNotFoundException':
@@ -379,6 +380,10 @@ class EnhancedBedrockOSCARAgent(OSCARAgentInterface):
         
         elif isinstance(error, TimeoutError):
             return "Your query is taking longer than expected. Please try a more specific question or try again later."
+        
+        # Handle EventStreamError from throttling
+        elif 'throttl' in str(error).lower():
+            return "I'm currently experiencing high load. Please wait a moment and try again."
         
         else:
             logger.error(f"Unexpected agent error: {error}", exc_info=True)
