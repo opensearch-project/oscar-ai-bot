@@ -305,6 +305,17 @@ class SlackHandler:
             agent_end_time = time.time()
             logger.info(f"OSCAR agent query completed in {agent_end_time - agent_start_time:.2f} seconds")
             
+            # Validate response - handle None, empty, or whitespace-only responses
+            if response is None:
+                logger.warning("OSCAR agent returned None response")
+                response = "I'm having trouble generating a response right now. Please try again."
+            elif not response or response.strip() == "":
+                logger.warning("OSCAR agent returned empty response")
+                response = "I'm having trouble generating a response right now. Please try again."
+            else:
+                # Ensure response is a string
+                response = str(response).strip()
+            
             # Update context with new query and response
             self._update_context(thread_key, query, response, session_id, new_session_id)
             
@@ -345,12 +356,30 @@ class SlackHandler:
                 remove_reaction=["thinking_face", "timer_clock"]
             )
             
-            # Send user-friendly error message
+            # Send user-friendly error message based on error type
             try:
-                error_message = "Sorry, I encountered an error while processing your request. Please try again later."
+                error_str = str(e).lower()
+                if 'throttl' in error_str or 'rate' in error_str:
+                    error_message = "I'm currently experiencing high load. Please wait a moment and try again."
+                elif 'timeout' in error_str:
+                    error_message = "Your request is taking longer than expected. Please try a simpler question."
+                elif 'nonetype' in error_str:
+                    error_message = "I'm having trouble generating a response. Please try rephrasing your question."
+                else:
+                    error_message = "Sorry, I encountered an error while processing your request. Please try again later."
+                
+                # Ensure error_message is not None
+                if error_message is None or error_message.strip() == "":
+                    error_message = "An unexpected error occurred. Please try again."
+                    
                 say(text=error_message, thread_ts=thread_ts)
             except Exception as say_error:
                 logger.error(f"Error sending error message: {say_error}", exc_info=True)
+                # Last resort - try to send a basic message
+                try:
+                    say(text="Error occurred. Please try again.", thread_ts=thread_ts)
+                except:
+                    logger.error("Failed to send any error message to Slack")
     
     def _handle_communication_command(
         self, 

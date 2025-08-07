@@ -1,0 +1,102 @@
+{
+  "results": [
+    {
+      "test_id": 1,
+      "query": "Hello",
+      "status_code": 200,
+      "response_time": 2.154147148132324,
+      "response_body": "{\"message\": \"Event received and will be processed asynchronously by OSCAR agent\"}",
+      "timestamp": "2025-08-06T21:44:05.004476",
+      "success": true
+    },
+    {
+      "test_id": 2,
+      "query": "Hi there",
+      "status_code": 200,
+      "response_time": 0.4796791076660156,
+      "response_body": "{\"message\": \"Event received and will be processed asynchronously by OSCAR agent\"}",
+      "timestamp": "2025-08-06T21:44:05.990716",
+      "success": true
+    },
+    {
+      "test_id": 3,
+      "query": "What's the weather?",
+      "status_code": 200,
+      "response_time": 0.45635008811950684,
+      "response_body": "{\"message\": \"Event received and will be processed asynchronously by OSCAR agent\"}",
+      "timestamp": "2025-08-06T21:44:06.956727",
+      "success": true
+    },
+    {
+      "test_id": 4,
+      "query": "Tell me about OpenSearch",
+      "status_code": 200,
+      "response_time": 0.43568897247314453,
+      "response_body": "{\"message\": \"Event received and will be processed asynchronously by OSCAR agent\"}",
+      "timestamp": "2025-08-06T21:44:07.901537",
+      "success": true
+    },
+    {
+      "test_id": 5,
+      "query": "How do I configure OpenSearch clusters?",
+      "status_code": 200,
+      "response_time": 0.48150205612182617,
+      "response_body": "{\"message\": \"Event received and will be processed asynchronously by OSCAR agent\"}",
+      "timestamp": "2025-08-06T21:44:08.892801",
+      "success": true
+    },
+    {
+      "test_id": 6,
+      "query": "What are the best practices for OpenSearch performance?",
+      "status_code": 200,
+      "response_time": 0.4803011417388916,
+      "response_body": "{\"message\": \"Event received and will be processed asynchronously by OSCAR agent\"}",
+      "timestamp": "2025-08-06T21:44:09.880690",
+      "success": true
+    },
+    {
+      "test_id": 7,
+      "query": "Can you help me troubleshoot OpenSearch indexing issues?",
+      "status_code": 200,
+      "response_time": 0.4964778423309326,
+      "response_body": "{\"message\": \"Event received and will be processed asynchronously by OSCAR agent\"}",
+      "timestamp": "2025-08-06T21:44:13.386257",
+      "success": true
+    },
+    {
+      "test_id": 8,
+      "query": "Explain OpenSearch security features in detail",
+      "status_code": 200,
+      "response_time": 0.5952649116516113,
+      "response_body": "{\"message\": \"Event received and will be processed asynchronously by OSCAR agent\"}",
+      "timestamp": "2025-08-06T21:44:16.994773",
+      "success": true
+    },
+    {
+      "test_id": 9,
+      "query": "What are the latest OpenSearch releases and their features?",
+      "status_code": 200,
+      "response_time": 0.5037660598754883,
+      "response_body": "{\"message\": \"Event received and will be processed asynchronously by OSCAR agent\"}",
+      "timestamp": "2025-08-06T21:44:20.504638",
+      "success": true
+    },
+    {
+      "test_id": 10,
+      "query": "How do I set up cross-cluster replication in OpenSearch?",
+      "status_code": 200,
+      "response_time": 0.44318604469299316,
+      "response_body": "{\"message\": \"Event received and will be processed asynchronously by OSCAR agent\"}",
+      "timestamp": "2025-08-06T21:44:23.955616",
+      "success": true
+    }
+  ],
+  "errors": [],
+  "summary": {
+    "total": 10,
+    "successful": 10,
+    "failed": 0,
+    "start_time": "2025-08-06T21:44:02.850308",
+    "end_time": "2025-08-06T21:44:57.133622"
+  }
+}

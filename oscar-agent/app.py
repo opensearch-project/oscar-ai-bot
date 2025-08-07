@@ -19,11 +19,9 @@ Functions:
     get_event_id: Generate unique event identifiers
 """
 
-import hashlib
 import json
 import logging
 import os
-import time
 from typing import Any, Dict, Optional
 
 import boto3
@@ -38,7 +36,7 @@ from storage import get_storage
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 
-# Initialize Slack app with credentials from config
+# Initialize Slack app with process_before_response=True for immediate ack
 app = App(
     token=config.slack_bot_token,
     signing_secret=config.slack_signing_secret,
@@ -53,45 +51,11 @@ oscar_agent = get_oscar_agent()
 handler = SlackHandler(app, storage_instance, oscar_agent)
 handler.register_handlers()
 
-# Initialize AWS Lambda client for async invocation
+# Initialize Lambda client for async processing
 lambda_client = boto3.client('lambda')
-# AWS_LAMBDA_FUNCTION_NAME is automatically set by AWS Lambda runtime
 FUNCTION_NAME = os.environ.get('AWS_LAMBDA_FUNCTION_NAME', 'oscar-supervisor-agent')
 
-def get_event_id(event: Dict[str, Any]) -> str:
-    """
-    Generate a unique ID for a Slack event.
-    
-    Args:
-        event: The event dict from API Gateway
-        
-    Returns:
-        A unique ID for the event
-    """
-    body = None
-    if event.get('body'):
-        body = json.loads(event['body']) if isinstance(event['body'], str) else event['body']
-    
-    # If this is a Slack event, use the event ID
-    if body and body.get('event'):
-        slack_event = body.get('event')
-        event_ts = slack_event.get('event_ts') or slack_event.get('ts')
-        channel = slack_event.get('channel')
-        
-        if event_ts and channel:
-            return f"slack_event_{channel}_{event_ts}"
-    
-    # Fallback to request timestamp and signature
-    if event.get('headers'):
-        request_timestamp = event.get('headers').get('X-Slack-Request-Timestamp')
-        request_signature = event.get('headers').get('X-Slack-Signature')
-        
-        if request_timestamp and request_signature:
-            return f"slack_request_{request_timestamp}_{request_signature[-8:]}"
-    
-    # Last resort: use a hash of the entire event
-    event_str = json.dumps(event, sort_keys=True)
-    return f"event_hash_{hashlib.md5(event_str.encode()).hexdigest()}"
+
 
 def process_slack_event(event: Dict[str, Any], context: Optional[object]) -> Dict[str, Any]:
     """
@@ -123,8 +87,7 @@ def lambda_handler(event: Dict[str, Any], context: Optional[object]) -> Dict[str
     """
     AWS Lambda handler for Slack events using OSCAR agent.
     
-    This function immediately acknowledges Slack events and then asynchronously
-    processes them to prevent duplicate responses.
+    Uses async processing pattern from old codebase to prevent duplicate responses.
     
     Args:
         event: The event dict from API Gateway or direct Lambda invocation
@@ -140,10 +103,6 @@ def lambda_handler(event: Dict[str, Any], context: Optional[object]) -> Dict[str
         logger.info("Processing async Slack event with OSCAR agent")
         return process_slack_event(event['detail'], context)
     
-    # Log request ID for tracing
-    request_id = context.aws_request_id if context and hasattr(context, 'aws_request_id') else 'unknown'
-    logger.info(f"Lambda request ID: {request_id}")
-    
     # Extract event body for processing
     body = None
     if event.get('body'):
@@ -151,10 +110,12 @@ def lambda_handler(event: Dict[str, Any], context: Optional[object]) -> Dict[str
     
     # Handle URL verification challenge immediately
     if body and body.get('type') == 'url_verification':
-        logger.info("Received URL verification challenge")
+        challenge = body.get('challenge')
+        logger.info(f"URL verification challenge: {challenge}")
         return {
             'statusCode': 200,
-            'body': json.dumps({'challenge': body['challenge']})
+            'headers': {'Content-Type': 'application/json'},
+            'body': json.dumps({'challenge': challenge})
         }
     
     # Handle Slack retries - acknowledge but don't process
