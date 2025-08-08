@@ -142,7 +142,8 @@ def handle_send_message(params: Dict[str, Any]) -> Dict[str, Any]:
         
         # Use provided message content (agent should provide complete message)
         if message_content:
-            processed_message = message_content
+            # Convert @username to <@username> for Slack pings
+            processed_message = convert_at_symbols_to_slack_pings(message_content)
         else:
             logger.error("No message content provided - agent should fill template with metrics")
             return create_error_response('No message content provided. Agent must provide complete message with metrics data.')
@@ -415,6 +416,19 @@ def extract_channel_from_query(query: str) -> Optional[str]:
         return 'C088XMSH4DA'
     
     return None
+
+def convert_at_symbols_to_slack_pings(message: str) -> str:
+    """
+    Convert @username to <@username> for Slack pings.
+    
+    Args:
+        message: Message content with @ symbols
+        
+    Returns:
+        Message with Slack ping format
+    """
+    import re
+    return re.sub(r'@([a-zA-Z0-9_-]+)', r'<@\1>', message)
 
 def determine_message_type_from_query(query: str) -> str:
     """
