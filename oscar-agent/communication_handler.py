@@ -26,9 +26,10 @@ logger.setLevel(logging.INFO)
 # Channel allow list for message sending
 CHANNEL_ALLOW_LIST = ['C096MV7JZ0T', 'C09827S7CEB', 'C091EH1JKCL', 'C088XMSH4DA']
 
-# Initialize Slack client
+# Initialize clients
 slack_token = os.environ.get('SLACK_BOT_TOKEN')
 slack_client = WebClient(token=slack_token) if slack_token else None
+bedrock_agent_runtime = boto3.client('bedrock-agent-runtime', region_name='us-east-1')
 
 # Hardcoded message templates from the templates directory
 MESSAGE_TEMPLATES = {
@@ -81,24 +82,15 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         
         logger.info(f"Processing action: {action_group}, path: {api_path}, params: {params}")
         
-        # Handle the send_automated_message action (both formats)
-        if api_path == '/send_automated_message' or function_name == 'send_automated_message':
+        # Handle the send_automated_message function
+        if function_name == 'send_automated_message':
             logger.info(f"Calling handle_send_message with params: {params}")
-            return handle_send_message(params, event)
+            return handle_send_message(params)
         else:
+            logger.error(f"Unknown function: {function_name}")
             return {
                 'response': {
-                    'actionGroup': action_group,
-                    'apiPath': api_path,
-                    'httpMethod': event.get('httpMethod', 'POST'),
-                    'httpStatusCode': 400,
-                    'responseBody': {
-                        'application/json': {
-                            'body': json.dumps({
-                                'error': f'Unknown API path: {api_path}'
-                            })
-                        }
-                    }
+                    'body': f'❌ Unknown function: {function_name}'
                 }
             }
             
@@ -107,21 +99,11 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         logger.error(f"Full event: {json.dumps(event, indent=2)}")
         return {
             'response': {
-                'actionGroup': event.get('actionGroup', ''),
-                'apiPath': event.get('apiPath', ''),
-                'httpMethod': event.get('httpMethod', 'POST'),
-                'httpStatusCode': 500,
-                'responseBody': {
-                    'application/json': {
-                        'body': json.dumps({
-                            'error': f'Internal server error: {str(e)}'
-                        })
-                    }
-                }
+                'body': f'❌ Internal server error: {str(e)}'
             }
         }
 
-def handle_send_message(params: Dict[str, Any], event: Dict[str, Any] = None) -> Dict[str, Any]:
+def handle_send_message(params: Dict[str, Any]) -> Dict[str, Any]:
     """
     Handle the send_message action.
     
@@ -134,33 +116,29 @@ def handle_send_message(params: Dict[str, Any], event: Dict[str, Any] = None) ->
     try:
         # Extract parameters
         query = params.get('query', '')
-        message_type = params.get('message_type', '')
+        message_content = params.get('message_content', '')
         target_channel = params.get('target_channel', '')
         
-        logger.info(f"Processing message request: query='{query}', type='{message_type}', channel='{target_channel}'")
-        logger.info(f"SLACK_BOT_TOKEN present: {bool(slack_token)}")
-        logger.info(f"Slack client initialized: {slack_client is not None}")
+        logger.info(f"Processing message request: query='{query}', channel='{target_channel}'")
+        logger.info(f"Message content provided: {bool(message_content)}")
         
-        # Determine message type from query if not provided
-        if not message_type:
-            message_type = determine_message_type_from_query(query)
+        # Use provided message content (agent should provide complete message)
+        if message_content:
+            processed_message = message_content
+        else:
+            logger.error("No message content provided - agent should fill template with metrics")
+            return create_error_response('No message content provided. Agent must provide complete message with metrics data.')
         
         # Extract target channel from query if not provided
         if not target_channel:
             target_channel = extract_channel_from_query(query)
             if not target_channel:
                 logger.error(f"Failed to extract channel from query: '{query}'")
-                return create_error_response(f'Could not determine target channel from query: "{query}". Please specify channel using #channel-name or channel ID.', event)
+                return create_error_response(f'Could not determine target channel from query: "{query}". Please specify channel using #channel-name or channel ID.')
         
         # Validate channel is in allow list
         if target_channel not in CHANNEL_ALLOW_LIST:
-            return create_error_response(f'Channel {target_channel} is not in the allowed channels list', event)
-        
-        # Generate message content using template
-        if message_type in MESSAGE_TEMPLATES:
-            processed_message = process_template_message(message_type, query, params)
-        else:
-            processed_message = f"Automated notification: {query}"
+            return create_error_response(f'Channel {target_channel} is not in the allowed channels list')
         
         # Send message directly to Slack
         if slack_client:
@@ -177,7 +155,6 @@ def handle_send_message(params: Dict[str, Any], event: Dict[str, Any] = None) ->
                     'success': True,
                     'message': f'✅ Message sent successfully to channel {target_channel}',
                     'channel': target_channel,
-                    'message_type': message_type,
                     'timestamp': response.get('ts')
                 }
             except SlackApiError as e:
@@ -197,34 +174,106 @@ def handle_send_message(params: Dict[str, Any], event: Dict[str, Any] = None) ->
         if not result.get('success'):
             logger.error(f"Message sending failed for query '{query}': {result.get('error')}")
         
-        # Return appropriate format based on event type
-        if 'apiPath' in event:
-            # Manual test format
+        # Return agent format response
+        if result.get('success'):
             return {
                 'response': {
-                    'actionGroup': 'communication-orchestration',
-                    'apiPath': '/send_automated_message',
-                    'httpMethod': 'POST',
-                    'httpStatusCode': 200,
-                    'responseBody': {
-                        'application/json': {
-                            'body': json.dumps(result)
-                        }
-                    }
+                    'body': f"✅ Message sent successfully to target channel"
                 }
             }
         else:
-            # Agent format
             return {
                 'response': {
-                    'body': result.get('message', 'Message processed')
+                    'body': f"❌ {result.get('error', 'Failed to send message')}"
                 }
             }
         
     except Exception as e:
         logger.error(f"Error in handle_send_message: {e}", exc_info=True)
         logger.error(f"Query was: '{query}'")
-        return create_error_response(f'Error processing message: {str(e)}', event)
+        return create_error_response(f'Error processing message: {str(e)}')
+
+def generate_message_with_metrics(message_type: str, query: str) -> str:
+    """
+    Generate complete message by collecting metrics and filling template.
+    
+    Args:
+        message_type: Type of message to generate
+        query: Original user query
+        
+    Returns:
+        Complete message with real data
+    """
+    try:
+        # Get template
+        template_info = MESSAGE_TEMPLATES.get(message_type)
+        if not template_info:
+            return f"Automated notification: {query}"
+        
+        template = template_info['template']
+        
+        # Collect metrics based on message type
+        if message_type == 'missing_release_notes':
+            metrics_data = collect_release_notes_metrics(query)
+        else:
+            metrics_data = {}
+        
+        # Fill template with metrics data
+        try:
+            formatted_message = template.format(**metrics_data)
+            return formatted_message
+        except KeyError as e:
+            logger.warning(f"Missing template variable {e}, using partial formatting")
+            # Leave missing variables as placeholders
+            import string
+            formatter = string.Formatter()
+            formatted_parts = []
+            for literal_text, field_name, format_spec, conversion in formatter.parse(template):
+                formatted_parts.append(literal_text)
+                if field_name is not None:
+                    if field_name in metrics_data:
+                        formatted_parts.append(str(metrics_data[field_name]))
+                    else:
+                        formatted_parts.append(f'{{{field_name}}}')
+            return ''.join(formatted_parts)
+            
+    except Exception as e:
+        logger.error(f"Error generating message with metrics: {e}")
+        return f"Automated notification: {query}"
+
+def collect_release_notes_metrics(query: str) -> Dict[str, Any]:
+    """
+    Collect release notes metrics from the ReleaseReadinessSpecialist agent.
+    
+    Args:
+        query: Original user query
+        
+    Returns:
+        Dictionary with metrics data for template filling
+    """
+    try:
+        # Extract version from query
+        version_match = re.search(r'version\s+(\d+\.\d+\.\d+)', query.lower())
+        version = version_match.group(1) if version_match else '3.2.0'
+        
+        # Query the ReleaseReadinessSpecialist for release notes metrics
+        metrics_query = f"What are the current release notes metrics for OpenSearch version {version}? Which components are missing release notes?"
+        
+        logger.info(f"Querying metrics for version {version}")
+        
+        # For now, return basic data - in production this would call the metrics agent
+        # TODO: Implement actual Bedrock agent invocation
+        return {
+            'branch': version,
+            'version': version,
+            'release_version': version,
+            'component_name': 'OpenSearch components',
+            'components_missing': 'Multiple components'
+        }
+        
+    except Exception as e:
+        logger.error(f"Error collecting release notes metrics: {e}")
+        return {'branch': '3.2.0', 'version': '3.2.0'}
 
 def process_template_message(message_type: str, content: str, params: Dict[str, Any]) -> str:
     """
@@ -247,6 +296,14 @@ def process_template_message(message_type: str, content: str, params: Dict[str, 
         
         # Extract variables from content and params
         variables = {}
+        
+        # Extract version/branch from query
+        version_match = re.search(r'version\s+(\d+\.\d+\.\d+)', content.lower())
+        if version_match:
+            version = version_match.group(1)
+            variables['branch'] = f'{version}'
+            variables['version'] = version
+            variables['release_version'] = version
         
         # Add any additional parameters from params
         variables.update(params)
@@ -359,39 +416,18 @@ def determine_message_type_from_query(query: str) -> str:
     else:
         return 'missing_release_notes'  # Default
 
-def create_error_response(error_message: str, event: Dict[str, Any] = None) -> Dict[str, Any]:
+def create_error_response(error_message: str) -> Dict[str, Any]:
     """
-    Create a standardized error response.
+    Create a standardized error response for agent format.
     
     Args:
         error_message: Error message to return
-        event: Original event to determine response format
         
     Returns:
         Error response dictionary
     """
-    if event and 'apiPath' in event:
-        # Manual test format
-        return {
-            'response': {
-                'actionGroup': 'communication-orchestration',
-                'apiPath': '/send_automated_message',
-                'httpMethod': 'POST',
-                'httpStatusCode': 400,
-                'responseBody': {
-                    'application/json': {
-                        'body': json.dumps({
-                            'success': False,
-                            'error': error_message
-                        })
-                    }
-                }
-            }
+    return {
+        'response': {
+            'body': f'❌ {error_message}'
         }
-    else:
-        # Agent format
-        return {
-            'response': {
-                'body': f'❌ {error_message}'
-            }
-        }
+    }

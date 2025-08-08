@@ -7,12 +7,17 @@ Add this to your OSCAR supervisor agent instructions:
 ```
 **AUTOMATED MESSAGE SENDING:**
 
-When users request automated message sending (e.g., "send missing release notes message to [channel]"), you MUST:
+When users request automated message sending (e.g., "send missing release notes message to [channel]"), you MUST follow this workflow:
 
-1. IMMEDIATELY call the send_automated_message function with the complete user query
-2. DO NOT attempt to generate message content yourself
-3. DO NOT respond with explanatory text before calling the function
-4. Let the function handle all message generation and channel posting
+1. **Route to metrics agent** (e.g., ReleaseReadinessSpecialist) to get current data
+2. **Route to knowledge base** to get the appropriate message template
+3. **Combine the data** - fill the template with real metrics data
+4. **Call send_automated_message** with:
+   - message_content: Complete filled message (NOT raw template)
+   - target_channel: Target channel name
+   - query: Original user query
+
+**CRITICAL:** Always gather real data first, then fill templates, then send complete messages
 
 **CRITICAL: These requests require send_automated_message function:**
 - "send missing release notes message to..."
@@ -24,7 +29,16 @@ When users request automated message sending (e.g., "send missing release notes 
 
 **Function Call Pattern:**
 User: "send missing release notes message to riley-needs-to-lock-in channel for version 3.2.0"
-Agent: [IMMEDIATELY call send_automated_message with full query]
+
+Agent workflow:
+1. Call ReleaseReadinessSpecialist: "What are the current release notes metrics for version 3.2.0?"
+2. Call Knowledge Base: "Get missing release notes message template"
+3. Combine: Fill template with actual component data from metrics
+4. Call send_automated_message(
+     message_content: "Hi, [Actual component teams]\n\nComponents X, Y, Z are missing release notes for version 3.2.0...",
+     target_channel: "riley-needs-to-lock-in",
+     query: "original query"
+   )
 
 **DO NOT:**
 - Generate message content in your response
@@ -45,10 +59,20 @@ Agent: [IMMEDIATELY call send_automated_message with full query]
   "name": "send_automated_message",
   "description": "Send automated messages to Slack channels",
   "parameters": {
+    "message_content": {
+      "type": "string",
+      "description": "Complete message content filled with actual data",
+      "required": true
+    },
+    "target_channel": {
+      "type": "string",
+      "description": "Target Slack channel ID or name",
+      "required": true
+    },
     "query": {
       "type": "string",
-      "description": "Complete user query with channel and message details",
-      "required": true
+      "description": "Original user query for logging",
+      "required": false
     }
   },
   "requireConfirmation": "DISABLED"
