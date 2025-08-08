@@ -1,0 +1,43 @@
+{
+  "test_run": {
+    "start_time": "2025-08-07T23:23:39.314998",
+    "agent_id": "NFCKXG7OIN",
+    "agent_alias_id": "KNFTCYYHPT",
+    "total_queries": 74
+  },
+  "results": [
+    {
+      "query_number": 1,
+      "query": "Which components failed the integration tests for RC number 1 for version 3.2.0?",
+      "timestamp": "2025-08-07T23:23:59.080842",
+      "status": "error_in_response",
+      "response_length": 424,
+      "response": "For version 3.2.0 RC1, the following components failed integration tests:\n\nOpenSearch components:\n- skills\n- query-insights \n- sql\n- anomaly-detection\n\nOpenSearch Dashboards components:\n- notificationsDashboards\n- alertingDashboards\n- anomalyDetectionDashboards\n- queryInsightsDashboards\n\nThese failures occurred in build numbers 11323 (OpenSearch) and 8585 (OpenSearch Dashboards) which correspond to RC1 for version 3.2.0.",
+      "session_id": "test-1754634219-1",
+      "error_indicators": [
+        "failed"
+      ]
+    },
+    {
+      "query_number": 2,
+      "query": "Show me integration test results for RC 2 and RC 3 for version 3.2.0",
+      "timestamp": "2025-08-07T23:24:22.722264",
+      "status": "error_in_response",
+      "response_length": 849,
+      "response": "# Integration Test Results for OpenSearch 3.2.0 (RC 2 and RC 3)\n\n## RC 2 Summary\n- **Total Tests**: 53\n- **Passed**: 46\n- **Failed**: 7\n- **Success Rate**: 86.8%\n\n### Failed Components in RC 2:\n- **OpenSearch Components**:\n  - sql\n  - skills\n  - anomaly-detection\n  - alerting\n\n- **OpenSearch Dashboards Components**:\n  - queryInsightsDashboards\n  - anomalyDetectionDashboards\n  - securityAnalyticsDashboards\n\n### Successful Components:\nMost components in both OpenSearch and OpenSearch Dashboards passed their integration tests, including core components like security, k-NN, neural-search, and flow-framework.\n\n## RC 3 Summary\nNo test results found for RC 3 in the database.\n\nTest reports and build URLs are available in the individual test results. You can access detailed test reports for any component by visiting the provided test report URLs.",
+      "session_id": "test-1754634242-2",
+      "error_indicators": [
+        "failed"
+      ]
+    },
+    {
+      "query_number": 3,
+      "query": "What OpenSearch components passed integration tests for RC 1 version 3.2.0?",
+      "timestamp": "2025-08-07T23:25:12.279405",
+      "status": "success",
+      "response_length": 918,
+      "response": "For OpenSearch version 3.2.0 RC 1, the following components passed integration tests:\n\nOpenSearch Core Components:\n- OpenSearch (core)\n- alerting\n- asynchronous-search\n- cross-cluster-replication\n- custom-codecs\n- flow-framework\n- geospatial\n- index-management\n- k-NN\n- ml-commons\n- neural-search\n- notifications\n- opensearch-learning-to-rank-base\n- opensearch-observability\n- opensearch-reports\n- opensearch-system-templates\n- search-relevance\n- security\n- security-analytics\n- user-behavior-insights\n\nOpenSearch Dashboards Components:\n- All OpenSearch-Dashboards test groups (ci-groups 1-14)\n- securityDashboards\n- mlCommonsDashboards\n- alertingDashboards\n- reportsDashboards\n- indexManagementDashboards\n- notificationsDashboards\n- assistantDashboards\n- observabilityDashboards\n- queryWorkbenchDashboards\n- customImportMapDashboards\n- searchRelevanceDashboards\n- flowFrameworkDashboards\n- securityAnalyticsDashboards",
+      "session_id": "test-1754634265-3"
+    }
+  ]
+}

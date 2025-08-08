@@ -73,29 +73,18 @@ def lambda_handler(event, context):
             if isinstance(param, dict) and 'name' in param and 'value' in param:
                 params[param['name']] = param['value']
         
-        agent_type = os.getenv('AGENT_TYPE', 'build-metrics')
-        mock_mode = os.getenv('MOCK_MODE', 'false').lower() == 'true'
+        agent_type = os.getenv('AGENT_TYPE', 'integration-test') # --> How does this work?
         
         logger.info(f"Function: {function_name}, Agent: {agent_type}")
         
         # Route based on function name
         if function_name == 'test_basic':
-            result = {
-                'status': 'success',
-                'message': 'Lambda function is working',
-                'agent_type': agent_type,
-                'mock_mode': mock_mode
-            }
+            result = {'status': 'success', 'message': 'Enhanced Lambda function is working', 'agent_type': agent_type}
         elif function_name == 'test_role_only':
             result = test_role_assumption()
-        elif function_name == 'explore_indices':
-            result = explore_opensearch_indices()
         elif function_name == 'test_opensearch':
             result = test_opensearch_connectivity()
-        elif function_name == 'discover_indices':
-            result = discover_all_indices_and_mappings()
-        elif function_name in ['get_test_metrics', 'get_build_metrics', 'get_release_metrics', 'get_deployment_metrics', 'get_metrics'] or not function_name:
-            # Handle metrics queries
+        elif function_name in ['get_integration_test_metrics', 'get_test_metrics', 'get_build_metrics', 'get_release_metrics', 'get_metrics', 'query_integration_test_failures', 'resolve_components_from_builds', 'get_rc_build_mapping'] or not function_name:
             result = handle_metrics_query(agent_type, function_name, params)
         else:
             result = {'error': f'Unknown function: {function_name}'}
@@ -107,325 +96,624 @@ def lambda_handler(event, context):
         return create_response(event, {'error': str(e), 'type': 'lambda_error'})
 
 def handle_metrics_query(agent_type, function_name, params):
-    """Handle metrics queries using boto3 HTTP requests."""
+    """Enhanced metrics query handler with natural language support."""
     try:
-        # Default parameters
-        metric_type = params.get('metric_type', 'execution')
-        time_range = params.get('time_range', '7d')
+        query_text = params.get('query', '')
         
-        if agent_type in ['test-metrics', 'test']:
-            return query_test_metrics(
-                metric_type, time_range, 
-                params.get('project_filter'),
-                params.get('test_type'),
-                params.get('status_filter')
-            )
+        # Parse query intent for all queries
+        intent = parse_query_intent(query_text, params)
+        
+        # Route to appropriate agent with enhanced logic
+        if agent_type in ['integration-test', 'test-metrics', 'test']:
+            return handle_integration_test_queries(intent, params)
         elif agent_type in ['build-metrics', 'build']:
-            return query_build_metrics(
-                metric_type, time_range, 
-                params.get('branch_filter'),
-                params.get('build_type'),
-                params.get('status_filter'),
-                params.get('pipeline_stage')
-            )
+            return handle_build_queries(intent, params)
         elif agent_type in ['release-metrics', 'release']:
-            return query_release_metrics(
-                metric_type, time_range, 
-                params.get('environment_filter'),
-                params.get('release_state'),
-                params.get('version_filter'),
-                params.get('readiness_threshold')
-            )
-        elif agent_type in ['deployment-metrics', 'deployment']:
-            return query_deployment_metrics(
-                metric_type, time_range, 
-                params.get('service_filter'),
-                params.get('environment'),
-                params.get('health_status'),
-                params.get('deployment_type')
-            )
+            return handle_release_queries(intent, params)
         else:
             return {'error': f'Unknown agent type: {agent_type}'}
             
     except Exception as e:
-        logger.error(f"Metrics query failed: {e}")
-        return {'error': str(e), 'type': 'metrics_error'}
+        logger.error(f"Enhanced metrics query failed: {e}")
+        return {'error': str(e), 'type': 'enhanced_metrics_error'}
 
-def query_test_metrics(metric_type, time_range, project_filter, test_type=None, status_filter=None):
-    """Query test metrics from OpenSearch - specialized for test-related data."""
+def handle_integration_test_queries(intent, params):
+    """Handle integration test queries using opensearch-integration-test-results index."""
     try:
-        # Test-related repositories and components based on discovery
-        test_repos = [
-            'opensearch-dashboards-functional-test',
-            'opensearch-build'
-        ]
+        version = intent.get('version')
+        if not version:
+            return {'error': 'Version is required for integration test queries'}
         
-        query_body = {
-            "size": 20,
-            "_source": [
-                "component", "repository", "version", "current_date",
-                "release_state", "issues_open", "issues_closed", 
-                "pulls_open", "pulls_closed", "release_owners"
-            ],
-            "query": {
-                "bool": {
-                    "should": [
-                        {"terms": {"repository.keyword": test_repos}},
-                        {"wildcard": {"repository.keyword": "*test*"}},
-                        {"wildcard": {"component.keyword": "*test*"}}
-                    ],
-                    "minimum_should_match": 1
-                }
-            },
-            "sort": [{"current_date": {"order": "desc"}}]
-        }
-        
-        if project_filter:
-            query_body["query"]["bool"]["must"] = [
-                {"match": {"repository": project_filter}}
-            ]
-        
-        result = opensearch_request('POST', '/opensearch_release_metrics/_search', query_body)
-        
-        hits = result.get('hits', {})
-        total = hits.get('total', {}).get('value', 0)
-        test_results = hits.get('hits', [])
+        # Execute multi-strategy query
+        results = execute_integration_test_strategy(intent)
         
         return {
-            'type': 'test_metrics',
-            'metric_type': metric_type,
-            'time_range': time_range,
-            'summary': {
-                'total_results': total,
-                'results_returned': len(test_results)
-            },
-            'recent_data': [
-                {
-                    'component': item.get('_source', {}).get('component', 'Unknown'),
-                    'repository': item.get('_source', {}).get('repository', 'Unknown'),
-                    'version': item.get('_source', {}).get('version', 'Unknown'),
-                    'timestamp': item.get('_source', {}).get('current_date', 'Unknown')
-                }
-                for item in test_results[:10]
-            ]
+            'agent_type': 'integration_test',
+            'query_intent': intent,
+            'results': results,
+            'summary': generate_integration_summary(results)
         }
+        
     except Exception as e:
-        return {'error': str(e), 'type': 'test_metrics_error'}
+        logger.error(f"Integration test query failed: {e}")
+        return {'error': str(e), 'type': 'integration_test_error'}
 
-def query_build_metrics(metric_type, time_range, branch_filter, build_type=None, status_filter=None, pipeline_stage=None):
-    """Query build metrics from OpenSearch - specialized for build-related data."""
+def handle_build_queries(intent, params):
+    """Handle build queries using opensearch-distribution-build-results index."""
     try:
-        # Build-related repositories based on discovery
-        build_repos = [
-            'opensearch-build',
-            'documentation-website',
-            'project-website'
-        ]
+        version = intent.get('version')
+        if not version:
+            return {'error': 'Version is required for build queries'}
         
-        query_body = {
-            "size": 20,
-            "_source": [
-                "component", "repository", "version", "current_date",
-                "release_state", "release_branch", "issues_open", "issues_closed",
-                "pulls_open", "pulls_closed", "release_owners", "version_increment"
-            ],
-            "query": {
-                "bool": {
-                    "should": [
-                        {"terms": {"repository.keyword": build_repos}},
-                        {"wildcard": {"repository.keyword": "*build*"}},
-                        {"wildcard": {"component.keyword": "*build*"}}
-                    ],
-                    "minimum_should_match": 1
-                }
-            },
-            "sort": [{"current_date": {"order": "desc"}}]
-        }
-        
-        if branch_filter:
-            query_body["query"]["bool"]["must"] = [
-                {"match": {"repository": branch_filter}}
-            ]
-        
-        result = opensearch_request('POST', '/opensearch_release_metrics/_search', query_body)
-        
-        hits = result.get('hits', {})
-        total = hits.get('total', {}).get('value', 0)
-        build_results = hits.get('hits', [])
+        results = execute_build_strategy(intent)
         
         return {
-            'type': 'build_metrics',
-            'metric_type': metric_type,
-            'time_range': time_range,
-            'summary': {
-                'total_results': total,
-                'recent_results': len(build_results)
-            },
-            'recent_data': [
-                {
-                    'component': item.get('_source', {}).get('component', 'Unknown'),
-                    'repository': item.get('_source', {}).get('repository', 'Unknown'),
-                    'version': item.get('_source', {}).get('version', 'Unknown'),
-                    'owners': item.get('_source', {}).get('release_owners', []),
-                    'timestamp': item.get('_source', {}).get('current_date', 'Unknown')
-                }
-                for item in build_results[:10]
-            ]
-        }
-    except Exception as e:
-        return {'error': str(e), 'type': 'build_metrics_error'}
-
-def query_release_metrics(metric_type, time_range, environment_filter, release_state=None, version_filter=None, readiness_threshold=None):
-    """Query release metrics from OpenSearch - specialized for release readiness data."""
-    try:
-        # Focus on release readiness indicators
-        query_body = {
-            "size": 20,
-            "_source": [
-                "component", "repository", "version", "current_date",
-                "release_state", "release_branch", "release_issue_exists",
-                "release_notes", "version_increment", "release_owners",
-                "issues_open", "issues_closed", "pulls_open", "pulls_closed",
-                "autocut_issues_open"
-            ],
-            "query": {
-                "bool": {
-                    "must": [
-                        {"exists": {"field": "release_state"}},
-                        {"exists": {"field": "version"}}
-                    ],
-                    "should": [
-                        {"term": {"release_state.keyword": "open"}},
-                        {"term": {"release_branch": True}},
-                        {"exists": {"field": "release_issue_exists"}}
-                    ],
-                    "minimum_should_match": 1
-                }
-            },
-            "sort": [{"current_date": {"order": "desc"}}]
+            'agent_type': 'build',
+            'query_intent': intent,
+            'results': results,
+            'summary': generate_build_summary(results)
         }
         
-        if environment_filter:
+    except Exception as e:
+        logger.error(f"Build query failed: {e}")
+        return {'error': str(e), 'type': 'build_error'}
+
+def handle_release_queries(intent, params):
+    """Handle release queries using opensearch_release_metrics index."""
+    try:
+        version = intent.get('version')
+        if not version:
+            return {'error': 'Version is required for release queries'}
+        
+        results = execute_release_strategy(intent)
+        
+        return {
+            'agent_type': 'release',
+            'query_intent': intent,
+            'results': results,
+            'summary': generate_release_summary(results)
+        }
+        
+    except Exception as e:
+        logger.error(f"Release query failed: {e}")
+        return {'error': str(e), 'type': 'release_error'}
+
+def parse_query_intent(query_text, params=None):
+    """Enhanced query parsing to extract comprehensive parameters."""
+    import re
+    
+    if params is None:
+        params = {}
+    
+    intent = {
+        'version': params.get('version'),
+        'rc_numbers': params.get('rc_numbers', []),
+        'build_numbers': params.get('build_numbers', []),
+        'components': params.get('components', []),
+        'status_filter': params.get('status_filter'),
+        'distribution': params.get('distribution', 'tar'),
+        'architecture': params.get('architecture', 'x64'),
+        'platform': params.get('platform', 'linux'),
+        'time_range': params.get('time_range', '7d'),
+        'query_type': 'general'
+    }
+    
+    if not query_text:
+        return intent
+    
+    query_lower = query_text.lower()
+    
+    # Extract version
+    if not intent['version']:
+        version_match = re.search(r'version\s+(\d+\.\d+\.\d+)', query_text, re.IGNORECASE)
+        if version_match:
+            intent['version'] = version_match.group(1)
+    
+    # Extract RC numbers
+    if not intent['rc_numbers']:
+        rc_matches = re.findall(r'RC\s+(?:number\s+)?(\d+)', query_text, re.IGNORECASE)
+        intent['rc_numbers'] = [int(rc) for rc in rc_matches]
+    
+    # Extract build numbers
+    if not intent['build_numbers']:
+        build_matches = re.findall(r'build\s+number\s+(\d+)', query_text, re.IGNORECASE)
+        intent['build_numbers'] = [int(build) for build in build_matches]
+    
+    # Extract components
+    if not intent['components']:
+        if 'opensearch-dashboards' in query_lower or 'dashboards' in query_lower:
+            intent['components'].append('OpenSearch-Dashboards')
+        if 'opensearch' in query_lower and 'dashboards' not in query_lower:
+            intent['components'].append('OpenSearch')
+    
+    # Determine query type
+    if 'failed' in query_lower or 'failure' in query_lower:
+        intent['status_filter'] = 'failed'
+        intent['query_type'] = 'failure_analysis'
+    elif 'passed' in query_lower or 'success' in query_lower:
+        intent['status_filter'] = 'passed'
+        intent['query_type'] = 'success_analysis'
+    elif 'integration test' in query_lower:
+        intent['query_type'] = 'integration_test'
+    elif 'build' in query_lower:
+        intent['query_type'] = 'build_analysis'
+    elif 'release' in query_lower:
+        intent['query_type'] = 'release_analysis'
+    
+    # Extract platform/architecture
+    if 'arm64' in query_lower:
+        intent['architecture'] = 'arm64'
+    if 'windows' in query_lower:
+        intent['platform'] = 'windows'
+    if 'rpm' in query_lower:
+        intent['distribution'] = 'rpm'
+    elif 'deb' in query_lower:
+        intent['distribution'] = 'deb'
+    
+    return intent
+
+def execute_integration_test_strategy(intent):
+    """Execute integration test queries with multiple strategies."""
+    version = intent['version']
+    rc_numbers = intent['rc_numbers']
+    build_numbers = intent['build_numbers']
+    components = intent['components']
+    status_filter = intent.get('status_filter')
+    
+    results = []
+    
+    # Strategy 1: RC-based queries
+    if rc_numbers:
+        for rc_num in rc_numbers:
+            if components:
+                for component in components:
+                    build_num = get_rc_distribution_build_number(version, rc_num, component)
+                    if build_num:
+                        result = query_integration_test_results(
+                            version=version,
+                            rc_number=rc_num,
+                            build_numbers=[build_num],
+                            components=[component],
+                            status_filter=status_filter,
+                            distribution=intent.get('distribution'),
+                            architecture=intent.get('architecture')
+                        )
+                        results.append({
+                            'strategy': 'rc_component_based',
+                            'rc_number': rc_num,
+                            'component': component,
+                            'build_number': build_num,
+                            'test_results': extract_test_results(result)
+                        })
+            else:
+                # Query all components for this RC
+                result = query_integration_test_results(
+                    version=version,
+                    rc_number=rc_num,
+                    status_filter=status_filter,
+                    distribution=intent.get('distribution'),
+                    architecture=intent.get('architecture')
+                )
+                results.append({
+                    'strategy': 'rc_based',
+                    'rc_number': rc_num,
+                    'test_results': extract_test_results(result)
+                })
+    
+    # Strategy 2: Direct build number queries
+    elif build_numbers:
+        if not components:
+            component_map = resolve_components_from_build_numbers(version, build_numbers)
+            all_components = []
+            for comps in component_map.values():
+                all_components.extend(comps)
+            components = list(set(all_components))
+        
+        result = query_integration_test_results(
+            version=version,
+            build_numbers=build_numbers,
+            components=components,
+            status_filter=status_filter,
+            distribution=intent.get('distribution'),
+            architecture=intent.get('architecture')
+        )
+        results.append({
+            'strategy': 'build_number_based',
+            'build_numbers': build_numbers,
+            'components': components,
+            'test_results': extract_test_results(result)
+        })
+    
+    # Strategy 3: Component-only queries (latest builds)
+    elif components:
+        result = query_integration_test_results(
+            version=version,
+            components=components,
+            status_filter=status_filter,
+            distribution=intent.get('distribution'),
+            architecture=intent.get('architecture')
+        )
+        results.append({
+            'strategy': 'component_based',
+            'components': components,
+            'test_results': extract_test_results(result)
+        })
+    
+    # Strategy 4: General query (all recent results)
+    else:
+        result = query_integration_test_results(
+            version=version,
+            status_filter=status_filter,
+            distribution=intent.get('distribution'),
+            architecture=intent.get('architecture')
+        )
+        results.append({
+            'strategy': 'general',
+            'test_results': extract_test_results(result)
+        })
+    
+    return results
+
+def execute_build_strategy(intent):
+    """Execute build queries using distribution build results."""
+    version = intent['version']
+    build_numbers = intent['build_numbers']
+    components = intent['components']
+    status_filter = intent.get('status_filter')
+    
+    result = query_distribution_build_results(
+        version=version,
+        build_numbers=build_numbers,
+        components=components,
+        status_filter=status_filter
+    )
+    
+    return [{
+        'strategy': 'build_analysis',
+        'build_results': extract_build_results(result)
+    }]
+
+def execute_release_strategy(intent):
+    """Execute release queries using release metrics."""
+    version = intent['version']
+    components = intent['components']
+    
+    result = query_release_readiness(
+        version=version,
+        components=components
+    )
+    
+    return [{
+        'strategy': 'release_readiness',
+        'release_results': extract_release_results(result)
+    }]
+
+def query_integration_test_results(version, rc_number=None, build_numbers=None, components=None, status_filter=None, distribution="tar", architecture="x64"):
+    """Comprehensive integration test results query."""
+    query_body = {
+        "size": 100,
+        "sort": [{"build_start_time": {"order": "desc"}}],
+        "_source": [
+            "component", "component_build_result", "distribution_build_number",
+            "rc_number", "platform", "architecture", "distribution",
+            "test_report_manifest_yml", "integ_test_build_url", "build_start_time",
+            "component_category", "qualifier"
+        ],
+        "query": {
+            "bool": {
+                "must": [
+                    {"match_phrase": {"version": version}}
+                ]
+            }
+        }
+    }
+    
+    # Add status filter if specified
+    if status_filter:
+        query_body["query"]["bool"]["must"].append(
+            {"match_phrase": {"component_build_result": status_filter}}
+        )
+    
+    # Add RC number filter
+    if rc_number:
+        query_body["query"]["bool"]["must"].append(
+            {"match_phrase": {"rc_number": str(rc_number)}}
+        )
+    
+    # Add build numbers filter
+    if build_numbers:
+        query_body["query"]["bool"]["must"].append(
+            {"terms": {"distribution_build_number": [str(bn) for bn in build_numbers]}}
+        )
+    
+    # Add component filter with OpenSearch-Dashboards special handling
+    if components:
+        if "OpenSearch-Dashboards" in components:
+            query_body["query"]["bool"]["must"].append({
+                "bool": {
+                    "should": [
+                        {"regexp": {"component": "OpenSearch-Dashboards-ci-group-.*"}},
+                        {"terms": {"component": components}}
+                    ]
+                }
+            })
+        else:
             query_body["query"]["bool"]["must"].append(
-                {"match": {"repository": environment_filter}}
+                {"terms": {"component": components}}
             )
-        
-        result = opensearch_request('POST', '/opensearch_release_metrics/_search', query_body)
-        
-        hits = result.get('hits', {})
-        total = hits.get('total', {}).get('value', 0)
-        release_results = hits.get('hits', [])
-        
-        # Calculate readiness based on actual release indicators
-        ready_components = 0
-        for item in release_results:
-            source = item.get('_source', {})
-            # A component is "ready" if it has:
-            # - release_issue_exists: true
-            # - release_notes: true  
-            # - version_increment: true
-            # - release_state: closed OR release_branch: true
-            readiness_score = 0
-            if source.get('release_issue_exists'): readiness_score += 1
-            if source.get('release_notes'): readiness_score += 1
-            if source.get('version_increment'): readiness_score += 1
-            if source.get('release_state') == 'closed' or source.get('release_branch'): readiness_score += 1
-            
-            if readiness_score >= 3:  # At least 3 out of 4 criteria
-                ready_components += 1
-        
-        overall_readiness = (ready_components / len(release_results) * 100) if release_results else 0
-        
-        return {
-            'type': 'release_metrics',
-            'metric_type': metric_type,
-            'time_range': time_range,
-            'summary': {
-                'total_releases': total,
-                'ready_components': ready_components,
-                'overall_readiness': round(overall_readiness, 1)
-            },
-            'recent_releases': [
-                {
-                    'version': item.get('_source', {}).get('version', 'Unknown'),
-                    'component': item.get('_source', {}).get('component', 'Unknown'),
-                    'repository': item.get('_source', {}).get('repository', 'Unknown'),
-                    'owners': item.get('_source', {}).get('release_owners', []),
-                    'timestamp': item.get('_source', {}).get('current_date', 'Unknown')
-                }
-                for item in release_results[:10]
-            ]
-        }
-    except Exception as e:
-        return {'error': str(e), 'type': 'release_metrics_error'}
+    
+    # Add platform/architecture filters
+    if distribution:
+        query_body["query"]["bool"]["must"].append(
+            {"match_phrase": {"distribution": distribution}}
+        )
+    if architecture:
+        query_body["query"]["bool"]["must"].append(
+            {"match_phrase": {"architecture": architecture}}
+        )
+    
+    # Remove collapse since component.keyword mapping doesn't exist
+    # query_body["collapse"] = {"field": "component.keyword"}
+    
+    return opensearch_request('POST', '/opensearch-integration-test-results/_search', query_body)
 
-def query_deployment_metrics(metric_type, time_range, service_filter, environment=None, health_status=None, deployment_type=None):
-    """Query deployment metrics from OpenSearch - specialized for core service deployment data."""
-    try:
-        # Core service components that would be deployed
-        core_services = [
-            'OpenSearch',
-            'OpenSearch-Dashboards', 
-            'security',
-            'alerting',
-            'anomaly-detection',
-            'ml-commons',
-            'k-NN',
-            'index-management'
-        ]
-        
-        query_body = {
-            "size": 20,
-            "_source": [
-                "component", "repository", "version", "current_date",
-                "release_state", "release_branch", "issues_open", "issues_closed",
-                "pulls_open", "pulls_closed", "release_owners"
-            ],
-            "query": {
-                "bool": {
-                    "should": [
-                        {"terms": {"component.keyword": core_services}},
-                        {"term": {"release_state.keyword": "closed"}},
-                        {"term": {"release_branch": True}}
-                    ],
-                    "minimum_should_match": 1
-                }
-            },
-            "sort": [{"current_date": {"order": "desc"}}]
+def query_distribution_build_results(version, build_numbers=None, components=None, status_filter=None):
+    """Query distribution build results."""
+    query_body = {
+        "size": 100,
+        "sort": [{"build_start_time": {"order": "desc"}}],
+        "_source": [
+            "component", "component_build_result", "distribution_build_number",
+            "build_start_time", "component_category", "qualifier", "version"
+        ],
+        "query": {
+            "bool": {
+                "must": [
+                    {"match_phrase": {"version": version}}
+                ]
+            }
         }
-        
-        if service_filter:
-            query_body["query"]["bool"]["must"] = [
-                {"match": {"component": service_filter}}
-            ]
-        
-        result = opensearch_request('POST', '/opensearch_release_metrics/_search', query_body)
-        
-        hits = result.get('hits', {})
-        total = hits.get('total', {}).get('value', 0)
-        deployment_results = hits.get('hits', [])
-        
-        return {
-            'type': 'deployment_metrics',
-            'metric_type': metric_type,
-            'time_range': time_range,
-            'summary': {
-                'total_results': total,
-                'recent_results': len(deployment_results)
-            },
-            'recent_data': [
-                {
-                    'component': item.get('_source', {}).get('component', 'Unknown'),
-                    'repository': item.get('_source', {}).get('repository', 'Unknown'),
-                    'version': item.get('_source', {}).get('version', 'Unknown'),
-                    'owners': item.get('_source', {}).get('release_owners', []),
-                    'timestamp': item.get('_source', {}).get('current_date', 'Unknown')
-                }
-                for item in deployment_results[:10]
-            ]
+    }
+    
+    if status_filter:
+        query_body["query"]["bool"]["must"].append(
+            {"match_phrase": {"component_build_result": status_filter}}
+        )
+    
+    if build_numbers:
+        query_body["query"]["bool"]["must"].append(
+            {"terms": {"distribution_build_number": [str(bn) for bn in build_numbers]}}
+        )
+    
+    if components:
+        query_body["query"]["bool"]["must"].append(
+            {"terms": {"component": components}}
+        )
+    
+    return opensearch_request('POST', '/opensearch-distribution-build-results/_search', query_body)
+
+def query_release_readiness(version, components=None):
+    """Query release readiness metrics."""
+    query_body = {
+        "size": 100,
+        "sort": [{"current_date": {"order": "desc"}}],
+        "_source": [
+            "component", "repository", "version", "current_date",
+            "release_state", "release_branch", "release_issue_exists",
+            "release_notes", "version_increment", "release_owners",
+            "issues_open", "issues_closed", "pulls_open", "pulls_closed"
+        ],
+        "query": {
+            "bool": {
+                "must": [
+                    {"match_phrase": {"version": version}}
+                ]
+            }
         }
-    except Exception as e:
-        return {'error': str(e), 'type': 'deployment_metrics_error'}
+    }
+    
+    if components:
+        query_body["query"]["bool"]["must"].append(
+            {"terms": {"component": components}}
+        )
+    
+    return opensearch_request('POST', '/opensearch_release_metrics/_search', query_body)
+
+def resolve_components_from_build_numbers(version, build_numbers):
+    """Resolve components from build numbers."""
+    query_body = {
+        "size": 1000,
+        "_source": ["component", "distribution_build_number"],
+        "query": {
+            "bool": {
+                "must": [
+                    {"match_phrase": {"version": version}},
+                    {"terms": {"distribution_build_number": [str(bn) for bn in build_numbers]}}
+                ]
+            }
+        }
+    }
+    
+    result = opensearch_request('POST', '/opensearch-distribution-build-results/_search', query_body)
+    
+    build_component_map = {}
+    for hit in result.get('hits', {}).get('hits', []):
+        source = hit['_source']
+        build_num = source['distribution_build_number']
+        component = source['component']
+        
+        if build_num not in build_component_map:
+            build_component_map[build_num] = []
+        if component not in build_component_map[build_num]:
+            build_component_map[build_num].append(component)
+    
+    return build_component_map
+
+def get_rc_distribution_build_number(version, rc_number, component_name="OpenSearch"):
+    """Get build number for RC."""
+    query_body = {
+        "_source": "distribution_build_number",
+        "sort": [{"distribution_build_number": {"order": "desc"}}],
+        "size": 1,
+        "query": {
+            "bool": {
+                "filter": [
+                    {"match_phrase": {"component": component_name}},
+                    {"match_phrase": {"rc": "true"}},
+                    {"match_phrase": {"version": version}},
+                    {"match_phrase": {"rc_number": str(rc_number)}}
+                ]
+            }
+        }
+    }
+    
+    result = opensearch_request('POST', '/opensearch-integration-test-results/_search', query_body)
+    hits = result.get('hits', {}).get('hits', [])
+    
+    if hits:
+        return hits[0]['_source']['distribution_build_number']
+    return None
+
+def extract_test_results(opensearch_result):
+    """Extract comprehensive test result information."""
+    results = []
+    hits = opensearch_result.get('hits', {}).get('hits', [])
+    
+    for hit in hits:
+        source = hit['_source']
+        results.append({
+            'component': source.get('component'),
+            'status': source.get('component_build_result'),
+            'build_number': source.get('distribution_build_number'),
+            'rc_number': source.get('rc_number'),
+            'platform': source.get('platform'),
+            'architecture': source.get('architecture'),
+            'distribution': source.get('distribution'),
+            'test_report': source.get('test_report_manifest_yml'),
+            'build_url': source.get('integ_test_build_url'),
+            'timestamp': source.get('build_start_time'),
+            'category': source.get('component_category'),
+            'qualifier': source.get('qualifier')
+        })
+    
+    return results
+
+def extract_build_results(opensearch_result):
+    """Extract build result information."""
+    results = []
+    hits = opensearch_result.get('hits', {}).get('hits', [])
+    
+    for hit in hits:
+        source = hit['_source']
+        results.append({
+            'component': source.get('component'),
+            'status': source.get('component_build_result'),
+            'build_number': source.get('distribution_build_number'),
+            'timestamp': source.get('build_start_time'),
+            'category': source.get('component_category'),
+            'qualifier': source.get('qualifier'),
+            'version': source.get('version')
+        })
+    
+    return results
+
+def extract_release_results(opensearch_result):
+    """Extract release readiness information."""
+    results = []
+    hits = opensearch_result.get('hits', {}).get('hits', [])
+    
+    for hit in hits:
+        source = hit['_source']
+        
+        # Calculate readiness score
+        readiness_score = 0
+        if source.get('release_issue_exists'): readiness_score += 1
+        if source.get('release_notes'): readiness_score += 1
+        if source.get('version_increment'): readiness_score += 1
+        if source.get('release_state') == 'closed' or source.get('release_branch'): readiness_score += 1
+        
+        results.append({
+            'component': source.get('component'),
+            'repository': source.get('repository'),
+            'version': source.get('version'),
+            'release_state': source.get('release_state'),
+            'release_branch': source.get('release_branch'),
+            'release_issue_exists': source.get('release_issue_exists'),
+            'release_notes': source.get('release_notes'),
+            'version_increment': source.get('version_increment'),
+            'release_owners': source.get('release_owners', []),
+            'issues_open': source.get('issues_open'),
+            'issues_closed': source.get('issues_closed'),
+            'pulls_open': source.get('pulls_open'),
+            'pulls_closed': source.get('pulls_closed'),
+            'readiness_score': readiness_score,
+            'is_ready': readiness_score >= 3,
+            'timestamp': source.get('current_date')
+        })
+    
+    return results
+
+def generate_integration_summary(results):
+    """Generate summary for integration test results."""
+    all_results = []
+    for result_set in results:
+        all_results.extend(result_set.get('test_results', []))
+    
+    if not all_results:
+        return {'total': 0, 'failed': 0, 'passed': 0, 'success_rate': 0}
+    
+    failed = len([r for r in all_results if r.get('status') == 'failed'])
+    passed = len([r for r in all_results if r.get('status') == 'passed'])
+    total = len(all_results)
+    
+    return {
+        'total': total,
+        'failed': failed,
+        'passed': passed,
+        'success_rate': round((passed / total * 100), 1) if total > 0 else 0,
+        'unique_components': len(set(r.get('component') for r in all_results if r.get('component')))
+    }
+
+def generate_build_summary(results):
+    """Generate summary for build results."""
+    all_results = []
+    for result_set in results:
+        all_results.extend(result_set.get('build_results', []))
+    
+    if not all_results:
+        return {'total': 0, 'failed': 0, 'successful': 0, 'success_rate': 0}
+    
+    failed = len([r for r in all_results if r.get('status') == 'failed'])
+    successful = len([r for r in all_results if r.get('status') == 'success'])
+    total = len(all_results)
+    
+    return {
+        'total': total,
+        'failed': failed,
+        'successful': successful,
+        'success_rate': round((successful / total * 100), 1) if total > 0 else 0,
+        'unique_components': len(set(r.get('component') for r in all_results if r.get('component')))
+    }
+
+def generate_release_summary(results):
+    """Generate summary for release results."""
+    all_results = []
+    for result_set in results:
+        all_results.extend(result_set.get('release_results', []))
+    
+    if not all_results:
+        return {'total': 0, 'ready': 0, 'not_ready': 0, 'readiness_rate': 0}
+    
+    ready = len([r for r in all_results if r.get('is_ready')])
+    total = len(all_results)
+    
+    return {
+        'total': total,
+        'ready': ready,
+        'not_ready': total - ready,
+        'readiness_rate': round((ready / total * 100), 1) if total > 0 else 0,
+        'unique_components': len(set(r.get('component') for r in all_results if r.get('component')))
+    }
 
 def test_role_assumption():
     """Test cross-account role assumption."""
@@ -485,55 +773,6 @@ def test_opensearch_connectivity():
             'error_type': type(e).__name__
         }
 
-def explore_opensearch_indices():
-    """Explore OpenSearch indices and their mappings."""
-    try:
-        # Get all indices
-        indices = opensearch_request('GET', '/_cat/indices?format=json')
-        
-        # Focus on build-related indices
-        build_indices = [idx for idx in indices if 'build' in idx.get('index', '').lower() or 'test' in idx.get('index', '').lower() or 'release' in idx.get('index', '').lower()]
-        
-        index_details = []
-        for idx in build_indices[:5]:  # Limit to first 5 indices
-            index_name = idx.get('index')
-            try:
-                # Get mapping for this index
-                mapping = opensearch_request('GET', f'/{index_name}/_mapping')
-                
-                # Get sample document
-                sample = opensearch_request('POST', f'/{index_name}/_search', {
-                    "size": 1,
-                    "query": {"match_all": {}}
-                })
-                
-                index_details.append({
-                    'index_name': index_name,
-                    'doc_count': idx.get('docs.count', '0'),
-                    'store_size': idx.get('store.size', '0'),
-                    'mapping_fields': list(mapping.get(index_name, {}).get('mappings', {}).get('properties', {}).keys())[:10],
-                    'sample_document': sample.get('hits', {}).get('hits', [{}])[0].get('_source', {}) if sample.get('hits', {}).get('hits') else {}
-                })
-            except Exception as e:
-                index_details.append({
-                    'index_name': index_name,
-                    'error': str(e)
-                })
-        
-        return {
-            'status': 'success',
-            'total_indices': len(indices),
-            'build_related_indices': len(build_indices),
-            'index_details': index_details
-        }
-        
-    except Exception as e:
-        return {
-            'status': 'failed',
-            'error': str(e),
-            'error_type': type(e).__name__
-        }
-
 def create_response(event, result):
     """Create a response in the format expected by the Bedrock agent."""
     action_group = event['actionGroup']
@@ -549,316 +788,6 @@ def create_response(event, result):
                 "responseBody": {
                     "TEXT": {
                         "body": response_body_string
-                    }
-                }
-            }
-        }
-    }
-
-def discover_all_indices_and_mappings():
-    """Discover field structure using search queries since we can't access mappings."""
-    try:
-        # We know opensearch_release_metrics exists, let's analyze its structure
-        index_name = 'opensearch_release_metrics'
-        
-        # Get sample documents to understand field structure
-        sample_query = {
-            "size": 10,
-            "query": {"match_all": {}},
-            "sort": [{"current_date": {"order": "desc"}}]
-        }
-        
-        sample_result = opensearch_request('POST', f'/{index_name}/_search', sample_query)
-        hits = sample_result.get('hits', {}).get('hits', [])
-        total_docs = sample_result.get('hits', {}).get('total', {}).get('value', 0)
-        
-        # Analyze field structure from sample documents
-        all_fields = set()
-        field_examples = {}
-        
-        for hit in hits:
-            source = hit.get('_source', {})
-            for field, value in source.items():
-                all_fields.add(field)
-                if field not in field_examples:
-                    field_examples[field] = value
-        
-        # Try to find different types of data by searching for specific patterns
-        analysis_queries = {
-            'build_related': {
-                "query": {"bool": {"should": [
-                    {"wildcard": {"component.keyword": "*build*"}},
-                    {"wildcard": {"repository.keyword": "*build*"}},
-                    {"match": {"component": "build"}}
-                ]}},
-                "size": 5
-            },
-            'test_related': {
-                "query": {"bool": {"should": [
-                    {"wildcard": {"component.keyword": "*test*"}},
-                    {"wildcard": {"repository.keyword": "*test*"}},
-                    {"match": {"component": "test"}}
-                ]}},
-                "size": 5
-            },
-            'deployment_related': {
-                "query": {"bool": {"should": [
-                    {"wildcard": {"component.keyword": "*deploy*"}},
-                    {"wildcard": {"repository.keyword": "*deploy*"}},
-                    {"match": {"component": "deploy"}}
-                ]}},
-                "size": 5
-            },
-            'unique_components': {
-                "size": 0,
-                "aggs": {
-                    "components": {"terms": {"field": "component.keyword", "size": 50}}
-                }
-            },
-            'unique_repositories': {
-                "size": 0,
-                "aggs": {
-                    "repositories": {"terms": {"field": "repository.keyword", "size": 50}}
-                }
-            },
-            'version_patterns': {
-                "size": 0,
-                "aggs": {
-                    "versions": {"terms": {"field": "version.keyword", "size": 20}}
-                }
-            }
-        }
-        
-        analysis_results = {}
-        for analysis_name, query in analysis_queries.items():
-            try:
-                result = opensearch_request('POST', f'/{index_name}/_search', query)
-                analysis_results[analysis_name] = result
-            except Exception as e:
-                analysis_results[analysis_name] = {'error': str(e)}
-        
-        return {
-            'status': 'success',
-            'index_analysis': {
-                'index_name': index_name,
-                'total_documents': total_docs,
-                'discovered_fields': list(all_fields),
-                'field_examples': field_examples,
-                'sample_documents': [hit.get('_source', {}) for hit in hits],
-                'specialized_analysis': analysis_results
-            }
-        }
-        
-    except Exception as e:
-        return {
-            'status': 'failed',
-            'error': str(e),
-            'error_type': type(e).__name__
-        }
-
-def discover_all_indices_and_mappings_old():
-    """Old discovery function - kept for reference."""
-    results = {
-        'discovery_methods': [],
-        'successful_indices': [],
-        'failed_attempts': []
-    }
-    
-    # Method 1: Try known index patterns from our existing queries
-    known_patterns = [
-        'opensearch_release_metrics',
-        'opensearch_build_metrics', 
-        'opensearch_test_metrics',
-        'opensearch_deployment_metrics',
-        'build_metrics',
-        'test_metrics',
-        'release_metrics',
-        'deployment_metrics',
-        'ci_metrics',
-        'pipeline_metrics'
-    ]
-    
-    results['discovery_methods'].append('known_patterns')
-    for pattern in known_patterns:
-        try:
-            # Try to get mapping first
-            mapping = opensearch_request('GET', f'/{pattern}/_mapping')
-            
-            # If mapping succeeds, get sample data
-            sample = opensearch_request('POST', f'/{pattern}/_search', {
-                "size": 3,
-                "query": {"match_all": {}}
-            })
-            
-            properties = mapping.get(pattern, {}).get('mappings', {}).get('properties', {})
-            hits = sample.get('hits', {}).get('hits', [])
-            total_docs = sample.get('hits', {}).get('total', {}).get('value', 0)
-            
-            results['successful_indices'].append({
-                'index_name': pattern,
-                'method': 'known_pattern',
-                'total_documents': total_docs,
-                'fields': list(properties.keys()),
-                'field_types': {k: v.get('type', 'unknown') for k, v in properties.items()},
-                'sample_documents': [hit.get('_source', {}) for hit in hits],
-                'metrics_relevance': analyze_metrics_relevance(properties, [hit.get('_source', {}) for hit in hits])
-            })
-            
-        except Exception as e:
-            results['failed_attempts'].append({
-                'index_pattern': pattern,
-                'method': 'known_pattern',
-                'error': str(e)
-            })
-    
-    # Method 2: Try wildcard searches on known working index
-    results['discovery_methods'].append('wildcard_search')
-    try:
-        # Use the known working index to search for similar patterns
-        base_search = opensearch_request('POST', '/opensearch_release_metrics/_search', {
-            "size": 0,
-            "aggs": {
-                "unique_indices": {
-                    "terms": {
-                        "field": "_index",
-                        "size": 100
-                    }
-                }
-            }
-        })
-        
-        # This might reveal other indices if they exist
-        results['wildcard_search_result'] = base_search.get('aggregations', {})
-        
-    except Exception as e:
-        results['failed_attempts'].append({
-            'method': 'wildcard_search',
-            'error': str(e)
-        })
-    
-    # Method 3: Try different index naming conventions
-    results['discovery_methods'].append('naming_conventions')
-    naming_conventions = [
-        'metrics-build',
-        'metrics-test', 
-        'metrics-release',
-        'metrics-deployment',
-        'build-*',
-        'test-*',
-        'release-*',
-        'deploy-*'
-    ]
-    
-    for convention in naming_conventions:
-        try:
-            search_result = opensearch_request('POST', f'/{convention}/_search', {
-                "size": 1,
-                "query": {"match_all": {}}
-            })
-            
-            if search_result.get('hits', {}).get('total', {}).get('value', 0) > 0:
-                # Get mapping for this index
-                mapping = opensearch_request('GET', f'/{convention}/_mapping')
-                
-                results['successful_indices'].append({
-                    'index_name': convention,
-                    'method': 'naming_convention',
-                    'total_documents': search_result.get('hits', {}).get('total', {}).get('value', 0),
-                    'mapping': mapping
-                })
-                
-        except Exception as e:
-            results['failed_attempts'].append({
-                'index_pattern': convention,
-                'method': 'naming_convention', 
-                'error': str(e)
-            })
-    
-    # Method 4: Analyze the working index in detail
-    results['discovery_methods'].append('detailed_analysis')
-    try:
-        # Deep dive into opensearch_release_metrics
-        detailed_mapping = opensearch_request('GET', '/opensearch_release_metrics/_mapping')
-        
-        # Get field statistics
-        field_stats = opensearch_request('POST', '/opensearch_release_metrics/_search', {
-            "size": 0,
-            "aggs": {
-                "component_types": {
-                    "terms": {"field": "component.keyword", "size": 20}
-                },
-                "repository_types": {
-                    "terms": {"field": "repository.keyword", "size": 20}
-                },
-                "version_types": {
-                    "terms": {"field": "version.keyword", "size": 10}
-                }
-            }
-        })
-        
-        results['detailed_analysis'] = {
-            'mapping': detailed_mapping,
-            'field_statistics': field_stats.get('aggregations', {}),
-            'total_documents': field_stats.get('hits', {}).get('total', {}).get('value', 0)
-        }
-        
-    except Exception as e:
-        results['failed_attempts'].append({
-            'method': 'detailed_analysis',
-            'error': str(e)
-        })
-    
-    return {
-        'status': 'success',
-        'discovery_results': results,
-        'summary': {
-            'methods_tried': len(results['discovery_methods']),
-            'successful_indices': len(results['successful_indices']),
-            'failed_attempts': len(results['failed_attempts'])
-        }
-    }
-
-def analyze_metrics_relevance(fields, sample_docs):
-    """Analyze how relevant an index is for different metrics types."""
-    relevance = {
-        'test': 0,
-        'build': 0, 
-        'release': 0,
-        'deployment': 0
-    }
-    
-    # Keywords for each metrics type
-    keywords = {
-        'test': ['test', 'result', 'status', 'coverage', 'failure', 'success', 'execution', 'junit', 'spec'],
-        'build': ['build', 'pipeline', 'job', 'branch', 'commit', 'duration', 'ci', 'jenkins', 'gradle'],
-        'release': ['release', 'version', 'deploy', 'environment', 'rollback', 'readiness', 'component'],
-        'deployment': ['deploy', 'service', 'environment', 'health', 'uptime', 'performance', 'infrastructure']
-    }
-    
-    # Check field names
-    for field_name in fields.keys():
-        field_lower = field_name.lower()
-        for metrics_type, type_keywords in keywords.items():
-            if any(keyword in field_lower for keyword in type_keywords):
-                relevance[metrics_type] += 1
-    
-    # Check sample document content
-    for doc in sample_docs:
-        doc_str = json.dumps(doc).lower()
-        for metrics_type, type_keywords in keywords.items():
-            if any(keyword in doc_str for keyword in type_keywords):
-                relevance[metrics_type] += 0.5
-    
-    return relevance
-
-def create_bedrock_response(result):
-    """Create Bedrock agent compatible response when needed."""
-    return {
-        'response': {
-            'functionResponse': {
-                'responseBody': {
-                    'TEXT': {
-                        'body': json.dumps(result, indent=2, default=str)
                     }
                 }
             }

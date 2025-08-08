@@ -34,7 +34,6 @@ AGENT_FUNCTIONS=(
     "oscar-test-metrics-agent-new"
     "oscar-build-metrics-agent-new"
     "oscar-release-metrics-agent-new"
-    "oscar-deployment-metrics-agent-new"
 )
 
 for FUNCTION_NAME in "${AGENT_FUNCTIONS[@]}"; do
