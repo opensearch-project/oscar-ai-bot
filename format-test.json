@@ -1,1 +1,0 @@
-{"response": {"functionResponse": {"responseBody": {"TEXT": {"body": "{\n  \"status\": \"success\",\n  \"message\": \"Lambda function is working\",\n  \"agent_type\": \"build-metrics\",\n  \"mock_mode\": false\n}"}}}}}

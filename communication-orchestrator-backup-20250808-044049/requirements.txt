@@ -1,9 +1,0 @@
-# Communication Orchestrator Dependencies
-# These are additional to the main OSCAR agent requirements
-
-# Already included in main OSCAR agent:
-# boto3>=1.26.0
-# slack-sdk>=3.19.0
-# slack-bolt>=1.14.0
-
-# No additional dependencies required - uses existing OSCAR infrastructure

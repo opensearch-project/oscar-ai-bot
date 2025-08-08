@@ -1,1 +1,0 @@
-{"statusCode": 200, "body": {"status": "success", "duration_seconds": 0.94, "assumed_identity": {"account": "979020455945", "arn": "arn:aws:sts::979020455945:assumed-role/OpenSearchOscarAccessRole/oscar-metrics-session", "user_id": "AROA6H4RKUAEZZONZXJKD:oscar-metrics-session"}}, "headers": {"Content-Type": "application/json"}}
