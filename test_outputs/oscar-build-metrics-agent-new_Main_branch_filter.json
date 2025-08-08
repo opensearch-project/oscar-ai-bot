@@ -1,1 +1,0 @@
-{"statusCode": 200, "body": {"type": "build_metrics", "metric_type": "execution", "time_range": "7d", "summary": {"total_results": 0, "recent_results": 0}, "recent_data": []}, "headers": {"Content-Type": "application/json"}}

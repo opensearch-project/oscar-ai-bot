@@ -1,1 +1,0 @@
-{"statusCode": 200, "body": {"type": "release_metrics", "metric_type": "quality", "time_range": "30d", "summary": {"total_releases": 0, "ready_components": 0, "overall_readiness": 0}, "recent_releases": []}, "headers": {"Content-Type": "application/json"}}

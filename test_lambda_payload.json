@@ -1,0 +1,10 @@
+{
+  "actionGroup": "communication-orchestration",
+  "apiPath": "/send_automated_message",
+  "parameters": [
+    {
+      "name": "query",
+      "value": "send missing release notes message to riley-needs-to-lock-in channel for version 3.2.0"
+    }
+  ]
+}
