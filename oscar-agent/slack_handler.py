@@ -31,8 +31,8 @@ from storage import StorageInterface
 logger = logging.getLogger(__name__)
 channel_allow_list = ['C096MV7JZ0T', 'C09827S7CEB', 'C091EH1JKCL', 'C088XMSH4DA']
 
-# Authorized users for automated message sending functionality
-AUTHORIZED_MESSAGE_SENDERS = ['U091B0QH1QD', 'W017VPMPKH7', 'W017PN2ADN0', 'W017VV9TD33']
+# Authorized users for automated message sending functionality --> Rishabh, Sayali, Prudhvi, Divyam, Peter, Saurabh
+AUTHORIZED_MESSAGE_SENDERS = ['U091B0QH1QD', 'W017PN2ADN0', 'W017VV9TD33', 'W017VPMPKH7', 'W017PKU06CC', 'U032Q5N0HTM']
 
 class SlackHandler:
     """Comprehensive Slack event handler with OSCAR agent integration.
