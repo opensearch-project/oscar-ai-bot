@@ -86,6 +86,10 @@ def lambda_handler(event, context):
             result = test_opensearch_connectivity()
         elif function_name in ['get_integration_test_metrics', 'get_test_metrics', 'get_build_metrics', 'get_release_metrics', 'get_metrics', 'query_integration_test_failures', 'resolve_components_from_builds', 'get_rc_build_mapping'] or not function_name:
             result = handle_metrics_query(agent_type, function_name, params)
+        elif function_name == 'resolve_components_from_builds':
+            result = handle_component_resolution(params)
+        elif function_name == 'get_rc_build_mapping':
+            result = handle_rc_build_mapping(params)
         else:
             result = {'error': f'Unknown function: {function_name}'}
         
@@ -131,7 +135,8 @@ def handle_integration_test_queries(intent, params):
             'agent_type': 'integration_test',
             'query_intent': intent,
             'results': results,
-            'summary': generate_integration_summary(results)
+            'summary': generate_integration_summary(results),
+            'data_source': 'opensearch-integration-test-results'
         }
         
     except Exception as e:
@@ -151,7 +156,8 @@ def handle_build_queries(intent, params):
             'agent_type': 'build',
             'query_intent': intent,
             'results': results,
-            'summary': generate_build_summary(results)
+            'summary': generate_build_summary(results),
+            'data_source': 'opensearch-distribution-build-results'
         }
         
     except Exception as e:
@@ -171,7 +177,8 @@ def handle_release_queries(intent, params):
             'agent_type': 'release',
             'query_intent': intent,
             'results': results,
-            'summary': generate_release_summary(results)
+            'summary': generate_release_summary(results),
+            'data_source': 'opensearch_release_metrics'
         }
         
     except Exception as e:
@@ -214,10 +221,20 @@ def parse_query_intent(query_text, params=None):
         rc_matches = re.findall(r'RC\s+(?:number\s+)?(\d+)', query_text, re.IGNORECASE)
         intent['rc_numbers'] = [int(rc) for rc in rc_matches]
     
-    # Extract build numbers
+    # Extract build numbers - handle both singular and plural
     if not intent['build_numbers']:
-        build_matches = re.findall(r'build\s+number\s+(\d+)', query_text, re.IGNORECASE)
-        intent['build_numbers'] = [int(build) for build in build_matches]
+        build_matches = re.findall(r'build\s+numbers?\s+(\d+(?:,\s*\d+)*)', query_text, re.IGNORECASE)
+        if build_matches:
+            # Handle comma-separated build numbers
+            build_nums = []
+            for match in build_matches:
+                nums = [int(n.strip()) for n in match.split(',')]
+                build_nums.extend(nums)
+            intent['build_numbers'] = build_nums
+        else:
+            # Fallback to individual build number pattern
+            single_matches = re.findall(r'build\s+(?:number\s+)?(\d+)', query_text, re.IGNORECASE)
+            intent['build_numbers'] = [int(build) for build in single_matches]
     
     # Extract components
     if not intent['components']:
@@ -361,16 +378,24 @@ def execute_build_strategy(intent):
     components = intent['components']
     status_filter = intent.get('status_filter')
     
+    # For consistency, always query all results first, then filter in summary
     result = query_distribution_build_results(
         version=version,
         build_numbers=build_numbers,
         components=components,
-        status_filter=status_filter
+        status_filter=None  # Don't filter at query level for consistency
     )
+    
+    build_results = extract_build_results(result)
+    
+    # Apply status filter after extraction if needed
+    if status_filter:
+        build_results = [r for r in build_results if r.get('status') == status_filter]
     
     return [{
         'strategy': 'build_analysis',
-        'build_results': extract_build_results(result)
+        'build_results': build_results,
+        'data_source': 'opensearch-distribution-build-results'
     }]
 
 def execute_release_strategy(intent):
@@ -687,12 +712,17 @@ def generate_build_summary(results):
     successful = len([r for r in all_results if r.get('status') == 'success'])
     total = len(all_results)
     
+    # If we only have failed results (due to status filtering), note this
+    filtered_query = len(set(r.get('status') for r in all_results)) == 1
+    
     return {
         'total': total,
         'failed': failed,
         'successful': successful,
         'success_rate': round((successful / total * 100), 1) if total > 0 else 0,
-        'unique_components': len(set(r.get('component') for r in all_results if r.get('component')))
+        'unique_components': len(set(r.get('component') for r in all_results if r.get('component'))),
+        'filtered_results': filtered_query,
+        'note': 'Results filtered by status - success rate may not reflect overall build health' if filtered_query else None
     }
 
 def generate_release_summary(results):
@@ -773,10 +803,66 @@ def test_opensearch_connectivity():
             'error_type': type(e).__name__
         }
 
+def handle_component_resolution(params):
+    """Handle resolve_components_from_builds function."""
+    try:
+        version = params.get('version')
+        build_numbers = params.get('build_numbers', [])
+        
+        if not version or not build_numbers:
+            return {'error': 'Version and build_numbers are required for component resolution'}
+        
+        component_map = resolve_components_from_build_numbers(version, build_numbers)
+        
+        return {
+            'function': 'resolve_components_from_builds',
+            'version': version,
+            'build_numbers': build_numbers,
+            'component_mapping': component_map,
+            'data_source': 'opensearch-distribution-build-results'
+        }
+        
+    except Exception as e:
+        logger.error(f"Component resolution failed: {e}")
+        return {'error': str(e), 'type': 'component_resolution_error'}
+
+def handle_rc_build_mapping(params):
+    """Handle get_rc_build_mapping function."""
+    try:
+        version = params.get('version')
+        rc_numbers = params.get('rc_numbers', [])
+        component = params.get('component', 'OpenSearch')
+        
+        if not version or not rc_numbers:
+            return {'error': 'Version and rc_numbers are required for RC build mapping'}
+        
+        rc_build_map = {}
+        for rc_num in rc_numbers:
+            build_num = get_rc_distribution_build_number(version, rc_num, component)
+            rc_build_map[str(rc_num)] = build_num
+        
+        return {
+            'function': 'get_rc_build_mapping',
+            'version': version,
+            'rc_numbers': rc_numbers,
+            'component': component,
+            'rc_build_mapping': rc_build_map,
+            'data_source': 'opensearch-integration-test-results'
+        }
+        
+    except Exception as e:
+        logger.error(f"RC build mapping failed: {e}")
+        return {'error': str(e), 'type': 'rc_mapping_error'}
+
 def create_response(event, result):
     """Create a response in the format expected by the Bedrock agent."""
     action_group = event['actionGroup']
     function = event['function']
+    
+    # Add data source information to response if not present
+    if isinstance(result, dict) and 'data_source' in result:
+        result['response_footer'] = f"\n\n*Data retrieved from {result['data_source']} index*"
+    
     response_body_string = json.dumps(result, default=str)
 
     return {

@@ -296,11 +296,19 @@ class SlackHandler:
             # Check if we're approaching timeout before querying agent
             current_time = time.time()
             if current_time - start_time > timeout_threshold * 0.3:  # 30% of timeout threshold
-                # Add timer emoji to indicate potential slow response
-                self._manage_reactions(channel, reaction_ts, add_reaction="timer_clock")
+                # Add hourglass emoji to indicate potential slow response
+                self._manage_reactions(channel, reaction_ts, add_reaction="hourglass_flowing_sand")
             
-            # Query OSCAR agent - simplified single call, no routing logic needed
+            # Query OSCAR agent with timeout handling
             agent_start_time = time.time()
+            
+            # Check if we've already exceeded timeout before starting agent query
+            if agent_start_time - start_time > timeout_threshold:
+                logger.warning(f"Timeout exceeded before agent query: {agent_start_time - start_time:.2f}s")
+                self._manage_reactions(channel, reaction_ts, add_reaction="stopwatch", remove_reaction=["thinking_face", "hourglass_flowing_sand"])
+                say(text="⏱️ Your query is taking longer than expected and has timed out. Please try a simpler question or try again later.", thread_ts=thread_ts)
+                return
+            
             response, new_session_id = self.oscar_agent.query(
                 query, 
                 session_id=session_id,
@@ -308,6 +316,13 @@ class SlackHandler:
             )
             agent_end_time = time.time()
             logger.info(f"OSCAR agent query completed in {agent_end_time - agent_start_time:.2f} seconds")
+            
+            # Check if agent query exceeded timeout
+            if agent_end_time - start_time > timeout_threshold:
+                logger.warning(f"Agent query exceeded timeout: {agent_end_time - start_time:.2f}s")
+                self._manage_reactions(channel, reaction_ts, add_reaction="stopwatch", remove_reaction=["thinking_face", "hourglass_flowing_sand"])
+                say(text="⏱️ Your query took longer than expected to complete. The response may be incomplete. Please try a simpler question.", thread_ts=thread_ts)
+                return
             
             # Validate response - handle None, empty, or whitespace-only responses
             if response is None:
@@ -333,13 +348,13 @@ class SlackHandler:
             logger.info(f"Query processed in {total_elapsed:.2f} seconds")
             
             # Update reactions based on processing time
-            reactions_to_remove = ["thinking_face"]
+            reactions_to_remove = ["thinking_face", "hourglass_flowing_sand"]
             if total_elapsed > timeout_threshold:
-                # Keep timer_clock reaction if it was a slow response
+                # Keep stopwatch reaction if it was a slow response
                 logger.info(f"Response took longer than timeout threshold: {total_elapsed:.2f}s > {timeout_threshold}s")
             else:
-                # Remove timer_clock if it was added
-                reactions_to_remove.append("timer_clock")
+                # Remove stopwatch if it was added
+                reactions_to_remove.append("stopwatch")
                 
             # Add success reaction and remove processing reactions
             self._manage_reactions(
@@ -352,12 +367,12 @@ class SlackHandler:
         except Exception as e:
             logger.error(f"Error processing message: {e}", exc_info=True)
             
-            # Update reactions: remove thinking_face and timer_clock if present, add x
+            # Update reactions: remove processing reactions, add x
             self._manage_reactions(
                 channel, 
                 reaction_ts, 
                 add_reaction="x", 
-                remove_reaction=["thinking_face", "timer_clock"]
+                remove_reaction=["thinking_face", "hourglass_flowing_sand", "stopwatch"]
             )
             
             # Send user-friendly error message based on error type
