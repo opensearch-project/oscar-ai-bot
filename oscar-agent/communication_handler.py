@@ -89,8 +89,17 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         else:
             logger.error(f"Unknown function: {function_name}")
             return {
-                'response': {
-                    'body': f'❌ Unknown function: {function_name}'
+                "messageVersion": "1.0",
+                "response": {
+                    "actionGroup": "communication-orchestration",
+                    "function": function_name or "unknown",
+                    "functionResponse": {
+                        "responseBody": {
+                            "TEXT": {
+                                "body": f'❌ Unknown function: {function_name}'
+                            }
+                        }
+                    }
                 }
             }
             
@@ -98,8 +107,17 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         logger.error(f"Error in lambda_handler: {e}", exc_info=True)
         logger.error(f"Full event: {json.dumps(event, indent=2)}")
         return {
-            'response': {
-                'body': f'❌ Internal server error: {str(e)}'
+            "messageVersion": "1.0",
+            "response": {
+                "actionGroup": "communication-orchestration",
+                "function": "send_automated_message",
+                "functionResponse": {
+                    "responseBody": {
+                        "TEXT": {
+                            "body": f'❌ Internal server error: {str(e)}'
+                        }
+                    }
+                }
             }
         }
 
@@ -174,19 +192,26 @@ def handle_send_message(params: Dict[str, Any]) -> Dict[str, Any]:
         if not result.get('success'):
             logger.error(f"Message sending failed for query '{query}': {result.get('error')}")
         
-        # Return agent format response
+        # Return proper Bedrock agent response format
         if result.get('success'):
-            return {
-                'response': {
-                    'body': f"✅ Message sent successfully to target channel"
-                }
-            }
+            response_body = f"✅ Message sent successfully to channel {target_channel}"
         else:
-            return {
-                'response': {
-                    'body': f"❌ {result.get('error', 'Failed to send message')}"
+            response_body = f"❌ {result.get('error', 'Failed to send message')}"
+        
+        return {
+            "messageVersion": "1.0",
+            "response": {
+                "actionGroup": "communication-orchestration",
+                "function": "send_automated_message",
+                "functionResponse": {
+                    "responseBody": {
+                        "TEXT": {
+                            "body": response_body
+                        }
+                    }
                 }
             }
+        }
         
     except Exception as e:
         logger.error(f"Error in handle_send_message: {e}", exc_info=True)
@@ -427,7 +452,16 @@ def create_error_response(error_message: str) -> Dict[str, Any]:
         Error response dictionary
     """
     return {
-        'response': {
-            'body': f'❌ {error_message}'
+        "messageVersion": "1.0",
+        "response": {
+            "actionGroup": "communication-orchestration",
+            "function": "send_automated_message",
+            "functionResponse": {
+                "responseBody": {
+                    "TEXT": {
+                        "body": f'❌ {error_message}'
+                    }
+                }
+            }
         }
     }
