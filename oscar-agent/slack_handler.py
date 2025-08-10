@@ -19,6 +19,8 @@ Classes:
 import logging
 import re
 import time
+import threading
+import queue
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 from slack_bolt import App
@@ -62,6 +64,16 @@ class SlackHandler:
         self.storage = storage
         self.oscar_agent = oscar_agent
         self.client = app.client
+        
+        # Thread pool for better scaling (50-100 concurrent users)
+        from concurrent.futures import ThreadPoolExecutor
+        import threading
+        import queue
+        self.executor = ThreadPoolExecutor(max_workers=50, thread_name_prefix="oscar-agent")
+        
+        # Track active queries for rate limiting
+        self.active_queries = {}
+        self.monitor_lock = threading.Lock()
     
     def register_handlers(self) -> App:
         """
@@ -238,6 +250,100 @@ class SlackHandler:
         except Exception as e:
             logger.warning(f"Error managing reactions: {e}")
     
+    def _query_agent_with_timeout(self, query: str, session_id: str, context_summary: str, 
+                                 channel: str, reaction_ts: str, start_time: float,
+                                 hourglass_threshold: float, timeout_threshold: float,
+                                 say: Callable, thread_ts: str, user_id: str) -> tuple:
+        """
+        Query the agent with timeout monitoring, rate limiting, and thread pool.
+        """
+        
+        query_id = f"{channel}_{thread_ts}_{int(start_time)}"
+        
+        # Rate limiting: max 3 concurrent queries per user
+        with self.monitor_lock:
+            user_queries = sum(1 for q in self.active_queries.values() if q.get('user_id') == user_id)
+            if user_queries >= 5:
+                self._manage_reactions(channel, reaction_ts, add_reaction="x", remove_reaction="thinking_face")
+                say(text="🚫 You have too many active requests. Please wait for them to complete.", thread_ts=thread_ts)
+                return None, None
+            
+            # System overload protection
+            if len(self.active_queries) >= 45:
+                self._manage_reactions(channel, reaction_ts, add_reaction="x", remove_reaction="thinking_face")
+                say(text="🚫 System is currently overloaded. Please try again in a few minutes.", thread_ts=thread_ts)
+                return None, None
+            
+            # Register query
+            self.active_queries[query_id] = {
+                'start_time': start_time,
+                'user_id': user_id,
+                'hourglass_added': False
+            }
+        
+        result_queue = queue.Queue()
+        
+        def agent_worker():
+            try:
+                response, new_session_id = self.oscar_agent.query(
+                    query, session_id=session_id, context_summary=context_summary
+                )
+                result_queue.put(("success", response, new_session_id))
+            except Exception as e:
+                result_queue.put(("error", str(e), None))
+        
+        # Submit to thread pool
+        future = self.executor.submit(agent_worker)
+        
+        # Monitor for timeouts every 30 seconds
+        while not future.done():
+            try:
+                status, response, new_session_id = result_queue.get(timeout=30)
+                
+                # Clean up
+                with self.monitor_lock:
+                    self.active_queries.pop(query_id, None)
+                
+                if status == "success":
+                    return response, new_session_id
+                else:
+                    raise Exception(response)
+                    
+            except queue.Empty:
+                current_time = time.time()
+                elapsed = current_time - start_time
+                
+                # Add hourglass at 60s threshold
+                with self.monitor_lock:
+                    query_info = self.active_queries.get(query_id)
+                    if query_info and elapsed >= hourglass_threshold and not query_info['hourglass_added']:
+                        self._manage_reactions(channel, reaction_ts, add_reaction="hourglass_flowing_sand")
+                        query_info['hourglass_added'] = True
+                
+                # Timeout at 90s threshold
+                if elapsed >= timeout_threshold:
+                    logger.warning(f"Agent query timed out after {elapsed:.2f}s")
+                    future.cancel()  # Try to cancel the future
+                    
+                    with self.monitor_lock:
+                        self.active_queries.pop(query_id, None)
+                    
+                    self._manage_reactions(channel, reaction_ts, add_reaction="x", 
+                                         remove_reaction=["thinking_face", "hourglass_flowing_sand"])
+                    say(text="⏱️ Your request took too long and timed out. Please try a simpler question.", 
+                        thread_ts=thread_ts)
+                    return None, None
+        
+        # Get final result
+        with self.monitor_lock:
+            self.active_queries.pop(query_id, None)
+            
+        status, response, new_session_id = result_queue.get()
+        if status == "success":
+            return response, new_session_id
+        else:
+            raise Exception(response)
+    
     def _process_message(self, channel: str, thread_ts: str, user_id: str, 
                         text: str, say: Callable, message_ts: str = None) -> None:
         """
@@ -263,8 +369,9 @@ class SlackHandler:
         # Add thinking reaction to the specific message
         self._manage_reactions(channel, reaction_ts, add_reaction="thinking_face")
         
-        # Set timeout threshold (60 seconds)
-        timeout_threshold = 60
+        # Set timeout thresholds
+        hourglass_threshold = 60  # seconds
+        timeout_threshold = 90    # seconds
         start_time = time.time()
         
         try:
@@ -277,7 +384,7 @@ class SlackHandler:
                 if not self._is_user_authorized_for_messaging(user_id):
                     logger.warning(f"Unauthorized message sending attempt by user {user_id}")
                     self._manage_reactions(channel, reaction_ts, add_reaction="x", remove_reaction="thinking_face")
-                    say(text="❌ You are not authorized to use automated message sending functionality.", thread_ts=thread_ts)
+                    say(text="❌ You are not authorized to use automated message sending functionality. If this was erroneous, try a prompt without keywords like 'message', 'notification', or 'ping'.", thread_ts=thread_ts)
                     return
                 
                 logger.info(f"Processing automated message sending request from authorized user {user_id}")
@@ -288,35 +395,14 @@ class SlackHandler:
             context_summary = context.get("summary") if context else None
             session_id = context.get("session_id") if context else None
             
-            # Check if we're approaching timeout before querying agent
-            current_time = time.time()
-            if current_time - start_time > timeout_threshold * 0.3:  # 30% of timeout threshold
-                # Add hourglass emoji to indicate potential slow response
-                self._manage_reactions(channel, reaction_ts, add_reaction="hourglass_flowing_sand")
-            
-            # Query OSCAR agent with timeout handling
-            agent_start_time = time.time()
-            
-            # Check if we've already exceeded timeout before starting agent query
-            if agent_start_time - start_time > timeout_threshold:
-                logger.warning(f"Timeout exceeded before agent query: {agent_start_time - start_time:.2f}s")
-                self._manage_reactions(channel, reaction_ts, add_reaction="stopwatch", remove_reaction=["thinking_face", "hourglass_flowing_sand"])
-                say(text="⏱️ Your query is taking longer than expected and has timed out. Please try a simpler question or try again later.", thread_ts=thread_ts)
-                return
-            
-            response, new_session_id = self.oscar_agent.query(
-                query, 
-                session_id=session_id,
-                context_summary=context_summary
+            # Query OSCAR agent with timeout monitoring
+            response, new_session_id = self._query_agent_with_timeout(
+                query, session_id, context_summary, channel, reaction_ts, 
+                start_time, hourglass_threshold, timeout_threshold, say, thread_ts, user_id
             )
-            agent_end_time = time.time()
-            logger.info(f"OSCAR agent query completed in {agent_end_time - agent_start_time:.2f} seconds")
             
-            # Check if agent query exceeded timeout
-            if agent_end_time - start_time > timeout_threshold:
-                logger.warning(f"Agent query exceeded timeout: {agent_end_time - start_time:.2f}s")
-                self._manage_reactions(channel, reaction_ts, add_reaction="stopwatch", remove_reaction=["thinking_face", "hourglass_flowing_sand"])
-                say(text="⏱️ Your query took longer than expected to complete. The response may be incomplete. Please try a simpler question.", thread_ts=thread_ts)
+            # If timeout occurred, response will be None
+            if response is None:
                 return
             
             # Validate response - handle None, empty, or whitespace-only responses
@@ -342,21 +428,12 @@ class SlackHandler:
             total_elapsed = end_time - start_time
             logger.info(f"Query processed in {total_elapsed:.2f} seconds")
             
-            # Update reactions based on processing time
-            reactions_to_remove = ["thinking_face", "hourglass_flowing_sand"]
-            if total_elapsed > timeout_threshold:
-                # Keep stopwatch reaction if it was a slow response
-                logger.info(f"Response took longer than timeout threshold: {total_elapsed:.2f}s > {timeout_threshold}s")
-            else:
-                # Remove stopwatch if it was added
-                reactions_to_remove.append("stopwatch")
-                
             # Add success reaction and remove processing reactions
             self._manage_reactions(
                 channel, 
                 reaction_ts, 
                 add_reaction="white_check_mark", 
-                remove_reaction=reactions_to_remove
+                remove_reaction=["thinking_face", "hourglass_flowing_sand"]
             )
                 
         except Exception as e:
@@ -367,7 +444,7 @@ class SlackHandler:
                 channel, 
                 reaction_ts, 
                 add_reaction="x", 
-                remove_reaction=["thinking_face", "hourglass_flowing_sand", "stopwatch"]
+                remove_reaction=["thinking_face", "hourglass_flowing_sand"]
             )
             
             # Send user-friendly error message based on error type
@@ -408,7 +485,7 @@ class SlackHandler:
         message_keywords = [
             'send message', 'send notification', 'send alert', 'post message',
             'notify channel', 'send to channel', 'message channel',
-            'missing release notes', 'release notes message', 'ping people'
+            'message', 'release notes message', 'ping people', 'ping'
         ]
         
         return any(keyword in query_lower for keyword in message_keywords)
