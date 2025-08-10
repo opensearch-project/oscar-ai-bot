@@ -1,5 +1,9 @@
 #!/bin/bash
+# Copyright OpenSearch Contributors
+# SPDX-License-Identifier: Apache-2.0
+
 # Deploy the new minimal metrics implementation
+# FULL DEPLOYMENT - Creates functions, roles, and permissions
 
 set -e
 

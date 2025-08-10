@@ -21,6 +21,8 @@ import re
 import time
 import threading
 import queue
+import concurrent.futures
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 from slack_bolt import App
@@ -66,14 +68,13 @@ class SlackHandler:
         self.client = app.client
         
         # Thread pool for better scaling (50-100 concurrent users)
-        from concurrent.futures import ThreadPoolExecutor
-        import threading
-        import queue
         self.executor = ThreadPoolExecutor(max_workers=50, thread_name_prefix="oscar-agent")
         
         # Track active queries for rate limiting
         self.active_queries = {}
         self.monitor_lock = threading.Lock()
+        
+ 
     
     def register_handlers(self) -> App:
         """
@@ -112,6 +113,7 @@ class SlackHandler:
         
         logger.info(f"Processing app_mention event: channel={channel}, ts={event_ts}, thread_ts={thread_ts}")
         
+
         # Process the message
         self._process_message(channel, thread_ts, user_id, text, say, message_ts=event_ts)
     
@@ -137,6 +139,7 @@ class SlackHandler:
         
         logger.info(f"Processing DM message event: channel={channel}, ts={event_ts}, thread_ts={thread_ts}")
         
+
         # Process the message
         self._process_message(channel, thread_ts, user_id, text, say, message_ts=event_ts)
     
@@ -250,41 +253,69 @@ class SlackHandler:
         except Exception as e:
             logger.warning(f"Error managing reactions: {e}")
     
+    def _attempt_bedrock_cancellation(self, session_id: str) -> None:
+        """
+        Attempt to cancel a Bedrock agent session.
+        Note: This may not immediately stop the agent but can help with resource cleanup.
+        """
+        if not session_id:
+            return
+            
+        try:
+            # There's no direct "cancel" API for Bedrock agents, but we can try:
+            # 1. End the session (if the agent supports it)
+            # 2. Log the cancellation attempt for monitoring
+            logger.warning(f"Attempting to cancel Bedrock session: {session_id}")
+            
+            # Note: Bedrock agents don't have a direct cancellation API
+            # The session will eventually timeout on AWS side
+            # This is mainly for logging and future enhancement
+            
+        except Exception as e:
+            logger.error(f"Failed to cancel Bedrock session {session_id}: {e}")
+    
+
     def _query_agent_with_timeout(self, query: str, session_id: str, context_summary: str, 
                                  channel: str, reaction_ts: str, start_time: float,
                                  hourglass_threshold: float, timeout_threshold: float,
                                  say: Callable, thread_ts: str, user_id: str) -> tuple:
         """
-        Query the agent with timeout monitoring, rate limiting, and thread pool.
+        Query the agent with timeout monitoring using simple threading with limits.
         """
         
+        # Simple system overload protection
         query_id = f"{channel}_{thread_ts}_{int(start_time)}"
         
-        # Rate limiting: max 3 concurrent queries per user
         with self.monitor_lock:
-            user_queries = sum(1 for q in self.active_queries.values() if q.get('user_id') == user_id)
-            if user_queries >= 5:
-                self._manage_reactions(channel, reaction_ts, add_reaction="x", remove_reaction="thinking_face")
-                say(text="🚫 You have too many active requests. Please wait for them to complete.", thread_ts=thread_ts)
-                return None, None
-            
-            # System overload protection
-            if len(self.active_queries) >= 45:
+            if len(self.active_queries) >= 50:
                 self._manage_reactions(channel, reaction_ts, add_reaction="x", remove_reaction="thinking_face")
                 say(text="🚫 System is currently overloaded. Please try again in a few minutes.", thread_ts=thread_ts)
                 return None, None
             
-            # Register query
+            # Register query for timeout tracking only
             self.active_queries[query_id] = {
                 'start_time': start_time,
                 'user_id': user_id,
-                'hourglass_added': False
+                'cancelled': False
             }
         
         result_queue = queue.Queue()
+        hourglass_added = False
         
         def agent_worker():
             try:
+                # Check if cancelled before starting
+                with self.monitor_lock:
+                    if self.active_queries.get(query_id, {}).get('cancelled'):
+                        result_queue.put(("cancelled", "Query was cancelled", None))
+                        return
+                
+                # Test delay for timeout verification (remove in production)
+                import os
+                if os.getenv('OSCAR_TEST_TIMEOUT') == 'true':
+                    logger.warning(f"TEST MODE: Adding 60s delay to test timeout for query {query_id}")
+                    time.sleep(60)  # This will trigger timeout
+                
                 response, new_session_id = self.oscar_agent.query(
                     query, session_id=session_id, context_summary=context_summary
                 )
@@ -292,13 +323,75 @@ class SlackHandler:
             except Exception as e:
                 result_queue.put(("error", str(e), None))
         
-        # Submit to thread pool
-        future = self.executor.submit(agent_worker)
+        # Start agent in background thread
+        thread = threading.Thread(target=agent_worker, daemon=True)
+        thread.start()
         
-        # Monitor for timeouts every 30 seconds
-        while not future.done():
+        # Monitor every 10 seconds for better timing accuracy
+        while thread.is_alive():
             try:
-                status, response, new_session_id = result_queue.get(timeout=30)
+                # Wait 10 seconds for result
+                status, response, new_session_id = result_queue.get(timeout=10)
+                
+                # Clean up on success
+                with self.monitor_lock:
+                    self.active_queries.pop(query_id, None)
+                
+                if status == "success":
+                    return response, new_session_id
+                elif status == "cancelled":
+                    logger.warning(f"Query {query_id} was cancelled")
+                    return None, None
+                else:
+                    raise Exception(response)
+                    
+            except queue.Empty:
+                # Check elapsed time
+                elapsed = time.time() - start_time
+                logger.info(f"TIMEOUT CHECK: Query {query_id} still running after {elapsed:.2f}s (hourglass_added={hourglass_added})")
+                
+                # Add hourglass at 30s
+                if elapsed >= hourglass_threshold and not hourglass_added:
+                    logger.warning(f"ADDING HOURGLASS: After {elapsed:.2f}s for query {query_id}")
+                    try:
+                        self._manage_reactions(channel, reaction_ts, add_reaction="hourglass_flowing_sand")
+                        hourglass_added = True
+                        logger.warning(f"HOURGLASS ADDED SUCCESSFULLY for {query_id}")
+                    except Exception as e:
+                        logger.error(f"FAILED TO ADD HOURGLASS: {e}")
+                
+                # Timeout at 50s
+                if elapsed >= timeout_threshold:
+                    logger.error(f"TIMEOUT TRIGGERED: Query {query_id} timed out after {elapsed:.2f}s")
+                    
+                    # Force thread termination attempt (though this won't stop Bedrock)
+                    logger.warning(f"Thread still alive: {thread.is_alive()}, attempting cleanup")
+                    
+                    # Mark as cancelled and attempt to stop Bedrock session
+                    with self.monitor_lock:
+                        query_info = self.active_queries.get(query_id)
+                        if query_info:
+                            query_info['cancelled'] = True
+                            # Attempt to cancel Bedrock session if possible
+                            self._attempt_bedrock_cancellation(query_info.get('session_id'))
+                        self.active_queries.pop(query_id, None)
+                    
+                    try:
+                        self._manage_reactions(channel, reaction_ts, add_reaction="x", 
+                                             remove_reaction=["thinking_face", "hourglass_flowing_sand"])
+                        say(text="⏱️ Your request took too long and timed out. Please try a simpler question.", 
+                            thread_ts=thread_ts)
+                        logger.warning(f"TIMEOUT HANDLED SUCCESSFULLY for {query_id}")
+                    except Exception as e:
+                        logger.error(f"FAILED TO HANDLE TIMEOUT: {e}")
+                    
+                    # Break out of monitoring loop and return None
+                    return None, None
+        
+        # Get final result if thread finished normally
+        try:
+            if not result_queue.empty():
+                status, response, new_session_id = result_queue.get_nowait()
                 
                 # Clean up
                 with self.monitor_lock:
@@ -306,43 +399,20 @@ class SlackHandler:
                 
                 if status == "success":
                     return response, new_session_id
+                elif status == "cancelled":
+                    return None, None
                 else:
                     raise Exception(response)
-                    
-            except queue.Empty:
-                current_time = time.time()
-                elapsed = current_time - start_time
-                
-                # Add hourglass at 60s threshold
-                with self.monitor_lock:
-                    query_info = self.active_queries.get(query_id)
-                    if query_info and elapsed >= hourglass_threshold and not query_info['hourglass_added']:
-                        self._manage_reactions(channel, reaction_ts, add_reaction="hourglass_flowing_sand")
-                        query_info['hourglass_added'] = True
-                
-                # Timeout at 90s threshold
-                if elapsed >= timeout_threshold:
-                    logger.warning(f"Agent query timed out after {elapsed:.2f}s")
-                    future.cancel()  # Try to cancel the future
-                    
-                    with self.monitor_lock:
-                        self.active_queries.pop(query_id, None)
-                    
-                    self._manage_reactions(channel, reaction_ts, add_reaction="x", 
-                                         remove_reaction=["thinking_face", "hourglass_flowing_sand"])
-                    say(text="⏱️ Your request took too long and timed out. Please try a simpler question.", 
-                        thread_ts=thread_ts)
-                    return None, None
+        except queue.Empty:
+            pass
         
-        # Get final result
+        # Clean up
         with self.monitor_lock:
             self.active_queries.pop(query_id, None)
-            
-        status, response, new_session_id = result_queue.get()
-        if status == "success":
-            return response, new_session_id
-        else:
-            raise Exception(response)
+        
+        # Thread finished but no result - this shouldn't happen
+        logger.error(f"Agent thread finished without result for query {query_id}")
+        return None, None
     
     def _process_message(self, channel: str, thread_ts: str, user_id: str, 
                         text: str, say: Callable, message_ts: str = None) -> None:
@@ -369,8 +439,8 @@ class SlackHandler:
         # Add thinking reaction to the specific message
         self._manage_reactions(channel, reaction_ts, add_reaction="thinking_face")
         
-        # Set timeout thresholds
-        hourglass_threshold = 60  # seconds
+        # Set timeout thresholds (Lambda has 60s limit, so use 30s/50s)
+        hourglass_threshold = 45  # seconds
         timeout_threshold = 90    # seconds
         start_time = time.time()
         
