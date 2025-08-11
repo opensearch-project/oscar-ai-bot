@@ -27,6 +27,7 @@ from typing import Any, Dict, Optional
 import boto3
 from slack_bolt import App
 from slack_bolt.adapter.aws_lambda import SlackRequestHandler
+import slack_bolt
 
 from config import config
 from oscar_agent import get_oscar_agent
@@ -106,7 +107,12 @@ def lambda_handler(event: Dict[str, Any], context: Optional[object]) -> Dict[str
     # Extract event body for processing
     body = None
     if event.get('body'):
-        body = json.loads(event['body']) if isinstance(event['body'], str) else event['body']
+        try:
+            body = json.loads(event['body']) if isinstance(event['body'], str) else event['body']
+        except (json.JSONDecodeError, TypeError) as e:
+            logger.warning(f"Failed to parse event body as JSON: {e}. Body: {event.get('body')[:100]}...")
+            # For slash commands and other non-JSON payloads, continue without body parsing
+            body = None
     
     # Handle URL verification challenge immediately
     if body and body.get('type') == 'url_verification':

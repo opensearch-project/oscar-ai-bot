@@ -24,7 +24,7 @@ import queue
 import concurrent.futures
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
-
+import slack_bolt
 from slack_bolt import App
 from slack_sdk.errors import SlackApiError
 
@@ -35,7 +35,7 @@ from storage import StorageInterface
 logger = logging.getLogger(__name__)
 channel_allow_list = ['C096MV7JZ0T', 'C09827S7CEB', 'C091EH1JKCL', 'C088XMSH4DA']
 
-# Authorized users for automated message sending functionality --> Rishabh, Sayali, Prudhvi, Divyam, Peter, Saurabh
+# Authorized users for automated message sending functionality --> Rishabh, Sayali, Prudhvi, Divyam, Peter, Saurabh (Not in order with respect to the below)
 AUTHORIZED_MESSAGE_SENDERS = ['U091B0QH1QD', 'W017PN2ADN0', 'W017VV9TD33', 'W017VPMPKH7', 'W017PKU06CC', 'U032Q5N0HTM']
 
 class SlackHandler:
@@ -90,7 +90,14 @@ class SlackHandler:
         if config.enable_dm:
             self.app.message()(self.handle_message)
         
-        logger.info("Registered Slack event handlers for OSCAR agent")
+        # Register slash command handlers for message orchestration
+        self.app.command("/oscar-announce")(self.handle_announce_command)
+        self.app.command("/oscar-assign-owner")(self.handle_assign_owner_command)
+        self.app.command("/oscar-request-owner")(self.handle_request_owner_command)
+        self.app.command("/oscar-rc-details")(self.handle_rc_details_command)
+        self.app.command("/oscar-missing-notes")(self.handle_missing_notes_command)
+        
+        logger.info("Registered Slack event handlers and slash commands for OSCAR agent")
         return self.app
     
     def handle_app_mention(self, event: Dict[str, Any], say: Callable) -> None:
@@ -415,7 +422,7 @@ class SlackHandler:
         return None, None
     
     def _process_message(self, channel: str, thread_ts: str, user_id: str, 
-                        text: str, say: Callable, message_ts: str = None) -> None:
+                        text: str, say: Callable, message_ts: str = None, slash_command: str = None) -> None:
         """
         Process a message and generate a response using the OSCAR agent.
         
@@ -423,9 +430,10 @@ class SlackHandler:
             channel: Slack channel ID
             thread_ts: Thread timestamp for threading replies
             user_id: User ID of the message sender
-            text: Message text
+            text: Message text (for slash commands, this is the channel parameter)
             say: Function to send a message to the channel
             message_ts: Timestamp of the specific message to react to (may differ from thread_ts)
+            slash_command: Type of slash command if this is a slash command invocation
         """
         # Use message_ts if provided, otherwise fall back to thread_ts
         # This ensures we react to the specific message, not just the thread parent
@@ -439,18 +447,36 @@ class SlackHandler:
         # Add thinking reaction to the specific message
         self._manage_reactions(channel, reaction_ts, add_reaction="thinking_face")
         
-        # Set timeout thresholds (Lambda has 60s limit, so use 30s/50s)
+        # Set timeout thresholds 
         hourglass_threshold = 45  # seconds
-        timeout_threshold = 90    # seconds
+        timeout_threshold = 120    # seconds
         start_time = time.time()
         
         try:
-            # Extract query from text (remove mentions)
-            query = self._extract_query(text)
-            logger.info(f"Extracted query: {query}")
+            # Extract or generate query based on source
+            if slash_command:
+                # For slash commands, generate query from template
+                query_template = self.AGENT_QUERIES.get(slash_command)
+                if not query_template:
+                    self._manage_reactions(channel, reaction_ts, add_reaction="x", remove_reaction="thinking_face")
+                    say(text="❌ Unknown slash command type", thread_ts=thread_ts)
+                    return
+                # text contains "channel version", split them
+                params = text.split()
+                if len(params) >= 2:
+                    channel_param = params[0]
+                    version_param = params[1]
+                    query = query_template.format(channel=channel_param, version=version_param)
+                else:
+                    query = query_template.format(channel=text, version="latest")
+                logger.info(f"Generated slash command query: {query}")
+            else:
+                # For regular messages, extract query from text (remove mentions)
+                query = self._extract_query(text)
+                logger.info(f"Extracted query: {query}")
             
-            # Check for automated message sending requests
-            if self._is_message_sending_request(query):
+            # Check for automated message sending requests (skip for slash commands as they're pre-authorized)
+            if not slash_command and self._is_message_sending_request(query):
                 if not self._is_user_authorized_for_messaging(user_id):
                     logger.warning(f"Unauthorized message sending attempt by user {user_id}")
                     self._manage_reactions(channel, reaction_ts, add_reaction="x", remove_reaction="thinking_face")
@@ -620,3 +646,62 @@ class SlackHandler:
                 "success": False,
                 "error": error_msg
             }
+    
+    # Predefined agent queries for direct invocation
+    AGENT_QUERIES = {
+        "announce": "Send a release announcement message to channel {channel} using the release-announcement template for version {version}. Ensure the template is filled out correctly.",
+        "assign_owner": "Send a release owner assignment message to channel {channel} using the release-owner-assignment template for version {version}. Make sure to ping any relevant people and ensure the template is filled out correctly.",
+        "request_owner": "Send a request for release owner message to channel {channel} using the request-release-owner template for version {version}. Make sure to ping any relevant people and ensure the template is filled out correctly.",
+        "rc_details": "Send RC details message to channel {channel} using the rc-details template for version {version} release candidate. Ensure the template is filled out correctly and fully.",
+        "missing_notes": "Send a missing release notes message to channel {channel} using the missing-release-notes template for version {version}. Ensure all relevant maintainers are pinged and the template is filled out correctly."
+    }
+    
+    def handle_announce_command(self, ack, command, say):
+        """Handle /announce slash command."""
+        self._handle_slash_command(ack, command, say, "announce")
+    
+    def handle_assign_owner_command(self, ack, command, say):
+        """Handle /assign-owner slash command."""
+        self._handle_slash_command(ack, command, say, "assign_owner")
+    
+    def handle_request_owner_command(self, ack, command, say):
+        """Handle /request-owner slash command."""
+        self._handle_slash_command(ack, command, say, "request_owner")
+    
+    def handle_rc_details_command(self, ack, command, say):
+        """Handle /rc-details slash command."""
+        self._handle_slash_command(ack, command, say, "rc_details")
+    
+    def handle_missing_notes_command(self, ack, command, say):
+        """Handle /missing-notes slash command."""
+        self._handle_slash_command(ack, command, say, "missing_notes")
+    
+    def _handle_slash_command(self, ack, command, say, slash_command_type: str):
+        """Handle slash commands by delegating to _process_message."""
+        ack()
+        
+        user_id = command.get('user_id')
+        params = command.get('text', '').strip().split()
+        
+        # Check authorization
+        if not self._is_user_authorized_for_messaging(user_id):
+            say(text="❌ You are not authorized to use OSCAR slash commands.", response_type="ephemeral")
+            return
+        
+        # Require channel and version parameters
+        if len(params) != 2:
+            say(text=f"❌ Usage: `/{slash_command_type.replace('_', '-')} <channel_id_or_name> <version>`", response_type="ephemeral")
+            return
+        
+        channel_param = params[0]
+        version_param = params[1]
+        
+        # Create synthetic parameters and delegate to _process_message
+        channel_id = command.get('channel_id')
+        thread_ts = str(int(time.time()))
+        
+        # Pass both channel and version as combined parameters
+        combined_params = f"{channel_param} {version_param}"
+        
+        # Delegate to _process_message with slash_command parameter
+        self._process_message(channel_id, thread_ts, user_id, combined_params, say, thread_ts, slash_command_type)
