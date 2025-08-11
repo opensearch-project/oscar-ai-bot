@@ -420,7 +420,7 @@ def query_integration_test_results(version, rc_number=None, build_numbers=None, 
         "sort": [{"build_start_time": {"order": "desc"}}],
         "_source": [
             "component", "component_build_result", "distribution_build_number",
-            "rc_number", "platform", "architecture", "distribution",
+            "rc_number", "version", "platform", "architecture", "distribution",
             "test_report_manifest_yml", "integ_test_build_url", "build_start_time",
             "component_category", "qualifier"
         ],
@@ -489,7 +489,7 @@ def query_distribution_build_results(version, build_numbers=None, components=Non
         "sort": [{"build_start_time": {"order": "desc"}}],
         "_source": [
             "component", "component_build_result", "distribution_build_number",
-            "build_start_time", "component_category", "qualifier", "version"
+            "rc_number", "build_start_time", "component_category", "qualifier", "version"
         ],
         "query": {
             "bool": {
@@ -518,7 +518,7 @@ def query_distribution_build_results(version, build_numbers=None, components=Non
     return opensearch_request('POST', '/opensearch-distribution-build-results/_search', query_body)
 
 def query_release_readiness(version, components=None):
-    """Query release readiness metrics."""
+    """Query release readiness metrics with improved error handling."""
     query_body = {
         "size": 100,
         "sort": [{"current_date": {"order": "desc"}}],
@@ -537,12 +537,89 @@ def query_release_readiness(version, components=None):
         }
     }
     
+    # Use match_phrase for component filtering to avoid terms query issues
     if components:
-        query_body["query"]["bool"]["must"].append(
-            {"terms": {"component": components}}
-        )
+        if len(components) == 1:
+            query_body["query"]["bool"]["must"].append(
+                {"match_phrase": {"component": components[0]}}
+            )
+        else:
+            # Use should clause with multiple match_phrase for multiple components
+            query_body["query"]["bool"]["must"].append({
+                "bool": {
+                    "should": [
+                        {"match_phrase": {"component": comp}} for comp in components
+                    ]
+                }
+            })
     
     return opensearch_request('POST', '/opensearch_release_metrics/_search', query_body)
+
+def deduplicate_by_highest_build_number(results):
+    """Keep only highest build number for each (component, version, rc_number) combination."""
+    if not results:
+        return results
+    
+    # Group by (component, version, rc_number)
+    groups = {}
+    ungrouped = []
+    
+    for result in results:
+        component = result.get('component')
+        version = result.get('version')
+        rc_number = result.get('rc_number')
+        build_number = result.get('build_number')
+        
+        # Only group if we have all required fields
+        if component and version and rc_number is not None and build_number is not None:
+            key = (component, str(version), str(rc_number))
+            try:
+                build_num_int = int(build_number)
+                if key not in groups or build_num_int > int(groups[key]['build_number']):
+                    groups[key] = result
+            except (ValueError, TypeError):
+                # If build_number is not convertible to int, keep as ungrouped
+                ungrouped.append(result)
+        else:
+            # Keep results without proper grouping keys
+            ungrouped.append(result)
+    
+    return list(groups.values()) + ungrouped
+
+def deduplicate_release_results(results):
+    """Keep only most recent entry for each (component, version) combination.
+    
+    Release readiness data does not contain RC/build numbers, only timestamps.
+    We deduplicate by timestamp to avoid showing outdated release readiness states
+    when newer evaluations exist for the same component/version.
+    """
+    if not results:
+        return results
+    
+    # Group by (component, version)
+    groups = {}
+    ungrouped = []
+    
+    for result in results:
+        component = result.get('component')
+        version = result.get('version')
+        timestamp = result.get('timestamp')
+        
+        # Only group if we have required fields
+        if component and version:
+            key = (component, str(version))
+            # Use timestamp for comparison, fallback to keeping first if no timestamp
+            if key not in groups:
+                groups[key] = result
+            elif timestamp:
+                existing_timestamp = groups[key].get('timestamp')
+                if not existing_timestamp or timestamp > existing_timestamp:
+                    groups[key] = result
+        else:
+            # Keep results without proper grouping keys
+            ungrouped.append(result)
+    
+    return list(groups.values()) + ungrouped
 
 def resolve_components_from_build_numbers(version, build_numbers):
     """Resolve components from build numbers."""
@@ -575,15 +652,14 @@ def resolve_components_from_build_numbers(version, build_numbers):
     return build_component_map
 
 def get_rc_distribution_build_number(version, rc_number, component_name="OpenSearch"):
-    """Get build number for RC."""
+    """Get highest build number for RC."""
     query_body = {
-        "_source": "distribution_build_number",
+        "_source": ["distribution_build_number", "component"],
         "sort": [{"distribution_build_number": {"order": "desc"}}],
-        "size": 1,
+        "size": 100,
         "query": {
             "bool": {
                 "filter": [
-                    {"match_phrase": {"component": component_name}},
                     {"match_phrase": {"rc": "true"}},
                     {"match_phrase": {"version": version}},
                     {"match_phrase": {"rc_number": str(rc_number)}}
@@ -592,12 +668,38 @@ def get_rc_distribution_build_number(version, rc_number, component_name="OpenSea
         }
     }
     
+    # Add component filter if specified
+    if component_name:
+        query_body["query"]["bool"]["filter"].append(
+            {"match_phrase": {"component": component_name}}
+        )
+    
     result = opensearch_request('POST', '/opensearch-integration-test-results/_search', query_body)
     hits = result.get('hits', {}).get('hits', [])
     
-    if hits:
+    if not hits:
+        return None
+    
+    # If single component requested, return highest build number
+    if component_name:
         return hits[0]['_source']['distribution_build_number']
-    return None
+    
+    # If multiple components, return dict of component -> highest build number
+    component_builds = {}
+    for hit in hits:
+        source = hit['_source']
+        component = source.get('component')
+        build_num = source.get('distribution_build_number')
+        
+        if component and build_num:
+            try:
+                build_num_int = int(build_num)
+                if component not in component_builds or build_num_int > int(component_builds[component]):
+                    component_builds[component] = build_num
+            except (ValueError, TypeError):
+                continue
+    
+    return component_builds
 
 def extract_test_results(opensearch_result):
     """Extract comprehensive test result information."""
@@ -611,6 +713,7 @@ def extract_test_results(opensearch_result):
             'status': source.get('component_build_result'),
             'build_number': source.get('distribution_build_number'),
             'rc_number': source.get('rc_number'),
+            'version': source.get('version'),
             'platform': source.get('platform'),
             'architecture': source.get('architecture'),
             'distribution': source.get('distribution'),
@@ -621,7 +724,7 @@ def extract_test_results(opensearch_result):
             'qualifier': source.get('qualifier')
         })
     
-    return results
+    return deduplicate_by_highest_build_number(results)
 
 def extract_build_results(opensearch_result):
     """Extract build result information."""
@@ -634,13 +737,14 @@ def extract_build_results(opensearch_result):
             'component': source.get('component'),
             'status': source.get('component_build_result'),
             'build_number': source.get('distribution_build_number'),
+            'rc_number': source.get('rc_number'),
+            'version': source.get('version'),
             'timestamp': source.get('build_start_time'),
             'category': source.get('component_category'),
-            'qualifier': source.get('qualifier'),
-            'version': source.get('version')
+            'qualifier': source.get('qualifier')
         })
     
-    return results
+    return deduplicate_by_highest_build_number(results)
 
 def extract_release_results(opensearch_result):
     """Extract release readiness information."""
@@ -676,7 +780,8 @@ def extract_release_results(opensearch_result):
             'timestamp': source.get('current_date')
         })
     
-    return results
+    # Apply deduplication to avoid duplicate component entries
+    return deduplicate_release_results(results)
 
 def generate_integration_summary(results):
     """Generate summary for integration test results."""
