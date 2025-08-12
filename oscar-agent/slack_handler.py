@@ -144,9 +144,14 @@ class SlackHandler:
         text = message.get("text")
         event_ts = message.get("ts")  # Use ts for the specific message
         
+        # Check if user is authorized for DM access
+        if not self._is_user_authorized_for_messaging(user_id):
+            logger.warning(f"Unauthorized DM attempt by user {user_id}")
+            say(text="❌ You are not authorized to use OSCAR via direct messages.")
+            return
+        
         logger.info(f"Processing DM message event: channel={channel}, ts={event_ts}, thread_ts={thread_ts}")
         
-
         # Process the message
         self._process_message(channel, thread_ts, user_id, text, say, message_ts=event_ts)
     
@@ -209,6 +214,47 @@ class SlackHandler:
         self.storage.store_context(thread_key, context)
         
         return context
+    
+    def _store_bot_message_context(self, channel: str, thread_ts: str, bot_message: str, 
+                                  session_id: Optional[str] = None, user_query: str = None) -> None:
+        """Store context for bot-initiated messages to enable follow-up conversations.
+        
+        Args:
+            channel: Slack channel ID
+            thread_ts: Thread timestamp for the message
+            bot_message: The message sent by the bot
+            session_id: Session ID if available
+            user_query: Original user query that triggered this bot message (for slash commands)
+        """
+        thread_key = f"{channel}_{thread_ts}"
+        
+        # Create context for bot-initiated message
+        context = {
+            "session_id": session_id,
+            "history": [],
+            "summary": ""
+        }
+        
+        # If there was a user query (slash command), add it to history
+        if user_query:
+            context["history"].append({
+                "query": user_query,
+                "response": bot_message,
+                "timestamp": int(time.time())
+            })
+            context["summary"] = f"User: {user_query}\nAssistant: {bot_message}\n\n"
+        else:
+            # For pure bot-initiated messages, create a synthetic entry
+            context["history"].append({
+                "query": "[Bot initiated conversation]",
+                "response": bot_message,
+                "timestamp": int(time.time())
+            })
+            context["summary"] = f"Assistant: {bot_message}\n\n"
+        
+        # Store the context
+        self.storage.store_context(thread_key, context)
+        logger.info(f"Stored bot message context for thread {thread_ts}")
     
     def _manage_reactions(self, channel: str, timestamp: str, add_reaction: Optional[str] = None, 
                          remove_reaction: Optional[Union[str, List[str]]] = None) -> None:
@@ -444,7 +490,7 @@ class SlackHandler:
         
         logger.info(f"Processing message in channel {channel}, thread {thread_ts}, from user {user_id}")
         
-        # Add thinking reaction to the specific message
+
         self._manage_reactions(channel, reaction_ts, add_reaction="thinking_face")
         
         # Set timeout thresholds 
@@ -524,7 +570,8 @@ class SlackHandler:
             total_elapsed = end_time - start_time
             logger.info(f"Query processed in {total_elapsed:.2f} seconds")
             
-            # Add success reaction and remove processing reactions
+            # Add success reaction and remove processing reactions (skip for DMs)
+            
             self._manage_reactions(
                 channel, 
                 reaction_ts, 
@@ -535,12 +582,12 @@ class SlackHandler:
         except Exception as e:
             logger.error(f"Error processing message: {e}", exc_info=True)
             
-            # Update reactions: remove processing reactions, add x
+            # Update reactions: remove processing reactions, add x (skip for DMs)
             self._manage_reactions(
-                channel, 
-                reaction_ts, 
-                add_reaction="x", 
-                remove_reaction=["thinking_face", "hourglass_flowing_sand"]
+                    channel, 
+                    reaction_ts, 
+                    add_reaction="x", 
+                    remove_reaction=["thinking_face", "hourglass_flowing_sand"]
             )
             
             # Send user-friendly error message based on error type
@@ -625,6 +672,10 @@ class SlackHandler:
                 unfurl_media=False
             )
             
+            # Store context for the bot message to enable follow-up conversations
+            if response and 'ts' in response:
+                self._store_bot_message_context(channel, response['ts'], message)
+            
             logger.info(f"Successfully sent automated message to channel {channel}")
             return {
                 "success": True,
@@ -703,5 +754,16 @@ class SlackHandler:
         # Pass both channel and version as combined parameters
         combined_params = f"{channel_param} {version_param}"
         
+        # Create a wrapper for say that captures the response and stores context
+        def say_with_context_storage(text, **kwargs):
+            response = say(text=text, **kwargs)
+            # If this creates a new message, store context for follow-ups
+            if response and 'ts' in response:
+                actual_thread_ts = response['ts']
+                # Store context with the original slash command as the user query
+                original_query = f"/{slash_command_type.replace('_', '-')} {combined_params}"
+                self._store_bot_message_context(channel_id, actual_thread_ts, text, None, original_query)
+            return response
+        
         # Delegate to _process_message with slash_command parameter
-        self._process_message(channel_id, thread_ts, user_id, combined_params, say, thread_ts, slash_command_type)
+        self._process_message(channel_id, thread_ts, user_id, combined_params, say_with_context_storage, thread_ts, slash_command_type)

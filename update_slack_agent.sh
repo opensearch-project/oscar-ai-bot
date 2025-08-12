@@ -55,15 +55,25 @@ echo "✅ Created deployment package: $DEPLOYMENT_PACKAGE"
 # Check if Lambda function exists
 echo "🔍 Checking if Lambda function exists..."
 if aws lambda get-function --function-name $FUNCTION_NAME --region $AWS_REGION > /dev/null 2>&1; then
-    echo "🔄 Updating Lambda function code (preserving all configurations)..."
+    echo "🔄 Updating Lambda function code and environment variables..."
     
-    # Update ONLY function code - preserves all permissions, environment variables, and configurations
+    # Update function code
     aws lambda update-function-code \
         --function-name $FUNCTION_NAME \
         --zip-file fileb://$DEPLOYMENT_PACKAGE \
         --region $AWS_REGION >/dev/null
 
-    echo "✅ Updated Lambda function code: $FUNCTION_NAME"
+    # Wait for code update to complete
+    echo "⏳ Waiting for code update to complete..."
+    aws lambda wait function-updated --function-name $FUNCTION_NAME --region $AWS_REGION
+
+    # Update environment variables using individual variables (AWS_REGION is reserved)
+    aws lambda update-function-configuration \
+        --function-name $FUNCTION_NAME \
+        --environment Variables="{SLACK_BOT_TOKEN=$SLACK_BOT_TOKEN,SLACK_SIGNING_SECRET=$SLACK_SIGNING_SECRET,OSCAR_BEDROCK_AGENT_ID=$OSCAR_BEDROCK_AGENT_ID,OSCAR_BEDROCK_AGENT_ALIAS_ID=${OSCAR_BEDROCK_AGENT_ALIAS_ID:-TSTALIASID},SESSIONS_TABLE_NAME=${SESSIONS_TABLE_NAME:-oscar-sessions-v2},CONTEXT_TABLE_NAME=${CONTEXT_TABLE_NAME:-oscar-context},ENABLE_DM=$ENABLE_DM,DEDUP_TTL=${DEDUP_TTL:-300},SESSION_TTL=${SESSION_TTL:-3600},CONTEXT_TTL=${CONTEXT_TTL:-604800},MAX_CONTEXT_LENGTH=${MAX_CONTEXT_LENGTH:-3000},CONTEXT_SUMMARY_LENGTH=${CONTEXT_SUMMARY_LENGTH:-500},AGENT_TIMEOUT=${AGENT_TIMEOUT:-60},AGENT_MAX_RETRIES=${AGENT_MAX_RETRIES:-2}}" \
+        --region $AWS_REGION >/dev/null
+
+    echo "✅ Updated Lambda function code and configuration: $FUNCTION_NAME"
     
     # Wait for function to be ready
     echo "⏳ Waiting for function to be ready..."
