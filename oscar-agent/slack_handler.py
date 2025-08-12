@@ -96,6 +96,8 @@ class SlackHandler:
         self.app.command("/oscar-request-owner")(self.handle_request_owner_command)
         self.app.command("/oscar-rc-details")(self.handle_rc_details_command)
         self.app.command("/oscar-missing-notes")(self.handle_missing_notes_command)
+        self.app.command("/oscar-integration-test")(self.handle_integration_test_command)
+        self.app.command("/oscar-broadcast")(self.handle_broadcast_command)
         
         logger.info("Registered Slack event handlers and slash commands for OSCAR agent")
         return self.app
@@ -468,7 +470,7 @@ class SlackHandler:
         return None, None
     
     def _process_message(self, channel: str, thread_ts: str, user_id: str, 
-                        text: str, say: Callable, message_ts: str = None, slash_command: str = None) -> None:
+                        text: str, say: Callable, message_ts: str = None, slash_command: str = None, skip_context_storage: bool = False) -> None:
         """
         Process a message and generate a response using the OSCAR agent.
         
@@ -501,21 +503,9 @@ class SlackHandler:
         try:
             # Extract or generate query based on source
             if slash_command:
-                # For slash commands, generate query from template
-                query_template = self.AGENT_QUERIES.get(slash_command)
-                if not query_template:
-                    self._manage_reactions(channel, reaction_ts, add_reaction="x", remove_reaction="thinking_face")
-                    say(text="❌ Unknown slash command type", thread_ts=thread_ts)
-                    return
-                # text contains "channel version", split them
-                params = text.split()
-                if len(params) >= 2:
-                    channel_param = params[0]
-                    version_param = params[1]
-                    query = query_template.format(channel=channel_param, version=version_param)
-                else:
-                    query = query_template.format(channel=text, version="latest")
-                logger.info(f"Generated slash command query: {query}")
+                # For slash commands, text is already the formatted query
+                query = text
+                logger.info(f"Using pre-formatted slash command query: {query}")
             else:
                 # For regular messages, extract query from text (remove mentions)
                 query = self._extract_query(text)
@@ -558,8 +548,9 @@ class SlackHandler:
                 # Ensure response is a string
                 response = str(response).strip()
             
-            # Update context with new query and response
-            self._update_context(thread_key, query, response, session_id, new_session_id)
+            # Update context with new query and response (skip for slash commands to avoid duplication)
+            if not skip_context_storage:
+                self._update_context(thread_key, query, response, session_id, new_session_id)
             
             # Send response
             say(text=response, thread_ts=thread_ts)
@@ -700,11 +691,13 @@ class SlackHandler:
     
     # Predefined agent queries for direct invocation
     AGENT_QUERIES = {
-        "announce": "Send a release announcement message to channel {channel} using the release-announcement template for version {version}. Ensure the template is filled out correctly.",
-        "assign_owner": "Send a release owner assignment message to channel {channel} using the release-owner-assignment template for version {version}. Make sure to ping any relevant people and ensure the template is filled out correctly.",
-        "request_owner": "Send a request for release owner message to channel {channel} using the request-release-owner template for version {version}. Make sure to ping any relevant people and ensure the template is filled out correctly.",
-        "rc_details": "Send RC details message to channel {channel} using the rc-details template for version {version} release candidate. Ensure the template is filled out correctly and fully.",
-        "missing_notes": "Send a missing release notes message to channel {channel} using the missing-release-notes template for version {version}. Ensure all relevant maintainers are pinged and the template is filled out correctly."
+        "announce": "Send a release announcement message to channel {channel} using the release-announcement template for version {version} {rc_param}. Ensure the template is filled out correctly.",
+        "assign_owner": "Send a release owner assignment message to channel {channel} using the release-owner-assignment template for version {version} {rc_param}. Make sure to ping any relevant people and ensure the template is filled out correctly.",
+        "request_owner": "Send a request for release owner message to channel {channel} using the request-release-owner template for version {version} {rc_param}. Ensure the template is filled out correctly.",
+        "rc_details": "Send RC details message to channel {channel} using the rc-details template for version {version} {rc_param}. Ensure the template is filled out correctly.",
+        "missing_notes": "Send a missing release notes message to channel {channel} using the missing-release-notes template for version {version} {rc_param}. Ensure that relevant maintainers are pinged and the template is filled out correctly.",
+        "integration_test": "Send an integration test status message to channel {channel} for version {version} {rc_param}. Format the response well.",
+        "broadcast": "Process the following user_query and broadcast the response to channel {channel}. Here is the user_query: {user_query}."
     }
     
     def handle_announce_command(self, ack, command, say):
@@ -727,6 +720,14 @@ class SlackHandler:
         """Handle /missing-notes slash command."""
         self._handle_slash_command(ack, command, say, "missing_notes")
     
+    def handle_integration_test_command(self, ack, command, say):
+        """Handle /integration-test slash command."""
+        self._handle_slash_command(ack, command, say, "integration_test")
+    
+    def handle_broadcast_command(self, ack, command, say):
+        """Handle /broadcast slash command."""
+        self._handle_broadcast_command(ack, command, say)
+    
     def _handle_slash_command(self, ack, command, say, slash_command_type: str):
         """Handle slash commands by delegating to _process_message."""
         ack()
@@ -739,31 +740,83 @@ class SlackHandler:
             say(text="❌ You are not authorized to use OSCAR slash commands.", response_type="ephemeral")
             return
         
-        # Require channel and version parameters
-        if len(params) != 2:
-            say(text=f"❌ Usage: `/{slash_command_type.replace('_', '-')} <channel_id_or_name> <version>`", response_type="ephemeral")
+        # Require channel and version, RC is optional
+        if len(params) < 2 or len(params) > 3:
+            say(text=f"❌ Usage: `/{slash_command_type.replace('_', '-')} <channel_id_or_name> <version> [rc_number]`", response_type="ephemeral")
             return
         
         channel_param = params[0]
         version_param = params[1]
+        rc_param = f" and RC{params[2]}" if len(params) == 3 else ""
         
-        # Create synthetic parameters and delegate to _process_message
+        # Create synthetic parameters
         channel_id = command.get('channel_id')
         thread_ts = str(int(time.time()))
         
-        # Pass both channel and version as combined parameters
-        combined_params = f"{channel_param} {version_param}"
+        # Generate query with RC parameter
+        query_template = self.AGENT_QUERIES.get(slash_command_type)
+        if not query_template:
+            say(text="❌ Unknown slash command type", response_type="ephemeral")
+            return
         
-        # Create a wrapper for say that captures the response and stores context
+        query = query_template.format(channel=channel_param, version=version_param, rc_param=rc_param)
+        
+        # Create a wrapper for say that captures the response and stores context efficiently
         def say_with_context_storage(text, **kwargs):
             response = say(text=text, **kwargs)
-            # If this creates a new message, store context for follow-ups
             if response and 'ts' in response:
                 actual_thread_ts = response['ts']
-                # Store context with the original slash command as the user query
-                original_query = f"/{slash_command_type.replace('_', '-')} {combined_params}"
-                self._store_bot_message_context(channel_id, actual_thread_ts, text, None, original_query)
+                original_query = f"/{slash_command_type.replace('_', '-')} {channel_param} {version_param} {params[2] if len(params) == 3 else ''}".strip()
+                # Get session_id from existing context if available
+                existing_context = self.storage.get_context(f"{channel_id}_{actual_thread_ts}")
+                session_id = existing_context.get("session_id") if existing_context else None
+                self._store_bot_message_context(channel_id, actual_thread_ts, text, session_id, original_query)
             return response
         
-        # Delegate to _process_message with slash_command parameter
-        self._process_message(channel_id, thread_ts, user_id, combined_params, say_with_context_storage, thread_ts, slash_command_type)
+        # Process directly with context storage skipped (handled by say_with_context_storage)
+        self._process_message(channel_id, thread_ts, user_id, query, say_with_context_storage, thread_ts, skip_context_storage=True)
+    
+
+    def _handle_broadcast_command(self, ack, command, say):
+        """Handle broadcast slash command for general queries."""
+        ack()
+        
+        user_id = command.get('user_id')
+        text = command.get('text', '').strip()
+        
+        # Check authorization
+        if not self._is_user_authorized_for_messaging(user_id):
+            say(text="❌ You are not authorized to use OSCAR slash commands.", response_type="ephemeral")
+            return
+        
+        # Parse channel and query
+        parts = text.split(' ', 1)
+        if len(parts) < 2:
+            say(text="❌ Usage: `/oscar-broadcast <channel_id_or_name> <your_query>`", response_type="ephemeral")
+            return
+        
+        channel_param = parts[0]
+        user_query = parts[1]
+        
+        # Create synthetic parameters
+        channel_id = command.get('channel_id')
+        thread_ts = str(int(time.time()))
+        
+        # Generate query for processing
+        query_template = self.AGENT_QUERIES.get("broadcast")
+        query = query_template.format(channel=channel_param, user_query=user_query)
+        
+        # Create a wrapper for say that captures the response and stores context efficiently
+        def say_with_context_storage(text, **kwargs):
+            response = say(text=text, **kwargs)
+            if response and 'ts' in response:
+                actual_thread_ts = response['ts']
+                original_query = f"/oscar-broadcast {channel_param} {user_query}"
+                # Get session_id from existing context if available
+                existing_context = self.storage.get_context(f"{channel_id}_{actual_thread_ts}")
+                session_id = existing_context.get("session_id") if existing_context else None
+                self._store_bot_message_context(channel_id, actual_thread_ts, text, session_id, original_query)
+            return response
+        
+        # Process directly with context storage skipped (handled by say_with_context_storage)
+        self._process_message(channel_id, thread_ts, user_id, query, say_with_context_storage, thread_ts, skip_context_storage=True)

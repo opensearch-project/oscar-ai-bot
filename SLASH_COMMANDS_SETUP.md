@@ -1,14 +1,16 @@
-# OSCAR Slack Bot Message Orchestration Slash Commands Setup
+# OSCAR Slack Bot Slash Commands Setup
 
 ## Overview
-This guide explains how to set up slash commands for your OSCAR Slack bot to simplify message orchestration using predefined templates.
+This guide explains how to set up slash commands for your OSCAR Slack bot for message orchestration using predefined templates.
 
 ## Available Slash Commands
-- `/announce <channel_id_or_name>` - Send release announcement using release-announcement template
-- `/assign-owner <channel_id_or_name>` - Send release owner assignment using release-owner-assignment template
-- `/request-owner <channel_id_or_name>` - Send request for release owner using request-release-owner template
-- `/rc-details <channel_id_or_name>` - Send RC details using rc-details template
-- `/missing-notes <channel_id_or_name>` - Send missing release notes message using missing-release-notes template
+- `/oscar-announce <channel> <version> [Optional: rc_number]` - Send release announcement
+- `/oscar-assign-owner <channel> <version> [Optional: rc_number]` - Send release owner assignment
+- `/oscar-request-owner <channel> <version> [Optional: rc_number]` - Send request for release owner
+- `/oscar-rc-details <channel> <version> [Optional: rc_number]` - Send RC details
+- `/oscar-missing-notes <channel> <version> [Optional: rc_number]` - Send missing release notes alert
+- `/oscar-integration-test <channel> <version> [Optional: rc_number]` - Send integration test status
+- `/oscar-broadcast <channel> <your_query>` - Send custom query response
 
 ## Slack App Configuration
 
@@ -22,35 +24,54 @@ This guide explains how to set up slash commands for your OSCAR Slack bot to sim
 
 For each command, use these settings:
 
-#### /announce
-- **Command**: `/announce`
-- **Request URL**: `https://your-lambda-url.amazonaws.com/` (same as your bot's webhook URL)
-- **Short Description**: `Send release announcement to specified channel`
-- **Usage Hint**: `<channel_id_or_name>`
+#### /oscar-announce
+- **Command**: `/oscar-announce`
+- **Request URL**: `https://your-domain.com/slack/events`
+- **Short Description**: `Send release announcement to channel`
+- **Usage Hint**: `<channel> <version> [Optional: rc_number]`
+- **Escape channels, users, and links sent to your app**: ✅ (checked)
 
-#### /assign-owner
-- **Command**: `/assign-owner`
-- **Request URL**: `https://your-lambda-url.amazonaws.com/` (same as your bot's webhook URL)
-- **Short Description**: `Send release owner assignment to specified channel`
-- **Usage Hint**: `<channel_id_or_name>`
+#### /oscar-assign-owner
+- **Command**: `/oscar-assign-owner`
+- **Request URL**: `https://your-domain.com/slack/events`
+- **Short Description**: `Assign release owner to channel`
+- **Usage Hint**: `<channel> <version> [Optional: rc_number]`
+- **Escape channels, users, and links sent to your app**: ✅ (checked)
 
-#### /request-owner
-- **Command**: `/request-owner`
-- **Request URL**: `https://your-lambda-url.amazonaws.com/` (same as your bot's webhook URL)
-- **Short Description**: `Send request for release owner to specified channel`
-- **Usage Hint**: `<channel_id_or_name>`
+#### /oscar-request-owner
+- **Command**: `/oscar-request-owner`
+- **Request URL**: `https://your-domain.com/slack/events`
+- **Short Description**: `Request release owner in channel`
+- **Usage Hint**: `<channel> <version> [Optional: rc_number]`
+- **Escape channels, users, and links sent to your app**: ✅ (checked)
 
-#### /rc-details
-- **Command**: `/rc-details`
-- **Request URL**: `https://your-lambda-url.amazonaws.com/` (same as your bot's webhook URL)
-- **Short Description**: `Send RC details to specified channel`
-- **Usage Hint**: `<channel_id_or_name>`
+#### /oscar-rc-details
+- **Command**: `/oscar-rc-details`
+- **Request URL**: `https://your-domain.com/slack/events`
+- **Short Description**: `Send RC details to channel`
+- **Usage Hint**: `<channel> <version> [Optional: rc_number]`
+- **Escape channels, users, and links sent to your app**: ✅ (checked)
 
-#### /missing-notes
-- **Command**: `/missing-notes`
-- **Request URL**: `https://your-lambda-url.amazonaws.com/` (same as your bot's webhook URL)
-- **Short Description**: `Send missing release notes message to specified channel`
-- **Usage Hint**: `<channel_id_or_name>`
+#### /oscar-missing-notes
+- **Command**: `/oscar-missing-notes`
+- **Request URL**: `https://your-domain.com/slack/events`
+- **Short Description**: `Send missing release notes alert to channel`
+- **Usage Hint**: `<channel> <version> [Optional: rc_number]`
+- **Escape channels, users, and links sent to your app**: ✅ (checked)
+
+#### /oscar-integration-test
+- **Command**: `/oscar-integration-test`
+- **Request URL**: `https://your-domain.com/slack/events`
+- **Short Description**: `Send integration test status to channel`
+- **Usage Hint**: `<channel> <version> [Optional: rc_number]`
+- **Escape channels, users, and links sent to your app**: ✅ (checked)
+
+#### /oscar-broadcast
+- **Command**: `/oscar-broadcast`
+- **Request URL**: `https://your-domain.com/slack/events`
+- **Short Description**: `Send custom query response to channel`
+- **Usage Hint**: `<channel> <your_query>`
+- **Escape channels, users, and links sent to your app**: ✅ (checked)
 
 ### 3. Install/Reinstall App
 After adding slash commands, you need to reinstall the app:
@@ -60,10 +81,10 @@ After adding slash commands, you need to reinstall the app:
 
 ## How It Works
 
-1. User types `/announce #release-channel` or `/announce C1234567890`
-2. The slash command handler sends a predefined message: `@oscar Send a release announcement message to channel #release-channel using the release-announcement template for the latest version.`
-3. This message triggers the bot's normal mention handler
-4. The bot processes the hardcoded query and your communication handler resolves the channel name/ID and sends the formatted message using the appropriate template
+1. User types `/oscar-announce #releases 2.12.0 1` (with RC1) or `/oscar-announce #releases 2.12.0` (without RC)
+2. The slash command handler processes the parameters and generates an agent query
+3. The bot processes the query using the appropriate template and sends the formatted message
+4. For `/oscar-query`, the user's custom query is processed and sent to the specified channel
 
 ## Authorization
 Only authorized users (defined in `AUTHORIZED_MESSAGE_SENDERS`) can use these slash commands. Unauthorized users will see an error message.
@@ -73,34 +94,35 @@ Only authorized users (defined in `AUTHORIZED_MESSAGE_SENDERS`) can use these sl
 - Target channels (specified in the command parameter) must be in the `channel_allow_list`
 - The bot will validate the target channel before sending messages
 
-## Predefined Messages
-The hardcoded message orchestration templates are defined in `SlackHandler.PREDEFINED_MESSAGES`:
+## Parameter Requirements
 
-```python
-PREDEFINED_MESSAGES = {
-    "announce": "@oscar Send a release announcement message to channel {channel} using the release-announcement template for the latest version.",
-    "assign_owner": "@oscar Send a release owner assignment message to channel {channel} using the release-owner-assignment template.",
-    "request_owner": "@oscar Send a request for release owner message to channel {channel} using the request-release-owner template.",
-    "rc_details": "@oscar Send RC details message to channel {channel} using the rc-details template for the current release candidate.",
-    "missing_notes": "@oscar Send a missing release notes message to channel {channel} using the missing-release-notes template."
-}
-```
+### Standard Commands (announce, assign-owner, request-owner, rc-details, missing-notes, integration-test)
+- **channel** (required): Channel ID or name where message will be sent
+- **version** (required): Release version (e.g., 2.12.0)
+- **rc_number** (optional): RC number (e.g., 1 for RC1)
 
-## Channel Parameter Requirement
-All commands require a channel parameter (ID or name). Users must specify the target channel where the message should be sent. Both formats work:
+### Broadcast Command
+- **channel** (required): Channel ID or name where response will be sent
+- **your_query** (required): Custom query text to process
+
+## Example Usage
+- `/oscar-announce #releases 2.12.0 1` (with RC1)
+- `/oscar-rc-details #releases 2.12.0` (without RC)
+- `/oscar-integration-test #releases 2.12.0 2` (with RC2)
+- `/oscar-broadcast #general send hello message to the team`
+
+## Channel Parameter Formats
+Both formats work for channel parameters:
 - Channel ID: `C1234567890`
 - Channel name: `#release-channel` or `release-channel`
 
-## Adding More Commands
-To add more slash commands:
-
-1. Add the message template to `PREDEFINED_MESSAGES` with `{channel}` placeholder
-2. Create a new handler method (e.g., `handle_criteria_command`)
-3. Register it in `register_handlers()`: `self.app.command("/oscar-criteria")(self.handle_criteria_command)`
-4. Configure the slash command in Slack App settings
-5. Redeploy your Lambda function
+## Common Settings
+- **Request URL**: Replace `your-domain.com` with your actual domain
+- **Method**: POST
+- **Escape channels, users, and links**: ✅ Always checked
+- **Usage Hint**: Shows parameter format to users including optional parameters
 
 ## Testing
-1. Type `/announce #release-channel` or `/announce C1234567890` in any channel
-2. You should see an ephemeral confirmation message
-3. The bot should then send the release announcement to the specified channel
+1. Type `/oscar-announce #releases 2.12.0` in any channel
+2. You should see the bot process the command and send the announcement
+3. For custom queries: `/oscar-broadcast #general what is the current release status?`
