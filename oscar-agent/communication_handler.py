@@ -479,6 +479,8 @@ def store_cross_channel_context(channel: str, message_ts: str, original_query: s
     """
     try:
         thread_key = f"{channel}_{message_ts}"
+        logger.info(f"🌐 CROSS_CHANNEL_CONTEXT: Starting storage for thread_key='{thread_key}'")
+        logger.info(f"🌐 CROSS_CHANNEL_CONTEXT: channel='{channel}', message_ts='{message_ts}', sent_message_len={len(sent_message)}")
         
         # Redact the original query for privacy/security reasons
         # The original query could contain sensitive info or reveal who made the request
@@ -496,20 +498,26 @@ def store_cross_channel_context(channel: str, message_ts: str, original_query: s
             ]
         }
         
+        logger.info(f"🌐 CROSS_CHANNEL_CONTEXT: Created context with {len(context['history'])} history entries")
+        
         # Store with TTL
-        expiration = int(time.time()) + context_ttl
+        current_time = int(time.time())
+        expiration = current_time + context_ttl
         item = {
             'thread_key': thread_key,
             'context': context,
             'ttl': expiration,
-            'updated_at': int(time.time())
+            'updated_at': current_time
         }
         
+        logger.info(f"🗄️ CROSS_CHANNEL_CONTEXT: DynamoDB item - thread_key='{thread_key}', ttl={expiration}, updated_at={current_time}")
+        logger.info(f"🗄️ CROSS_CHANNEL_CONTEXT: Table name='{context_table_name}'")
+        
         context_table.put_item(Item=item)
-        logger.info(f"Stored cross-channel context for thread {thread_key} in channel {channel}")
+        logger.info(f"✅ CROSS_CHANNEL_CONTEXT: Successfully stored cross-channel context for thread {thread_key} in channel {channel}")
         
     except Exception as e:
-        logger.error(f"Error storing cross-channel context for {channel}_{message_ts}: {e}", exc_info=True)
+        logger.error(f"❌ CROSS_CHANNEL_CONTEXT: Error storing cross-channel context for {channel}_{message_ts}: {e}", exc_info=True)
 
 def create_error_response(error_message: str) -> Dict[str, Any]:
     """
