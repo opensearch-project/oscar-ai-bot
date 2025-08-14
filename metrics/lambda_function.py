@@ -60,61 +60,106 @@ def opensearch_request(method, path, body=None):
         raise Exception(f'OpenSearch request failed: {response.status_code} - {response.text}')
 
 def lambda_handler(event, context):
-    """Main Lambda handler."""
+    """Main Lambda handler.
+    
+    Function Mappings:
+    
+    Integration Test Agent:
+    - get_integration_test_metrics: Get integration test results with proper deduplication
+    - get_rc_build_mapping: Map RC numbers to build numbers
+    
+    Build Metrics Agent:
+    - get_build_metrics: Get build results and metrics
+    - resolve_components_from_builds: Map build numbers to components
+    
+    Release Metrics Agent:
+    - get_release_metrics: Get release readiness metrics
+    
+    Deprecated Functions (still supported but not recommended):
+    - get_test_metrics: Use get_integration_test_metrics instead
+    - get_metrics: Too generic, use specific functions instead
+    """
+    import uuid
+    request_id = str(uuid.uuid4())[:8]
+    
     try:
-        logger.info("🚀 LAMBDA_HANDLER: Starting Lambda execution")
-        logger.info(f"🚀 LAMBDA_HANDLER: Event keys: {list(event.keys())}")
-        logger.info(f"🚀 LAMBDA_HANDLER: Context: {context}")
+        logger.info(f"🚀 LAMBDA_HANDLER [{request_id}]: Starting Lambda execution")
+        logger.info(f"🚀 LAMBDA_HANDLER [{request_id}]: Event keys: {list(event.keys())}")
+        logger.info(f"🚀 LAMBDA_HANDLER [{request_id}]: Context: {context}")
         
         function_name = event.get('function', '')
         parameters = event.get('parameters', [])
-        logger.info(f"🚀 LAMBDA_HANDLER: Function name: {function_name}")
-        logger.info(f"🚀 LAMBDA_HANDLER: Parameters count: {len(parameters)}")
+        logger.info(f"🚀 LAMBDA_HANDLER [{request_id}]: Function name: '{function_name}' (type: {type(function_name)})")
+        logger.info(f"🚀 LAMBDA_HANDLER [{request_id}]: Parameters count: {len(parameters)}")
+        
+        # Log the entire event for debugging
+        logger.info(f"🚀 LAMBDA_HANDLER [{request_id}]: Full event: {json.dumps(event, indent=2)}")
         
         # Convert parameters to dict with proper array handling
         params = {}
         for param in parameters:
             if isinstance(param, dict) and 'name' in param and 'value' in param:
                 value = param['value']
-                # Handle array parameters that might be passed as JSON strings
-                if isinstance(value, str) and value.startswith('[') and value.endswith(']'):
+                param_name = param['name']
+                
+                logger.info(f"🚀 LAMBDA_HANDLER [{request_id}]: Processing param '{param_name}' = {value} (type: {type(value)})")
+                
+                # Handle different value types
+                if isinstance(value, list):
+                    # Already an array, keep as is
+                    pass
+                elif isinstance(value, str) and value.startswith('[') and value.endswith(']'):
+                    # Handle array parameters that might be passed as JSON strings
                     try:
                         value = json.loads(value)
+                        logger.info(f"🚀 LAMBDA_HANDLER [{request_id}]: Parsed JSON array for '{param_name}': {value}")
                     except json.JSONDecodeError:
+                        logger.warning(f"🚀 LAMBDA_HANDLER [{request_id}]: Failed to parse JSON for '{param_name}', keeping as string")
                         pass  # Keep as string if not valid JSON
-                elif isinstance(value, str) and ',' in value and param['name'] in ['rc_numbers', 'build_numbers', 'components']:
+                elif isinstance(value, str) and ',' in value and param_name in ['rc_numbers', 'build_numbers', 'components', 'integ_test_build_numbers']:
                     # Handle comma-separated values for array parameters
-                    value = [item.strip() for item in value.split(',')]
-                params[param['name']] = value
+                    value = [item.strip() for item in value.split(',') if item.strip()]
+                    logger.info(f"🚀 LAMBDA_HANDLER [{request_id}]: Split comma-separated '{param_name}': {value}")
+                elif isinstance(value, str) and param_name in ['rc_numbers', 'build_numbers', 'components', 'integ_test_build_numbers'] and value.strip():
+                    # Single value for array parameter - convert to list
+                    value = [value.strip()]
+                    logger.info(f"🚀 LAMBDA_HANDLER [{request_id}]: Converted single value to array for '{param_name}': {value}")
+                
+                params[param_name] = value
         
         # Get agent_type from parameters - this should be passed by the supervisor agent
         agent_type = params.get('agent_type')
         
-        # If agent_type is not provided, try to infer it from the function name
+        # If agent_type is not provided, infer it from the function name using exact mappings
         if not agent_type:
-            # Try to infer from function name first
-            if function_name in ['get_integration_test_metrics', 'get_test_metrics', 'query_integration_test_failures']:
+            # Integration Test Agent functions
+            if function_name in ['get_integration_test_metrics', 'get_rc_build_mapping']:
                 agent_type = 'integration-test'
+                logger.info(f"Mapped function '{function_name}' to agent_type 'integration-test'")
+            
+            # Build Metrics Agent functions  
             elif function_name in ['get_build_metrics', 'resolve_components_from_builds']:
                 agent_type = 'build-metrics'
-            elif function_name in ['get_release_metrics', 'get_rc_build_mapping']:
+                logger.info(f"Mapped function '{function_name}' to agent_type 'build-metrics'")
+            
+            # Release Metrics Agent functions
+            elif function_name in ['get_release_metrics']:
                 agent_type = 'release-metrics'
-            elif function_name == 'get_metrics':
-                # For generic get_metrics, infer from Lambda function name environment variable
-                lambda_function_name = os.environ.get('AWS_LAMBDA_FUNCTION_NAME', '')
-                if 'build-metrics' in lambda_function_name:
-                    agent_type = 'build-metrics'
-                elif 'release-metrics' in lambda_function_name:
-                    agent_type = 'release-metrics'
-                else:
-                    agent_type = 'integration-test'  # Default fallback
-                logger.info(f"Inferred agent_type '{agent_type}' from Lambda function name: {lambda_function_name}")
+                logger.info(f"Mapped function '{function_name}' to agent_type 'release-metrics'")
+            
+            # Handle deprecated/problematic functions
+            elif function_name in ['get_test_metrics', 'get_metrics']:
+                agent_type = 'integration-test'  # Default to integration test
+                logger.warning(f"Function '{function_name}' is deprecated/generic, mapping to 'integration-test'. Consider using 'get_integration_test_metrics' instead.")
+            
+            # Default fallback
             else:
                 agent_type = 'integration-test'  # Default fallback
-                logger.warning(f"Could not determine agent_type from function '{function_name}', using default: {agent_type}")
+                logger.warning(f"Unknown function '{function_name}', using default agent_type: {agent_type}")
         
-        logger.info(f"🚀 LAMBDA_HANDLER: Function: {function_name}, Agent: {agent_type}")
-        logger.info(f"🚀 LAMBDA_HANDLER: About to route to function handler")
+        logger.info(f"🚀 LAMBDA_HANDLER [{request_id}]: Function: {function_name}, Agent: {agent_type}")
+        logger.info(f"🚀 LAMBDA_HANDLER [{request_id}]: Final params: {params}")
+        logger.info(f"🚀 LAMBDA_HANDLER [{request_id}]: About to route to function handler")
         
         # Route based on function name
         if function_name == 'test_basic':
@@ -124,34 +169,61 @@ def lambda_handler(event, context):
         elif function_name == 'test_opensearch':
             result = test_opensearch_connectivity()
         #based on action group functions that get called, so names not matching concrete implementations here is fine
-        elif function_name in ['get_integration_test_metrics', 'get_test_metrics', 'get_build_metrics', 'get_release_metrics', 'get_metrics', 'query_integration_test_failures', 'resolve_components_from_builds', 'get_rc_build_mapping'] or not function_name:
-            logger.info(f"🚀 LAMBDA_HANDLER: Calling handle_metrics_query")
-            result = handle_metrics_query(agent_type, function_name, params)
-            logger.info(f"🚀 LAMBDA_HANDLER: handle_metrics_query completed, result keys: {list(result.keys()) if isinstance(result, dict) else 'Not a dict'}")
+        # Route to specific function handlers
+        elif function_name in [
+            # Integration Test Agent functions
+            'get_integration_test_metrics',
+            # Build Metrics Agent functions  
+            'get_build_metrics',
+            # Release Metrics Agent functions
+            'get_release_metrics',
+            # Deprecated but still supported
+            'get_test_metrics', 'get_metrics'
+        ]:
+            logger.info(f"🚀 LAMBDA_HANDLER [{request_id}]: Calling handle_metrics_query for {function_name}")
+            result = handle_metrics_query(agent_type, function_name, params, request_id)
+            logger.info(f"🚀 LAMBDA_HANDLER [{request_id}]: handle_metrics_query completed, result keys: {list(result.keys()) if isinstance(result, dict) else 'Not a dict'}")
+        
+        # Handle component resolution (used by both Build and Release agents)
         elif function_name == 'resolve_components_from_builds':
+            logger.info(f"🚀 LAMBDA_HANDLER [{request_id}]: Calling handle_component_resolution")
             result = handle_component_resolution(params)
+        
+        # Handle RC build mapping (used by Integration Test agent)
         elif function_name == 'get_rc_build_mapping':
+            logger.info(f"🚀 LAMBDA_HANDLER [{request_id}]: Calling handle_rc_build_mapping")
             result = handle_rc_build_mapping(params)
+        
+        # Handle unknown functions
+        elif not function_name:
+            logger.info(f"🚀 LAMBDA_HANDLER [{request_id}]: No function name provided, calling handle_metrics_query with default")
+            result = handle_metrics_query(agent_type, function_name, params, request_id)
         else:
             result = {'error': f'Unknown function: {function_name}'}
         
-        logger.info(f"🚀 LAMBDA_HANDLER: About to create response")
+        logger.info(f"🚀 LAMBDA_HANDLER [{request_id}]: About to create response")
         response = create_response(event, result)
-        logger.info(f"🚀 LAMBDA_HANDLER: Response created successfully")
+        logger.info(f"🚀 LAMBDA_HANDLER [{request_id}]: Response created successfully")
         return response
         
     except Exception as e:
-        logger.error(f"🚀 LAMBDA_HANDLER: Exception occurred: {e}")
+        logger.error(f"🚀 LAMBDA_HANDLER [{request_id}]: Exception occurred: {e}")
         import traceback
-        logger.error(f"🚀 LAMBDA_HANDLER: Stack trace: {traceback.format_exc()}")
+        logger.error(f"🚀 LAMBDA_HANDLER [{request_id}]: Stack trace: {traceback.format_exc()}")
         return create_response(event, {'error': str(e), 'type': 'lambda_error'})
 
-def handle_metrics_query(agent_type, function_name, params):
+def handle_metrics_query(agent_type, function_name, params, request_id=None):
     """Simplified metrics query handler - execute query with parameters and return results."""
     try:
-        logger.info(f"📊 METRICS_QUERY: Starting metrics query handler")
-        logger.info(f"📊 METRICS_QUERY: agent_type={agent_type}, function_name={function_name}")
-        logger.info(f"📊 METRICS_QUERY: params keys: {list(params.keys()) if isinstance(params, dict) else 'Not a dict'}")
+        req_id = request_id or "unknown"
+        logger.info(f"📊 METRICS_QUERY [{req_id}]: Starting metrics query handler")
+        logger.info(f"📊 METRICS_QUERY [{req_id}]: agent_type={agent_type}, function_name={function_name}")
+        logger.info(f"📊 METRICS_QUERY [{req_id}]: params keys: {list(params.keys()) if isinstance(params, dict) else 'Not a dict'}")
+        
+        # Log all parameters for debugging
+        for key, value in params.items():
+            logger.info(f"📊 METRICS_QUERY [{req_id}]: param {key} = {value}")
+        
         # Extract parameters directly from the event
         version = params.get('version')
         rc_numbers = params.get('rc_numbers') or []
@@ -169,7 +241,16 @@ def handle_metrics_query(agent_type, function_name, params):
         if not version:
             return {'error': 'Version is required for metrics queries'}
         
-        # Normalize array parameters
+        # Function-specific validation
+        if function_name == 'get_integration_test_metrics' and not rc_numbers:
+            logger.warning(f"📊 METRICS_QUERY [{req_id}]: get_integration_test_metrics called without rc_numbers")
+        elif function_name == 'get_build_metrics' and not (build_numbers or rc_numbers):
+            logger.warning(f"📊 METRICS_QUERY [{req_id}]: get_build_metrics called without build_numbers or rc_numbers")
+        elif function_name == 'get_release_metrics' and not components:
+            logger.warning(f"📊 METRICS_QUERY [{req_id}]: get_release_metrics called without components")
+        
+        # Normalize array parameters - these should already be handled in the main parameter processing
+        # but keep this as a safety net for any edge cases
         if isinstance(rc_numbers, str):
             rc_numbers = [item.strip() for item in rc_numbers.split(',') if item.strip()]
         if isinstance(build_numbers, str):
@@ -179,17 +260,27 @@ def handle_metrics_query(agent_type, function_name, params):
         if isinstance(components, str):
             components = [item.strip() for item in components.split(',') if item.strip()]
         
-        logger.info(f"📊 METRICS_QUERY: Executing {agent_type} query for version {version}")
-        logger.info(f"📊 METRICS_QUERY: Parameters - rc_numbers={rc_numbers}, build_numbers={build_numbers}, components={components}")
-        logger.info(f"📊 METRICS_QUERY: About to execute query based on agent type")
+        # Ensure arrays are not None
+        rc_numbers = rc_numbers or []
+        build_numbers = build_numbers or []
+        integ_test_build_numbers = integ_test_build_numbers or []
+        components = components or []
+        
+        logger.info(f"📊 METRICS_QUERY [{req_id}]: Executing {agent_type} query for version {version}")
+        logger.info(f"📊 METRICS_QUERY [{req_id}]: Parameters - rc_numbers={rc_numbers}, build_numbers={build_numbers}, components={components}")
+        logger.info(f"📊 METRICS_QUERY [{req_id}]: About to execute query based on agent type")
         
         # Execute single query based on agent type
         if agent_type in ['integration-test', 'test-metrics', 'test']:
-            logger.info(f"📊 METRICS_QUERY: Processing integration test query")
+            logger.info(f"📊 METRICS_QUERY [{req_id}]: Processing integration test query")
             rc_number_to_use = rc_numbers[0] if rc_numbers else None
-            logger.info(f"📊 METRICS_QUERY: Using RC number: {rc_number_to_use}")
+            logger.info(f"📊 METRICS_QUERY [{req_id}]: Using RC number: {rc_number_to_use} (from rc_numbers: {rc_numbers})")
             
-            logger.info(f"📊 METRICS_QUERY: About to call query_integration_test_results")
+            logger.info(f"📊 METRICS_QUERY [{req_id}]: About to call query_integration_test_results")
+            logger.info(f"📊 METRICS_QUERY [{req_id}]: Query parameters - version={version}, rc_number={rc_number_to_use}, build_numbers={build_numbers}, components={components}")
+            logger.info(f"📊 METRICS_QUERY [{req_id}]: Filters - status_filter={status_filter}, distribution={distribution}, architecture={architecture}, platform={platform}")
+            logger.info(f"📊 METRICS_QUERY [{req_id}]: Security filters - with_security={with_security}, without_security={without_security}")
+            
             opensearch_results = query_integration_test_results(
                 version=version,
                 rc_number=rc_number_to_use,
@@ -203,7 +294,7 @@ def handle_metrics_query(agent_type, function_name, params):
                 without_security=without_security,
                 integ_test_build_numbers=integ_test_build_numbers if integ_test_build_numbers else None
             )
-            logger.info(f"📊 METRICS_QUERY: query_integration_test_results completed")
+            logger.info(f"📊 METRICS_QUERY [{req_id}]: query_integration_test_results completed")
             data_source = 'opensearch-integration-test-results'
             
         elif agent_type in ['build-metrics', 'build']:
@@ -226,19 +317,52 @@ def handle_metrics_query(agent_type, function_name, params):
             return {'error': f'Unknown agent type: {agent_type}'}
         
         # Extract and process results based on agent type
-        logger.info(f"📊 METRICS_QUERY: About to extract results for agent type: {agent_type}")
+        logger.info(f"📊 METRICS_QUERY [{req_id}]: About to extract results for agent type: {agent_type}")
+        logger.info(f"📊 METRICS_QUERY [{req_id}]: Function name: {function_name}")
+        logger.info(f"📊 METRICS_QUERY [{req_id}]: Data source will be: {data_source}")
+        
         if agent_type in ['integration-test', 'test-metrics', 'test']:
-            logger.info(f"📊 METRICS_QUERY: Calling extract_test_results")
+            logger.info(f"📊 METRICS_QUERY [{req_id}]: Calling extract_test_results for integration test data")
             results = extract_test_results(opensearch_results)
-            logger.info(f"📊 METRICS_QUERY: extract_test_results completed, got {len(results)} results")
+            logger.info(f"📊 METRICS_QUERY [{req_id}]: extract_test_results completed, got {len(results)} results")
+            
+            # Debug: Log summary of results by component and status
+            component_status_summary = {}
+            for result in results:
+                component = result.get('component')
+                status = result.get('component_build_result')
+                platform = result.get('platform')
+                arch = result.get('architecture')
+                dist = result.get('distribution')
+                build_time = result.get('build_start_time')
+                
+                key = f"{component}_{platform}_{arch}_{dist}"
+                if key not in component_status_summary:
+                    component_status_summary[key] = []
+                component_status_summary[key].append({
+                    'status': status,
+                    'build_time': build_time
+                })
+            
+            logger.info(f"📊 METRICS_QUERY [{req_id}]: Final results summary:")
+            for key, statuses in component_status_summary.items():
+                logger.info(f"📊 METRICS_QUERY [{req_id}]: {key}: {statuses}")
         elif agent_type in ['build-metrics', 'build']:
             results = extract_build_results(opensearch_results)
         elif agent_type in ['release-metrics', 'release']:
             results = extract_release_results(opensearch_results)
         else:
-            # Fallback to raw extraction
+            # Fallback to raw extraction - but check if this is integration test data
             hits = opensearch_results.get('hits', {}).get('hits', [])
-            results = [hit.get('_source', {}) for hit in hits]
+            raw_results = [hit.get('_source', {}) for hit in hits]
+            
+            # If this looks like integration test data, apply deduplication
+            if raw_results and any('component_build_result' in r and 'build_start_time' in r for r in raw_results):
+                logger.info(f"📊 METRICS_QUERY [{req_id}]: Fallback case detected integration test data, applying deduplication")
+                results = deduplicate_integration_test_results(raw_results)
+            else:
+                logger.info(f"📊 METRICS_QUERY [{req_id}]: Fallback case - raw results don't look like integration test data")
+                results = raw_results
         
         # Apply additional filtering if needed (redundant but kept for safety)
         if status_filter:
@@ -252,8 +376,24 @@ def handle_metrics_query(agent_type, function_name, params):
         if without_security:
             results = [r for r in results if r.get('without_security') == without_security]
         
-        logger.info(f"📊 METRICS_QUERY: Query returned {len(results)} results after filtering")
-        logger.info(f"📊 METRICS_QUERY: About to create final response")
+        logger.info(f"📊 METRICS_QUERY [{req_id}]: Query returned {len(results)} results after filtering")
+        logger.info(f"📊 METRICS_QUERY [{req_id}]: About to create final response")
+        
+        # Log final summary before returning
+        failed_results = [r for r in results if r.get('component_build_result') == 'failed' or r.get('status') == 'failed']
+        passed_results = [r for r in results if r.get('component_build_result') == 'passed' or r.get('status') == 'passed']
+        
+        logger.info(f"📊 METRICS_QUERY [{req_id}]: FINAL SUMMARY - Total: {len(results)}, Failed: {len(failed_results)}, Passed: {len(passed_results)}")
+        
+        if failed_results:
+            logger.info(f"📊 METRICS_QUERY [{req_id}]: FAILED COMPONENTS:")
+            for result in failed_results:
+                component = result.get('component')
+                platform = result.get('platform')
+                arch = result.get('architecture')
+                dist = result.get('distribution')
+                build_time = result.get('build_start_time')
+                logger.info(f"📊 METRICS_QUERY [{req_id}]: - {component} ({platform}/{arch}/{dist}) - time: {build_time}")
         
         # Return results directly - let the LLM interpret them
         return {
@@ -273,7 +413,14 @@ def handle_metrics_query(agent_type, function_name, params):
             },
             'data_source': data_source,
             'total_results': len(results),
-            'results': results
+            'results': results,
+            'summary': {
+                'total_components': len(results),
+                'failed_components': len(failed_results),
+                'passed_components': len(passed_results),
+                'failed_component_names': [r.get('component') for r in failed_results],
+                'passed_component_names': [r.get('component') for r in passed_results]
+            }
         }
         
     except Exception as e:
@@ -320,10 +467,8 @@ def query_integration_test_results(version, rc_number=None, build_numbers=None, 
         }
     }
     
-    # Add status filter if specified
-    if status_filter:
-        status_filter_clause = {"match_phrase": {"component_build_result": status_filter}}
-        query_body["query"]["bool"]["must"].append(status_filter_clause)
+    # Note: status_filter is NOT applied at OpenSearch level to ensure proper deduplication
+    # It will be applied after deduplication in the main handler
     
     # Add build numbers filter
     if build_numbers:
@@ -437,10 +582,8 @@ def query_distribution_build_results(version, build_numbers=None, components=Non
         }
     }
     
-    if status_filter:
-        query_body["query"]["bool"]["must"].append(
-            {"match_phrase": {"component_build_result": status_filter}}
-        )
+    # Note: status_filter is NOT applied at OpenSearch level to ensure proper deduplication
+    # It will be applied after deduplication in the main handler
     
     if build_numbers:
         query_body["query"]["bool"]["must"].append(
@@ -546,9 +689,9 @@ def deduplicate_integration_test_results(results):
     if not results:
         return results
     
-    logger.info(f"Deduplicating {len(results)} integration test results")
+    logger.info(f"🔄 DEDUP: Starting deduplication of {len(results)} integration test results")
     
-    # Group by (component, version, rc_number)
+    # Group by (component, version, rc_number, platform, architecture, distribution)
     groups = {}
     ungrouped = []
     
@@ -558,7 +701,6 @@ def deduplicate_integration_test_results(results):
         rc_number = result.get('rc_number')
         build_start_time = result.get('build_start_time')
         
-        # Only group if we have required fields
         # Include platform/arch/distribution to keep legitimate different test configurations
         platform = result.get('platform')
         architecture = result.get('architecture') 
@@ -567,32 +709,55 @@ def deduplicate_integration_test_results(results):
         if component and version and rc_number is not None:
             key = (component, str(version), str(rc_number), str(platform), str(architecture), str(distribution))
             
+            logger.info(f"🔄 DEDUP: Processing {component} - key: {key}, build_time: {build_start_time}")
+            
             if key not in groups:
                 groups[key] = result
+                logger.info(f"🔄 DEDUP: Added new entry for {component}")
             else:
                 # Compare by build_start_time (most recent wins)
                 existing_time = groups[key].get('build_start_time')
+                existing_status = groups[key].get('component_build_result')
+                new_status = result.get('component_build_result')
+                
+                logger.info(f"🔄 DEDUP: Comparing {component} - existing_time: {existing_time} ({existing_status}) vs new_time: {build_start_time} ({new_status})")
+                
                 if build_start_time and existing_time:
                     try:
                         # Convert to int for proper numeric comparison
                         new_time_int = int(build_start_time) if isinstance(build_start_time, str) else build_start_time
                         existing_time_int = int(existing_time) if isinstance(existing_time, str) else existing_time
+                        
                         if new_time_int > existing_time_int:
+                            logger.info(f"🔄 DEDUP: Replacing {component} - newer time {new_time_int} > {existing_time_int}")
                             groups[key] = result
-                    except (ValueError, TypeError):
+                        else:
+                            logger.info(f"🔄 DEDUP: Keeping existing {component} - older time {new_time_int} <= {existing_time_int}")
+                    except (ValueError, TypeError) as e:
+                        logger.error(f"🔄 DEDUP: Error comparing times for {component}: {e}")
                         # If conversion fails, do string comparison
                         if build_start_time > existing_time:
                             groups[key] = result
                 elif build_start_time and not existing_time:
                     # New result has timestamp, existing doesn't - prefer new
+                    logger.info(f"🔄 DEDUP: Replacing {component} - new has timestamp, existing doesn't")
                     groups[key] = result
                 # If neither has timestamp or existing is newer, keep existing
         else:
             # Keep results without proper grouping keys
+            logger.info(f"🔄 DEDUP: Adding to ungrouped - missing fields: component={component}, version={version}, rc_number={rc_number}")
             ungrouped.append(result)
     
     deduplicated_results = list(groups.values()) + ungrouped
-    logger.info(f"Deduplication complete: {len(results)} -> {len(deduplicated_results)} results")
+    logger.info(f"🔄 DEDUP: Deduplication complete: {len(results)} -> {len(deduplicated_results)} results")
+    
+    # Log final results for debugging
+    for result in deduplicated_results:
+        component = result.get('component')
+        status = result.get('component_build_result')
+        build_time = result.get('build_start_time')
+        logger.info(f"🔄 DEDUP: Final result - {component}: {status} (time: {build_time})")
+    
     return deduplicated_results
 
 def deduplicate_release_results(results):
