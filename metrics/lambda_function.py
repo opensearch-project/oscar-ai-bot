@@ -88,12 +88,23 @@ def lambda_handler(event, context):
         
         # If agent_type is not provided, try to infer it from the function name
         if not agent_type:
+            # Try to infer from function name first
             if function_name in ['get_integration_test_metrics', 'get_test_metrics', 'query_integration_test_failures']:
                 agent_type = 'integration-test'
             elif function_name in ['get_build_metrics', 'resolve_components_from_builds']:
                 agent_type = 'build-metrics'
             elif function_name in ['get_release_metrics', 'get_rc_build_mapping']:
                 agent_type = 'release-metrics'
+            elif function_name == 'get_metrics':
+                # For generic get_metrics, infer from Lambda function name environment variable
+                lambda_function_name = os.environ.get('AWS_LAMBDA_FUNCTION_NAME', '')
+                if 'build-metrics' in lambda_function_name:
+                    agent_type = 'build-metrics'
+                elif 'release-metrics' in lambda_function_name:
+                    agent_type = 'release-metrics'
+                else:
+                    agent_type = 'integration-test'  # Default fallback
+                logger.info(f"Inferred agent_type '{agent_type}' from Lambda function name: {lambda_function_name}")
             else:
                 agent_type = 'integration-test'  # Default fallback
                 logger.warning(f"Could not determine agent_type from function '{function_name}', using default: {agent_type}")
@@ -124,412 +135,125 @@ def lambda_handler(event, context):
         return create_response(event, {'error': str(e), 'type': 'lambda_error'})
 
 def handle_metrics_query(agent_type, function_name, params):
-    """Enhanced metrics query handler with natural language support."""
+    """Simplified metrics query handler - execute query with parameters and return results."""
     try:
-        query_text = params.get('query', '')
+        # Extract parameters directly from the event
+        version = params.get('version')
+        rc_numbers = params.get('rc_numbers', [])
+        build_numbers = params.get('build_numbers', [])
+        integ_test_build_numbers = params.get('integ_test_build_numbers', [])
+        components = params.get('components', [])
+        status_filter = params.get('status_filter')  # 'passed', 'failed', or None
+        distribution = params.get('distribution', 'tar')
+        architecture = params.get('architecture', 'x64')
+        platform = params.get('platform', 'linux')
+        with_security = params.get('with_security')  # 'pass', 'fail', or None
+        without_security = params.get('without_security')  # 'pass', 'fail', or None
         
-        # Parse query intent for all queries
-        intent = parse_query_intent(query_text, params)
+        # Validate required parameters
+        if not version:
+            return {'error': 'Version is required for metrics queries'}
         
-        # Route to appropriate agent with enhanced logic
+        # Normalize array parameters
+        if isinstance(rc_numbers, str):
+            rc_numbers = [item.strip() for item in rc_numbers.split(',') if item.strip()]
+        if isinstance(build_numbers, str):
+            build_numbers = [item.strip() for item in build_numbers.split(',') if item.strip()]
+        if isinstance(integ_test_build_numbers, str):
+            integ_test_build_numbers = [item.strip() for item in integ_test_build_numbers.split(',') if item.strip()]
+        if isinstance(components, str):
+            components = [item.strip() for item in components.split(',') if item.strip()]
+        
+        logger.info(f"Executing {agent_type} query for version {version} with parameters: rc_numbers={rc_numbers}, build_numbers={build_numbers}, components={components}")
+        
+        # Execute single query based on agent type
         if agent_type in ['integration-test', 'test-metrics', 'test']:
-            return handle_integration_test_queries(intent, params)
+            opensearch_results = query_integration_test_results(
+                version=version,
+                rc_number=rc_numbers[0] if rc_numbers else None,
+                build_numbers=build_numbers if build_numbers else None,
+                components=components if components else None,
+                status_filter=status_filter,
+                distribution=distribution,
+                architecture=architecture,
+                platform=platform,
+                with_security=with_security,
+                without_security=without_security,
+                integ_test_build_numbers=integ_test_build_numbers if integ_test_build_numbers else None
+            )
+            data_source = 'opensearch-integration-test-results'
+            
         elif agent_type in ['build-metrics', 'build']:
-            return handle_build_queries(intent, params)
+            opensearch_results = query_distribution_build_results(
+                version=version,
+                build_numbers=build_numbers if build_numbers else None,
+                components=components if components else None,
+                status_filter=status_filter
+            )
+            data_source = 'opensearch-distribution-build-results'
+            
         elif agent_type in ['release-metrics', 'release']:
-            return handle_release_queries(intent, params)
+            opensearch_results = query_release_readiness(
+                version=version,
+                components=components if components else None
+            )
+            data_source = 'opensearch_release_metrics'
+            
         else:
             return {'error': f'Unknown agent type: {agent_type}'}
-            
-    except Exception as e:
-        logger.error(f"Enhanced metrics query failed: {e}")
-        return {'error': str(e), 'type': 'enhanced_metrics_error'}
-
-def handle_integration_test_queries(intent, params):
-    """Handle integration test queries using opensearch-integration-test-results index."""
-    try:
-        version = intent.get('version')
-        if not version:
-            return {'error': 'Version is required for integration test queries'}
         
-        # Validate and normalize parameters
-        intent = validate_and_normalize_intent(intent)
+        # Extract the actual results from OpenSearch response
+        hits = opensearch_results.get('hits', {}).get('hits', [])
+        results = [hit.get('_source', {}) for hit in hits]
         
-        # Execute multi-strategy query
-        results = execute_integration_test_strategy(intent)
+        # Apply additional filtering if needed
+        if status_filter:
+            if agent_type in ['integration-test', 'test-metrics', 'test']:
+                # Filter by component_build_result for integration tests
+                results = [r for r in results if r.get('component_build_result') == status_filter]
+            elif agent_type in ['build-metrics', 'build']:
+                # Filter by component_build_result for builds
+                results = [r for r in results if r.get('component_build_result') == status_filter]
         
+        # Apply security test filtering
+        if with_security:
+            results = [r for r in results if r.get('with_security') == with_security]
+        if without_security:
+            results = [r for r in results if r.get('without_security') == without_security]
+        
+        logger.info(f"Query returned {len(results)} results after filtering")
+        
+        # Return results directly - let the LLM interpret them
         return {
-            'agent_type': 'integration_test',
-            'query_intent': intent,
-            'results': results,
-            'summary': generate_integration_summary(results),
-            'data_source': 'opensearch-integration-test-results'
+            'agent_type': agent_type,
+            'version': version,
+            'query_parameters': {
+                'rc_numbers': rc_numbers,
+                'build_numbers': build_numbers,
+                'integ_test_build_numbers': integ_test_build_numbers,
+                'components': components,
+                'status_filter': status_filter,
+                'distribution': distribution,
+                'architecture': architecture,
+                'platform': platform,
+                'with_security': with_security,
+                'without_security': without_security
+            },
+            'data_source': data_source,
+            'total_results': len(results),
+            'results': results
         }
         
     except Exception as e:
-        logger.error(f"Integration test query failed: {e}")
-        return {'error': str(e), 'type': 'integration_test_error'}
+        logger.error(f"Metrics query failed: {e}")
+        return {'error': str(e), 'type': 'metrics_error'}
 
-def handle_build_queries(intent, params):
-    """Handle build queries using opensearch-distribution-build-results index."""
-    try:
-        version = intent.get('version')
-        if not version:
-            return {'error': 'Version is required for build queries'}
-        
-        results = execute_build_strategy(intent)
-        
-        return {
-            'agent_type': 'build',
-            'query_intent': intent,
-            'results': results,
-            'summary': generate_build_summary(results),
-            'data_source': 'opensearch-distribution-build-results'
-        }
-        
-    except Exception as e:
-        logger.error(f"Build query failed: {e}")
-        return {'error': str(e), 'type': 'build_error'}
 
-def handle_release_queries(intent, params):
-    """Handle release queries using opensearch_release_metrics index."""
-    try:
-        version = intent.get('version')
-        if not version:
-            return {'error': 'Version is required for release queries'}
-        
-        results = execute_release_strategy(intent)
-        
-        return {
-            'agent_type': 'release',
-            'query_intent': intent,
-            'results': results,
-            'summary': generate_release_summary(results),
-            'data_source': 'opensearch_release_metrics'
-        }
-        
-    except Exception as e:
-        logger.error(f"Release query failed: {e}")
-        return {'error': str(e), 'type': 'release_error'}
-
-def parse_query_intent(query_text, params=None):
-    """Enhanced query parsing to extract comprehensive parameters."""
-    import re
-    
-    if params is None:
-        params = {}
-    
-    intent = {
-        'version': params.get('version'),
-        'rc_numbers': params.get('rc_numbers', []),
-        'build_numbers': params.get('build_numbers', []),
-        'integ_test_build_numbers': params.get('integ_test_build_numbers', []),
-        'components': params.get('components', []),
-        'status_filter': params.get('status_filter'),
-        'distribution': params.get('distribution', 'tar'),
-        'architecture': params.get('architecture', 'x64'),
-        'platform': params.get('platform', 'linux'),
-        'with_security': params.get('with_security'),
-        'without_security': params.get('without_security'),
-        'time_range': params.get('time_range', '7d'),
-        'query_type': 'general'
-    }
-    
-    if not query_text:
-        return intent
-    
-    query_lower = query_text.lower()
-    
-    # Extract version
-    if not intent['version']:
-        version_match = re.search(r'version\s+(\d+\.\d+\.\d+)', query_text, re.IGNORECASE)
-        if version_match:
-            intent['version'] = version_match.group(1)
-    
-    # Extract RC numbers
-    if not intent['rc_numbers']:
-        rc_matches = re.findall(r'RC\s+(?:number\s+)?(\d+)', query_text, re.IGNORECASE)
-        intent['rc_numbers'] = [int(rc) for rc in rc_matches]
-    
-    # Extract build numbers - handle both distribution and integration test build numbers
-    if not intent['build_numbers']:
-        build_matches = re.findall(r'(?:distribution\s+)?build\s+numbers?\s+(\d+(?:,\s*\d+)*)', query_text, re.IGNORECASE)
-        if build_matches:
-            # Handle comma-separated build numbers
-            build_nums = []
-            for match in build_matches:
-                nums = [int(n.strip()) for n in match.split(',')]
-                build_nums.extend(nums)
-            intent['build_numbers'] = build_nums
-        else:
-            # Fallback to individual build number pattern
-            single_matches = re.findall(r'(?:distribution\s+)?build\s+(?:number\s+)?(\d+)', query_text, re.IGNORECASE)
-            intent['build_numbers'] = [int(build) for build in single_matches]
-    
-    # Extract integration test build numbers
-    if not intent['integ_test_build_numbers']:
-        integ_matches = re.findall(r'(?:integ|integration)\s+test\s+build\s+numbers?\s+(\d+(?:,\s*\d+)*)', query_text, re.IGNORECASE)
-        if integ_matches:
-            integ_nums = []
-            for match in integ_matches:
-                nums = [int(n.strip()) for n in match.split(',')]
-                integ_nums.extend(nums)
-            intent['integ_test_build_numbers'] = integ_nums
-    
-    # Extract components with improved Dashboards plugin detection
-    if not intent['components']:
-        if 'opensearch-dashboards' in query_lower or 'dashboards' in query_lower:
-            intent['components'].append('OpenSearch-Dashboards')
-        if 'opensearch' in query_lower and 'dashboards' not in query_lower:
-            intent['components'].append('OpenSearch')
-        
-        # Generic detection for dashboards-related components
-        if 'dashboards' in query_lower and 'opensearch-dashboards' not in query_lower:
-            # This will be handled by the improved component filtering in the query
-            pass
-    
-    # Determine query type
-    if 'failed' in query_lower or 'failure' in query_lower:
-        intent['status_filter'] = 'failed'
-        intent['query_type'] = 'failure_analysis'
-    elif 'passed' in query_lower or 'success' in query_lower:
-        intent['status_filter'] = 'passed'
-        intent['query_type'] = 'success_analysis'
-    elif 'integration test' in query_lower:
-        intent['query_type'] = 'integration_test'
-    elif 'build' in query_lower:
-        intent['query_type'] = 'build_analysis'
-    elif 'release' in query_lower:
-        intent['query_type'] = 'release_analysis'
-    
-    # Extract platform/architecture/distribution
-    if 'arm64' in query_lower:
-        intent['architecture'] = 'arm64'
-    if 'windows' in query_lower:
-        intent['platform'] = 'windows'
-    if 'rpm' in query_lower:
-        intent['distribution'] = 'rpm'
-    elif 'deb' in query_lower:
-        intent['distribution'] = 'deb'
-    
-    # Extract security test filters
-    if 'with security' in query_lower:
-        if 'failed' in query_lower or 'fail' in query_lower:
-            intent['with_security'] = 'fail'
-        elif 'passed' in query_lower or 'pass' in query_lower:
-            intent['with_security'] = 'pass'
-    
-    if 'without security' in query_lower:
-        if 'failed' in query_lower or 'fail' in query_lower:
-            intent['without_security'] = 'fail'
-        elif 'passed' in query_lower or 'pass' in query_lower:
-            intent['without_security'] = 'pass'
-    
-    return intent
-
-def validate_and_normalize_intent(intent):
-    """Validate and normalize intent parameters."""
-    # Ensure arrays are properly formatted
-    for array_field in ['rc_numbers', 'build_numbers', 'integ_test_build_numbers', 'components']:
-        value = intent.get(array_field, [])
-        if isinstance(value, str):
-            # Handle comma-separated values or single values
-            if ',' in value:
-                intent[array_field] = [item.strip() for item in value.split(',') if item.strip()]
-            elif value.strip():
-                intent[array_field] = [value.strip()]
-            else:
-                intent[array_field] = []
-        elif not isinstance(value, list):
-            # Convert other types to list
-            intent[array_field] = [value] if value is not None else []
-    
-    # Convert RC and build numbers to appropriate types
-    if intent.get('rc_numbers'):
-        intent['rc_numbers'] = [int(rc) if str(rc).isdigit() else rc for rc in intent['rc_numbers']]
-    
-    if intent.get('build_numbers'):
-        intent['build_numbers'] = [str(bn) for bn in intent['build_numbers']]  # Keep as strings for OpenSearch
-    
-    if intent.get('integ_test_build_numbers'):
-        intent['integ_test_build_numbers'] = [str(bn) for bn in intent['integ_test_build_numbers']]
-    
-    # Validate security test parameters
-    for security_field in ['with_security', 'without_security']:
-        value = intent.get(security_field)
-        if value and value not in ['pass', 'fail']:
-            intent[security_field] = None  # Invalid value, clear it
-    
-    return intent
-
-def execute_integration_test_strategy(intent):
-    """Execute integration test queries with multiple strategies."""
-    version = intent['version']
-    rc_numbers = intent['rc_numbers']
-    build_numbers = intent['build_numbers']
-    components = intent['components']
-    status_filter = intent.get('status_filter')
-    
-    results = []
-    
-    # Strategy 1: RC-based queries (improved to handle multiple builds per RC)
-    if rc_numbers:
-        for rc_num in rc_numbers:
-            if components:
-                # For specific components, query directly without build number restriction
-                result = query_integration_test_results(
-                    version=version,
-                    rc_number=rc_num,
-                    components=components,
-                    status_filter=status_filter,
-                    distribution=intent.get('distribution'),
-                    architecture=intent.get('architecture'),
-                    platform=intent.get('platform'),
-                    with_security=intent.get('with_security'),
-                    without_security=intent.get('without_security')
-                )
-                results.append({
-                    'strategy': 'rc_component_based',
-                    'rc_number': rc_num,
-                    'components': components,
-                    'test_results': extract_test_results(result)
-                })
-            else:
-                # Query all components for this RC
-                result = query_integration_test_results(
-                    version=version,
-                    rc_number=rc_num,
-                    status_filter=status_filter,
-                    distribution=intent.get('distribution'),
-                    architecture=intent.get('architecture'),
-                    platform=intent.get('platform'),
-                    with_security=intent.get('with_security'),
-                    without_security=intent.get('without_security')
-                )
-                results.append({
-                    'strategy': 'rc_based',
-                    'rc_number': rc_num,
-                    'test_results': extract_test_results(result)
-                })
-    
-    # Strategy 2: Direct build number queries (improved component resolution)
-    elif build_numbers:
-        # Convert build numbers to strings for consistency
-        build_numbers = [str(bn) for bn in build_numbers]
-        
-        if not components:
-            # Try to resolve components, but don't fail if we can't
-            try:
-                component_map = resolve_components_from_build_numbers(version, build_numbers)
-                all_components = []
-                for comps in component_map.values():
-                    all_components.extend(comps)
-                components = list(set(all_components)) if all_components else None
-            except Exception as e:
-                logger.warning(f"Could not resolve components from build numbers: {e}")
-                components = None
-        
-        result = query_integration_test_results(
-            version=version,
-            build_numbers=build_numbers,
-            components=components,
-            status_filter=status_filter,
-            distribution=intent.get('distribution'),
-            architecture=intent.get('architecture'),
-            platform=intent.get('platform'),
-            with_security=intent.get('with_security'),
-            without_security=intent.get('without_security'),
-            integ_test_build_numbers=intent.get('integ_test_build_numbers')
-        )
-        results.append({
-            'strategy': 'build_number_based',
-            'build_numbers': build_numbers,
-            'components': components,
-            'test_results': extract_test_results(result)
-        })
-    
-    # Strategy 3: Component-only queries (latest builds)
-    elif components:
-        result = query_integration_test_results(
-            version=version,
-            components=components,
-            status_filter=status_filter,
-            distribution=intent.get('distribution'),
-            architecture=intent.get('architecture'),
-            platform=intent.get('platform'),
-            with_security=intent.get('with_security'),
-            without_security=intent.get('without_security')
-        )
-        results.append({
-            'strategy': 'component_based',
-            'components': components,
-            'test_results': extract_test_results(result)
-        })
-    
-    # Strategy 4: General query (all recent results)
-    else:
-        result = query_integration_test_results(
-            version=version,
-            status_filter=status_filter,
-            distribution=intent.get('distribution'),
-            architecture=intent.get('architecture'),
-            platform=intent.get('platform'),
-            with_security=intent.get('with_security'),
-            without_security=intent.get('without_security')
-        )
-        results.append({
-            'strategy': 'general',
-            'test_results': extract_test_results(result)
-        })
-    
-    return results
-
-def execute_build_strategy(intent):
-    """Execute build queries using distribution build results."""
-    version = intent['version']
-    build_numbers = intent['build_numbers']
-    components = intent['components']
-    status_filter = intent.get('status_filter')
-    
-    # For consistency, always query all results first, then filter in summary
-    result = query_distribution_build_results(
-        version=version,
-        build_numbers=build_numbers,
-        components=components,
-        status_filter=None  # Don't filter at query level for consistency
-    )
-    
-    build_results = extract_build_results(result)
-    
-    # Apply status filter after extraction if needed
-    if status_filter:
-        build_results = [r for r in build_results if r.get('status') == status_filter]
-    
-    return [{
-        'strategy': 'build_analysis',
-        'build_results': build_results,
-        'data_source': 'opensearch-distribution-build-results'
-    }]
-
-def execute_release_strategy(intent):
-    """Execute release queries using release metrics."""
-    version = intent['version']
-    components = intent['components']
-    
-    result = query_release_readiness(
-        version=version,
-        components=components
-    )
-    
-    return [{
-        'strategy': 'release_readiness',
-        'release_results': extract_release_results(result)
-    }]
 
 def query_integration_test_results(version, rc_number=None, build_numbers=None, components=None, status_filter=None, distribution="tar", architecture="x64", platform="linux", with_security=None, without_security=None, integ_test_build_numbers=None):
     """Comprehensive integration test results query."""
     query_body = {
-        "size": 100,
+        "size": 1000,
         "sort": [{"build_start_time": {"order": "desc"}}],
         "_source": [
             "component", "component_repo", "component_repo_url", "component_build_result", 
@@ -635,7 +359,7 @@ def query_integration_test_results(version, rc_number=None, build_numbers=None, 
 def query_distribution_build_results(version, build_numbers=None, components=None, status_filter=None):
     """Query distribution build results."""
     query_body = {
-        "size": 100,
+        "size": 1000,
         "sort": [{"build_start_time": {"order": "desc"}}],
         "_source": [
             "component", "component_repo", "component_repo_url", "component_ref",
@@ -671,7 +395,7 @@ def query_distribution_build_results(version, build_numbers=None, components=Non
 def query_release_readiness(version, components=None):
     """Query release readiness metrics with comprehensive field coverage."""
     query_body = {
-        "size": 100,
+        "size": 1000,
         "sort": [{"current_date": {"order": "desc"}}],
         "_source": [
             # Core identification fields

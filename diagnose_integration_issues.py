@@ -232,7 +232,7 @@ def create_test_queries():
                 "size": 0,
                 "aggs": {
                     "components": {
-                        "terms": {"field": "component.keyword", "size": 100}
+                        "terms": {"field": "component.keyword", "size": 1000}
                     }
                 }
             },
