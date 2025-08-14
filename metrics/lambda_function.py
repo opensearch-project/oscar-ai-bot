@@ -62,10 +62,14 @@ def opensearch_request(method, path, body=None):
 def lambda_handler(event, context):
     """Main Lambda handler."""
     try:
-        logger.info("Lambda handler started")
+        logger.info("🚀 LAMBDA_HANDLER: Starting Lambda execution")
+        logger.info(f"🚀 LAMBDA_HANDLER: Event keys: {list(event.keys())}")
+        logger.info(f"🚀 LAMBDA_HANDLER: Context: {context}")
         
         function_name = event.get('function', '')
         parameters = event.get('parameters', [])
+        logger.info(f"🚀 LAMBDA_HANDLER: Function name: {function_name}")
+        logger.info(f"🚀 LAMBDA_HANDLER: Parameters count: {len(parameters)}")
         
         # Convert parameters to dict with proper array handling
         params = {}
@@ -109,7 +113,8 @@ def lambda_handler(event, context):
                 agent_type = 'integration-test'  # Default fallback
                 logger.warning(f"Could not determine agent_type from function '{function_name}', using default: {agent_type}")
         
-        logger.info(f"Function: {function_name}, Agent: {agent_type}")
+        logger.info(f"🚀 LAMBDA_HANDLER: Function: {function_name}, Agent: {agent_type}")
+        logger.info(f"🚀 LAMBDA_HANDLER: About to route to function handler")
         
         # Route based on function name
         if function_name == 'test_basic':
@@ -120,7 +125,9 @@ def lambda_handler(event, context):
             result = test_opensearch_connectivity()
         #based on action group functions that get called, so names not matching concrete implementations here is fine
         elif function_name in ['get_integration_test_metrics', 'get_test_metrics', 'get_build_metrics', 'get_release_metrics', 'get_metrics', 'query_integration_test_failures', 'resolve_components_from_builds', 'get_rc_build_mapping'] or not function_name:
+            logger.info(f"🚀 LAMBDA_HANDLER: Calling handle_metrics_query")
             result = handle_metrics_query(agent_type, function_name, params)
+            logger.info(f"🚀 LAMBDA_HANDLER: handle_metrics_query completed, result keys: {list(result.keys()) if isinstance(result, dict) else 'Not a dict'}")
         elif function_name == 'resolve_components_from_builds':
             result = handle_component_resolution(params)
         elif function_name == 'get_rc_build_mapping':
@@ -128,15 +135,23 @@ def lambda_handler(event, context):
         else:
             result = {'error': f'Unknown function: {function_name}'}
         
-        return create_response(event, result)
+        logger.info(f"🚀 LAMBDA_HANDLER: About to create response")
+        response = create_response(event, result)
+        logger.info(f"🚀 LAMBDA_HANDLER: Response created successfully")
+        return response
         
     except Exception as e:
-        logger.error(f"Lambda handler error: {e}", exc_info=True)
+        logger.error(f"🚀 LAMBDA_HANDLER: Exception occurred: {e}")
+        import traceback
+        logger.error(f"🚀 LAMBDA_HANDLER: Stack trace: {traceback.format_exc()}")
         return create_response(event, {'error': str(e), 'type': 'lambda_error'})
 
 def handle_metrics_query(agent_type, function_name, params):
     """Simplified metrics query handler - execute query with parameters and return results."""
     try:
+        logger.info(f"📊 METRICS_QUERY: Starting metrics query handler")
+        logger.info(f"📊 METRICS_QUERY: agent_type={agent_type}, function_name={function_name}")
+        logger.info(f"📊 METRICS_QUERY: params keys: {list(params.keys()) if isinstance(params, dict) else 'Not a dict'}")
         # Extract parameters directly from the event
         version = params.get('version')
         rc_numbers = params.get('rc_numbers') or []
@@ -164,12 +179,17 @@ def handle_metrics_query(agent_type, function_name, params):
         if isinstance(components, str):
             components = [item.strip() for item in components.split(',') if item.strip()]
         
-        logger.info(f"Executing {agent_type} query for version {version} with parameters: rc_numbers={rc_numbers}, build_numbers={build_numbers}, components={components}")
+        logger.info(f"📊 METRICS_QUERY: Executing {agent_type} query for version {version}")
+        logger.info(f"📊 METRICS_QUERY: Parameters - rc_numbers={rc_numbers}, build_numbers={build_numbers}, components={components}")
+        logger.info(f"📊 METRICS_QUERY: About to execute query based on agent type")
         
         # Execute single query based on agent type
         if agent_type in ['integration-test', 'test-metrics', 'test']:
+            logger.info(f"📊 METRICS_QUERY: Processing integration test query")
             rc_number_to_use = rc_numbers[0] if rc_numbers else None
+            logger.info(f"📊 METRICS_QUERY: Using RC number: {rc_number_to_use}")
             
+            logger.info(f"📊 METRICS_QUERY: About to call query_integration_test_results")
             opensearch_results = query_integration_test_results(
                 version=version,
                 rc_number=rc_number_to_use,
@@ -183,6 +203,7 @@ def handle_metrics_query(agent_type, function_name, params):
                 without_security=without_security,
                 integ_test_build_numbers=integ_test_build_numbers if integ_test_build_numbers else None
             )
+            logger.info(f"📊 METRICS_QUERY: query_integration_test_results completed")
             data_source = 'opensearch-integration-test-results'
             
         elif agent_type in ['build-metrics', 'build']:
@@ -204,9 +225,20 @@ def handle_metrics_query(agent_type, function_name, params):
         else:
             return {'error': f'Unknown agent type: {agent_type}'}
         
-        # Extract the actual results from OpenSearch response
-        hits = opensearch_results.get('hits', {}).get('hits', [])
-        results = [hit.get('_source', {}) for hit in hits]
+        # Extract and process results based on agent type
+        logger.info(f"📊 METRICS_QUERY: About to extract results for agent type: {agent_type}")
+        if agent_type in ['integration-test', 'test-metrics', 'test']:
+            logger.info(f"📊 METRICS_QUERY: Calling extract_test_results")
+            results = extract_test_results(opensearch_results)
+            logger.info(f"📊 METRICS_QUERY: extract_test_results completed, got {len(results)} results")
+        elif agent_type in ['build-metrics', 'build']:
+            results = extract_build_results(opensearch_results)
+        elif agent_type in ['release-metrics', 'release']:
+            results = extract_release_results(opensearch_results)
+        else:
+            # Fallback to raw extraction
+            hits = opensearch_results.get('hits', {}).get('hits', [])
+            results = [hit.get('_source', {}) for hit in hits]
         
         # Apply additional filtering if needed (redundant but kept for safety)
         if status_filter:
@@ -220,7 +252,8 @@ def handle_metrics_query(agent_type, function_name, params):
         if without_security:
             results = [r for r in results if r.get('without_security') == without_security]
         
-        logger.info(f"Query returned {len(results)} results after filtering")
+        logger.info(f"📊 METRICS_QUERY: Query returned {len(results)} results after filtering")
+        logger.info(f"📊 METRICS_QUERY: About to create final response")
         
         # Return results directly - let the LLM interpret them
         return {
@@ -252,10 +285,13 @@ def handle_metrics_query(agent_type, function_name, params):
 def query_integration_test_results(version, rc_number=None, build_numbers=None, components=None, status_filter=None, distribution=None, architecture=None, platform=None, with_security=None, without_security=None, integ_test_build_numbers=None):
     """Comprehensive integration test results query with detailed logging."""
     
-    logger.info(f"Integration test query: version={version}, rc_number={rc_number}, components={components}")
+    logger.info(f"🔍 INTEGRATION_QUERY: Starting integration test query")
+    logger.info(f"🔍 INTEGRATION_QUERY: version={version}, rc_number={rc_number}, components={components}")
     
-    # Use maximum allowed OpenSearch result window size
-    size_limit = 10000
+    # Use reasonable size limit - we'll deduplicate results for cleaner output
+    size_limit = 1000
+    logger.info(f"🔍 INTEGRATION_QUERY: Using size limit: {size_limit}")
+
     
     # Build query with version and RC filters
     must_clauses = [{"match_phrase": {"version": version}}]
@@ -268,13 +304,14 @@ def query_integration_test_results(version, rc_number=None, build_numbers=None, 
         "size": size_limit,
         "sort": [{"build_start_time": {"order": "desc"}}],
         "_source": [
-            "component", "component_repo", "component_repo_url", "component_build_result", 
+                        "component", "component_repo", "component_repo_url", "component_build_result", 
             "distribution_build_number", "distribution_build_url", "integ_test_build_number", 
             "integ_test_build_url", "rc_number", "rc", "version", "qualifier",
             "platform", "architecture", "distribution", "component_category",
             "test_report_manifest_yml", "build_start_time",
             "with_security", "with_security_build_yml", "with_security_test_stdout", "with_security_test_stderr",
             "without_security", "without_security_build_yml", "without_security_test_stdout", "without_security_test_stderr"
+
         ],
         "query": {
             "bool": {
@@ -351,8 +388,10 @@ def query_integration_test_results(version, rc_number=None, build_numbers=None, 
         integ_clause = {"terms": {"integ_test_build_number": integ_build_nums}}
         query_body["query"]["bool"]["must"].append(integ_clause)
     
-    # Execute the query
+    # Execute the main query
+    logger.info(f"🔍 INTEGRATION_QUERY: About to execute OpenSearch request")
     result = opensearch_request('POST', '/opensearch-integration-test-results-*/_search', query_body)
+    logger.info(f"🔍 INTEGRATION_QUERY: OpenSearch request completed")
     
     if result and 'hits' in result:
         total_hits = result['hits'].get('total', {})
@@ -361,10 +400,22 @@ def query_integration_test_results(version, rc_number=None, build_numbers=None, 
         else:
             hit_count = total_hits
         actual_results = len(result['hits'].get('hits', []))
-        logger.info(f"Integration test query completed - Total matches: {hit_count}, Returned: {actual_results}")
+        logger.info(f"🔍 INTEGRATION_QUERY: Query completed - Total matches: {hit_count}, Returned: {actual_results}")
+        
+        # Add metadata about result limits
+        if 'metadata' not in result:
+            result['metadata'] = {}
+        result['metadata']['total_available'] = hit_count
+        result['metadata']['returned_count'] = actual_results
+        
+        if hit_count > actual_results:
+            result['metadata']['note'] = f"Showing first {actual_results} of {hit_count} total results. For complete data, use the OpenSearch dashboard or add filters to narrow results."
+        else:
+            result['metadata']['note'] = f"Query completed successfully. Showing {actual_results} results."
     else:
-        logger.error("Integration test query failed or returned no hits structure")
+        logger.error("🔍 INTEGRATION_QUERY: Query failed or returned no hits structure")
     
+    logger.info(f"🔍 INTEGRATION_QUERY: Returning result")
     return result
 
 def query_distribution_build_results(version, build_numbers=None, components=None, status_filter=None):
@@ -484,6 +535,65 @@ def deduplicate_by_highest_build_number(results):
             ungrouped.append(result)
     
     return list(groups.values()) + ungrouped
+
+def deduplicate_integration_test_results(results):
+    """Keep only most recent entry for each (component, version, rc_number) combination.
+    
+    Integration test data often has multiple entries for the same component/RC due to
+    different build times, retries, etc. We deduplicate by build_start_time to show
+    only the most recent test result for each component.
+    """
+    if not results:
+        return results
+    
+    logger.info(f"Deduplicating {len(results)} integration test results")
+    
+    # Group by (component, version, rc_number)
+    groups = {}
+    ungrouped = []
+    
+    for result in results:
+        component = result.get('component')
+        version = result.get('version')
+        rc_number = result.get('rc_number')
+        build_start_time = result.get('build_start_time')
+        
+        # Only group if we have required fields
+        # Include platform/arch/distribution to keep legitimate different test configurations
+        platform = result.get('platform')
+        architecture = result.get('architecture') 
+        distribution = result.get('distribution')
+        
+        if component and version and rc_number is not None:
+            key = (component, str(version), str(rc_number), str(platform), str(architecture), str(distribution))
+            
+            if key not in groups:
+                groups[key] = result
+            else:
+                # Compare by build_start_time (most recent wins)
+                existing_time = groups[key].get('build_start_time')
+                if build_start_time and existing_time:
+                    try:
+                        # Convert to int for proper numeric comparison
+                        new_time_int = int(build_start_time) if isinstance(build_start_time, str) else build_start_time
+                        existing_time_int = int(existing_time) if isinstance(existing_time, str) else existing_time
+                        if new_time_int > existing_time_int:
+                            groups[key] = result
+                    except (ValueError, TypeError):
+                        # If conversion fails, do string comparison
+                        if build_start_time > existing_time:
+                            groups[key] = result
+                elif build_start_time and not existing_time:
+                    # New result has timestamp, existing doesn't - prefer new
+                    groups[key] = result
+                # If neither has timestamp or existing is newer, keep existing
+        else:
+            # Keep results without proper grouping keys
+            ungrouped.append(result)
+    
+    deduplicated_results = list(groups.values()) + ungrouped
+    logger.info(f"Deduplication complete: {len(results)} -> {len(deduplicated_results)} results")
+    return deduplicated_results
 
 def deduplicate_release_results(results):
     """Keep only most recent entry for each (component, version) combination.
@@ -615,8 +725,10 @@ def get_rc_distribution_build_number(version, rc_number, component_name=None):
 
 def extract_test_results(opensearch_result):
     """Extract comprehensive test result information based on real data structure."""
+    logger.info(f"🔄 EXTRACT_RESULTS: Starting result extraction")
     results = []
     hits = opensearch_result.get('hits', {}).get('hits', [])
+    logger.info(f"🔄 EXTRACT_RESULTS: Processing {len(hits)} hits")
     
     for hit in hits:
         source = hit['_source']
@@ -639,36 +751,27 @@ def extract_test_results(opensearch_result):
         
         results.append({
             'component': source.get('component'),
-            'component_repo': source.get('component_repo'),
-            'component_repo_url': source.get('component_repo_url'),
             'status': overall_status,
             'component_build_result': component_build_result,
             'build_number': source.get('distribution_build_number'),
-            'distribution_build_url': source.get('distribution_build_url'),
             'integ_test_build_number': source.get('integ_test_build_number'),
-            'integ_test_build_url': source.get('integ_test_build_url'),
             'rc_number': source.get('rc_number'),
-            'rc': source.get('rc'),
             'version': source.get('version'),
-            'qualifier': source.get('qualifier'),
             'platform': source.get('platform'),
             'architecture': source.get('architecture'),
             'distribution': source.get('distribution'),
             'category': source.get('component_category'),
             'test_report': source.get('test_report_manifest_yml'),
-            'timestamp': source.get('build_start_time'),
+            'build_start_time': source.get('build_start_time'),
             # Security test details
             'with_security': with_security,
-            'with_security_build_yml': source.get('with_security_build_yml'),
-            'with_security_test_stdout': source.get('with_security_test_stdout'),
-            'with_security_test_stderr': source.get('with_security_test_stderr'),
             'without_security': without_security,
-            'without_security_build_yml': source.get('without_security_build_yml'),
-            'without_security_test_stdout': source.get('without_security_test_stdout'),
-            'without_security_test_stderr': source.get('without_security_test_stderr')
         })
     
-    return deduplicate_by_highest_build_number(results)
+    logger.info(f"🔄 EXTRACT_RESULTS: Extracted {len(results)} results, about to deduplicate")
+    deduplicated = deduplicate_integration_test_results(results)
+    logger.info(f"🔄 EXTRACT_RESULTS: Deduplication complete, returning {len(deduplicated)} results")
+    return deduplicated
 
 def extract_build_results(opensearch_result):
     """Extract build result information."""
@@ -681,13 +784,11 @@ def extract_build_results(opensearch_result):
             'component': source.get('component'),
             'component_repo': source.get('component_repo'),
             'component_repo_url': source.get('component_repo_url'),
-            'component_ref': source.get('component_ref'),
             'version': source.get('version'),
             'qualifier': source.get('qualifier'),
             'distribution_build_number': source.get('distribution_build_number'),
             'distribution_build_url': source.get('distribution_build_url'),
             'build_start_time': source.get('build_start_time'),
-            'rc': source.get('rc'),
             'rc_number': source.get('rc_number'),
             'component_category': source.get('component_category'),
             'component_build_result': source.get('component_build_result'),
@@ -748,7 +849,6 @@ def extract_release_results(opensearch_result):
             'component': source.get('component'),
             'repository': source.get('repository'),
             'version': source.get('version'),
-            'release_version': source.get('release_version'),
             'timestamp': source.get('current_date'),
             
             # Release state information
@@ -1001,16 +1101,20 @@ def handle_rc_build_mapping(params):
 
 def create_response(event, result):
     """Create a response in the format expected by the Bedrock agent."""
+    logger.info(f"📤 CREATE_RESPONSE: Starting response creation")
     action_group = event['actionGroup']
     function = event['function']
+    logger.info(f"📤 CREATE_RESPONSE: action_group={action_group}, function={function}")
     
     # Add data source information to response if not present
     if isinstance(result, dict) and 'data_source' in result:
         result['response_footer'] = f"\n\n*Data retrieved from {result['data_source']} index*"
     
+    logger.info(f"📤 CREATE_RESPONSE: About to serialize result to JSON")
     response_body_string = json.dumps(result, default=str)
+    logger.info(f"📤 CREATE_RESPONSE: JSON serialization complete, length: {len(response_body_string)}")
 
-    return {
+    final_response = {
         "messageVersion": "1.0",
         "response": {
             "actionGroup": action_group,
@@ -1024,3 +1128,5 @@ def create_response(event, result):
             }
         }
     }
+    logger.info(f"📤 CREATE_RESPONSE: Response creation complete")
+    return final_response
