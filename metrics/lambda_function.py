@@ -83,7 +83,20 @@ def lambda_handler(event, context):
                     value = [item.strip() for item in value.split(',')]
                 params[param['name']] = value
         
-        agent_type = os.getenv('AGENT_TYPE', 'integration-test') # --> How does this work?
+        # Get agent_type from parameters - this should be passed by the supervisor agent
+        agent_type = params.get('agent_type')
+        
+        # If agent_type is not provided, try to infer it from the function name
+        if not agent_type:
+            if function_name in ['get_integration_test_metrics', 'get_test_metrics', 'query_integration_test_failures']:
+                agent_type = 'integration-test'
+            elif function_name in ['get_build_metrics', 'resolve_components_from_builds']:
+                agent_type = 'build-metrics'
+            elif function_name in ['get_release_metrics', 'get_rc_build_mapping']:
+                agent_type = 'release-metrics'
+            else:
+                agent_type = 'integration-test'  # Default fallback
+                logger.warning(f"Could not determine agent_type from function '{function_name}', using default: {agent_type}")
         
         logger.info(f"Function: {function_name}, Agent: {agent_type}")
         
@@ -94,6 +107,7 @@ def lambda_handler(event, context):
             result = test_role_assumption()
         elif function_name == 'test_opensearch':
             result = test_opensearch_connectivity()
+        #based on action group functions that get called, so names not matching concrete implementations here is fine
         elif function_name in ['get_integration_test_metrics', 'get_test_metrics', 'get_build_metrics', 'get_release_metrics', 'get_metrics', 'query_integration_test_failures', 'resolve_components_from_builds', 'get_rc_build_mapping'] or not function_name:
             result = handle_metrics_query(agent_type, function_name, params)
         elif function_name == 'resolve_components_from_builds':
