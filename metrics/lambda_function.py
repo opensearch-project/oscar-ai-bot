@@ -51,7 +51,7 @@ def opensearch_request(method, path, body=None):
         url=request.url,
         data=request.body,
         headers=dict(request.headers),
-        timeout=30
+        timeout=60
     )
     
     if response.status_code in [200, 201]:
@@ -139,14 +139,14 @@ def handle_metrics_query(agent_type, function_name, params):
     try:
         # Extract parameters directly from the event
         version = params.get('version')
-        rc_numbers = params.get('rc_numbers', [])
-        build_numbers = params.get('build_numbers', [])
-        integ_test_build_numbers = params.get('integ_test_build_numbers', [])
-        components = params.get('components', [])
+        rc_numbers = params.get('rc_numbers') or []
+        build_numbers = params.get('build_numbers') or []
+        integ_test_build_numbers = params.get('integ_test_build_numbers') or []
+        components = params.get('components') or []
         status_filter = params.get('status_filter')  # 'passed', 'failed', or None
-        distribution = params.get('distribution', 'tar')
-        architecture = params.get('architecture', 'x64')
-        platform = params.get('platform', 'linux')
+        distribution = params.get('distribution')  # Don't default to 'tar' - let all distributions through
+        architecture = params.get('architecture')
+        platform = params.get('platform')  # Don't default - let all platforms through
         with_security = params.get('with_security')  # 'pass', 'fail', or None
         without_security = params.get('without_security')  # 'pass', 'fail', or None
         
@@ -168,9 +168,11 @@ def handle_metrics_query(agent_type, function_name, params):
         
         # Execute single query based on agent type
         if agent_type in ['integration-test', 'test-metrics', 'test']:
+            rc_number_to_use = rc_numbers[0] if rc_numbers else None
+            
             opensearch_results = query_integration_test_results(
                 version=version,
-                rc_number=rc_numbers[0] if rc_numbers else None,
+                rc_number=rc_number_to_use,
                 build_numbers=build_numbers if build_numbers else None,
                 components=components if components else None,
                 status_filter=status_filter,
@@ -206,16 +208,13 @@ def handle_metrics_query(agent_type, function_name, params):
         hits = opensearch_results.get('hits', {}).get('hits', [])
         results = [hit.get('_source', {}) for hit in hits]
         
-        # Apply additional filtering if needed
+        # Apply additional filtering if needed (redundant but kept for safety)
         if status_filter:
             if agent_type in ['integration-test', 'test-metrics', 'test']:
-                # Filter by component_build_result for integration tests
                 results = [r for r in results if r.get('component_build_result') == status_filter]
             elif agent_type in ['build-metrics', 'build']:
-                # Filter by component_build_result for builds
                 results = [r for r in results if r.get('component_build_result') == status_filter]
         
-        # Apply security test filtering
         if with_security:
             results = [r for r in results if r.get('with_security') == with_security]
         if without_security:
@@ -250,10 +249,23 @@ def handle_metrics_query(agent_type, function_name, params):
 
 
 
-def query_integration_test_results(version, rc_number=None, build_numbers=None, components=None, status_filter=None, distribution="tar", architecture="x64", platform="linux", with_security=None, without_security=None, integ_test_build_numbers=None):
-    """Comprehensive integration test results query."""
+def query_integration_test_results(version, rc_number=None, build_numbers=None, components=None, status_filter=None, distribution=None, architecture=None, platform=None, with_security=None, without_security=None, integ_test_build_numbers=None):
+    """Comprehensive integration test results query with detailed logging."""
+    
+    logger.info(f"Integration test query: version={version}, rc_number={rc_number}, components={components}")
+    
+    # Use maximum allowed OpenSearch result window size
+    size_limit = 10000
+    
+    # Build query with version and RC filters
+    must_clauses = [{"match_phrase": {"version": version}}]
+    
+    if rc_number:
+        rc_number_int = int(rc_number) if isinstance(rc_number, str) else rc_number
+        must_clauses.append({"term": {"rc_number": rc_number_int}})
+    
     query_body = {
-        "size": 1000,
+        "size": size_limit,
         "sort": [{"build_start_time": {"order": "desc"}}],
         "_source": [
             "component", "component_repo", "component_repo_url", "component_build_result", 
@@ -266,30 +278,21 @@ def query_integration_test_results(version, rc_number=None, build_numbers=None, 
         ],
         "query": {
             "bool": {
-                "must": [
-                    {"match_phrase": {"version": version}}
-                ]
+                "must": must_clauses
             }
         }
     }
     
     # Add status filter if specified
     if status_filter:
-        query_body["query"]["bool"]["must"].append(
-            {"match_phrase": {"component_build_result": status_filter}}
-        )
-    
-    # Add RC number filter
-    if rc_number:
-        query_body["query"]["bool"]["must"].append(
-            {"match_phrase": {"rc_number": str(rc_number)}}
-        )
+        status_filter_clause = {"match_phrase": {"component_build_result": status_filter}}
+        query_body["query"]["bool"]["must"].append(status_filter_clause)
     
     # Add build numbers filter
     if build_numbers:
-        query_body["query"]["bool"]["must"].append(
-            {"terms": {"distribution_build_number": [str(bn) for bn in build_numbers]}}
-        )
+        build_numbers_str = [str(bn) for bn in build_numbers]
+        build_filter_clause = {"terms": {"distribution_build_number": build_numbers_str}}
+        query_body["query"]["bool"]["must"].append(build_filter_clause)
     
     # Add component filter with improved Dashboards handling
     if components:
@@ -299,62 +302,70 @@ def query_integration_test_results(version, rc_number=None, build_numbers=None, 
         for component in components:
             if component == "OpenSearch-Dashboards":
                 # Match ci-group patterns and any dashboards-related components
-                should_clauses.extend([
+                dashboards_clauses = [
                     {"regexp": {"component": "OpenSearch-Dashboards-ci-group-.*"}},
                     {"regexp": {"component": ".*[Dd]ashboards.*"}}
-                ])
+                ]
+                should_clauses.extend(dashboards_clauses)
             elif "dashboards" in component.lower():
                 # Handle any dashboards-related components generically
-                should_clauses.append({"match_phrase": {"component": component}})
+                dashboards_clause = {"match_phrase": {"component": component}}
+                should_clauses.append(dashboards_clause)
             else:
                 regular_components.append(component)
         
         # Add regular components
         if regular_components:
-            should_clauses.append({"terms": {"component": regular_components}})
+            regular_clause = {"terms": {"component": regular_components}}
+            should_clauses.append(regular_clause)
         
         if should_clauses:
             if len(should_clauses) == 1:
                 query_body["query"]["bool"]["must"].append(should_clauses[0])
             else:
-                query_body["query"]["bool"]["must"].append({
-                    "bool": {"should": should_clauses}
-                })
+                component_bool_clause = {"bool": {"should": should_clauses}}
+                query_body["query"]["bool"]["must"].append(component_bool_clause)
     
-    # Add platform/architecture/distribution filters
+    # Add platform/architecture/distribution filters (only if explicitly specified)
     if distribution:
-        query_body["query"]["bool"]["must"].append(
-            {"match_phrase": {"distribution": distribution}}
-        )
+        dist_clause = {"match_phrase": {"distribution": distribution}}
+        query_body["query"]["bool"]["must"].append(dist_clause)
     if architecture:
-        query_body["query"]["bool"]["must"].append(
-            {"match_phrase": {"architecture": architecture}}
-        )
+        arch_clause = {"match_phrase": {"architecture": architecture}}
+        query_body["query"]["bool"]["must"].append(arch_clause)
     if platform:
-        query_body["query"]["bool"]["must"].append(
-            {"match_phrase": {"platform": platform}}
-        )
+        platform_clause = {"match_phrase": {"platform": platform}}
+        query_body["query"]["bool"]["must"].append(platform_clause)
     
     # Add security test filters
     if with_security is not None:
-        query_body["query"]["bool"]["must"].append(
-            {"match_phrase": {"with_security": with_security}}
-        )
+        with_sec_clause = {"match_phrase": {"with_security": with_security}}
+        query_body["query"]["bool"]["must"].append(with_sec_clause)
     if without_security is not None:
-        query_body["query"]["bool"]["must"].append(
-            {"match_phrase": {"without_security": without_security}}
-        )
+        without_sec_clause = {"match_phrase": {"without_security": without_security}}
+        query_body["query"]["bool"]["must"].append(without_sec_clause)
     
     # Add integration test build number filter
     if integ_test_build_numbers:
-        query_body["query"]["bool"]["must"].append(
-            {"terms": {"integ_test_build_number": [int(bn) for bn in integ_test_build_numbers]}}
-        )
+        integ_build_nums = [int(bn) for bn in integ_test_build_numbers]
+        integ_clause = {"terms": {"integ_test_build_number": integ_build_nums}}
+        query_body["query"]["bool"]["must"].append(integ_clause)
     
-    # Remove collapse since component.keyword mapping doesn't exist
-    # query_body["collapse"] = {"field": "component.keyword"}
+    # Execute the query
+    result = opensearch_request('POST', '/opensearch-integration-test-results-*/_search', query_body)
     
-    return opensearch_request('POST', '/opensearch-integration-test-results/_search', query_body)
+    if result and 'hits' in result:
+        total_hits = result['hits'].get('total', {})
+        if isinstance(total_hits, dict):
+            hit_count = total_hits.get('value', 0)
+        else:
+            hit_count = total_hits
+        actual_results = len(result['hits'].get('hits', []))
+        logger.info(f"Integration test query completed - Total matches: {hit_count}, Returned: {actual_results}")
+    else:
+        logger.error("Integration test query failed or returned no hits structure")
+    
+    return result
 
 def query_distribution_build_results(version, build_numbers=None, components=None, status_filter=None):
     """Query distribution build results."""
@@ -390,7 +401,7 @@ def query_distribution_build_results(version, build_numbers=None, components=Non
             {"terms": {"component": components}}
         )
     
-    return opensearch_request('POST', '/opensearch-distribution-build-results/_search', query_body)
+    return opensearch_request('POST', '/opensearch-distribution-build-results-*/_search', query_body)
 
 def query_release_readiness(version, components=None):
     """Query release readiness metrics with comprehensive field coverage."""
@@ -524,7 +535,7 @@ def resolve_components_from_build_numbers(version, build_numbers):
         }
     }
     
-    result = opensearch_request('POST', '/opensearch-distribution-build-results/_search', query_body)
+    result = opensearch_request('POST', '/opensearch-distribution-build-results-*/_search', query_body)
     
     build_component_map = {}
     for hit in result.get('hits', {}).get('hits', []):
@@ -571,7 +582,8 @@ def get_rc_distribution_build_number(version, rc_number, component_name=None):
             {"match_phrase": {"component": component_name}}
         )
     
-    result = opensearch_request('POST', '/opensearch-integration-test-results/_search', query_body)
+    # Query all monthly indices to get complete dataset
+    result = opensearch_request('POST', '/opensearch-integration-test-results-*/_search', query_body)
     hits = result.get('hits', {}).get('hits', [])
     
     if not hits:
@@ -936,7 +948,7 @@ def handle_component_resolution(params):
     """Handle resolve_components_from_builds function."""
     try:
         version = params.get('version')
-        build_numbers = params.get('build_numbers', [])
+        build_numbers = params.get('build_numbers') or []
         
         if not version or not build_numbers:
             return {'error': 'Version and build_numbers are required for component resolution'}
@@ -959,7 +971,7 @@ def handle_rc_build_mapping(params):
     """Handle get_rc_build_mapping function."""
     try:
         version = params.get('version')
-        rc_numbers = params.get('rc_numbers', [])
+        rc_numbers = params.get('rc_numbers') or []
         component = params.get('component')  # Optional now
         
         if not version or not rc_numbers:

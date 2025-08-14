@@ -1,0 +1,4780 @@
+Integration Test Results Analysis - RC 6, Version 3.2.0
+Generated: 2025-08-14T12:48:10.732850
+================================================================================
+
+SUMMARY:
+Total Results: 377
+Status Breakdown: {'passed': 357, 'failed': 20}
+RC Breakdown: {6: 377}
+Unique Components: 48
+
+ALL RESULTS (sorted by component name):
+--------------------------------------------------------------------------------
+
+  1. Component: OpenSearch
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 11330
+     Integration Test Build: 10297
+     Platform: windows/x64/zip
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755145638015
+     Repository: OpenSearch
+     ------------------------------------------------------------
+
+  2. Component: OpenSearch
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 11330
+     Integration Test Build: 10296
+     Platform: linux/x64/deb
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755144647971
+     Repository: OpenSearch
+     ------------------------------------------------------------
+
+  3. Component: OpenSearch
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 11330
+     Integration Test Build: 10295
+     Platform: linux/arm64/deb
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755144438021
+     Repository: OpenSearch
+     ------------------------------------------------------------
+
+  4. Component: OpenSearch
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 11330
+     Integration Test Build: 10294
+     Platform: linux/x64/rpm
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755143822972
+     Repository: OpenSearch
+     ------------------------------------------------------------
+
+  5. Component: OpenSearch
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 11330
+     Integration Test Build: 10293
+     Platform: linux/arm64/rpm
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755143534378
+     Repository: OpenSearch
+     ------------------------------------------------------------
+
+  6. Component: OpenSearch
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 11330
+     Integration Test Build: 10292
+     Platform: linux/x64/tar
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755143350675
+     Repository: OpenSearch
+     ------------------------------------------------------------
+
+  7. Component: OpenSearch
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 11330
+     Integration Test Build: 10291
+     Platform: linux/arm64/tar
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755143040699
+     Repository: OpenSearch
+     ------------------------------------------------------------
+
+  8. Component: OpenSearch-Dashboards-ci-group-1
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 8590
+     Integration Test Build: 7722
+     Platform: linux/x64/deb
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755192902707
+     Repository: OpenSearch-Dashboards
+     ------------------------------------------------------------
+
+  9. Component: OpenSearch-Dashboards-ci-group-1
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 8590
+     Integration Test Build: 7720
+     Platform: linux/arm64/deb
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755151812396
+     Repository: OpenSearch-Dashboards
+     ------------------------------------------------------------
+
+ 10. Component: OpenSearch-Dashboards-ci-group-1
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 8590
+     Integration Test Build: 7718
+     Platform: linux/arm64/tar
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755150289425
+     Repository: OpenSearch-Dashboards
+     ------------------------------------------------------------
+
+ 11. Component: OpenSearch-Dashboards-ci-group-1
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 8590
+     Integration Test Build: 7716
+     Platform: windows/x64/zip
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755147410715
+     Repository: OpenSearch-Dashboards
+     ------------------------------------------------------------
+
+ 12. Component: OpenSearch-Dashboards-ci-group-1
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 8590
+     Integration Test Build: 7715
+     Platform: linux/arm64/deb
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755145598258
+     Repository: OpenSearch-Dashboards
+     ------------------------------------------------------------
+
+ 13. Component: OpenSearch-Dashboards-ci-group-1
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 8590
+     Integration Test Build: 7714
+     Platform: linux/arm64/rpm
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755145057867
+     Repository: OpenSearch-Dashboards
+     ------------------------------------------------------------
+
+ 14. Component: OpenSearch-Dashboards-ci-group-1
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 8590
+     Integration Test Build: 7713
+     Platform: linux/x64/deb
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755144879175
+     Repository: OpenSearch-Dashboards
+     ------------------------------------------------------------
+
+ 15. Component: OpenSearch-Dashboards-ci-group-1
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 8590
+     Integration Test Build: 7712
+     Platform: linux/x64/rpm
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755144357902
+     Repository: OpenSearch-Dashboards
+     ------------------------------------------------------------
+
+ 16. Component: OpenSearch-Dashboards-ci-group-1
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 8590
+     Integration Test Build: 7711
+     Platform: linux/arm64/tar
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755143876345
+     Repository: OpenSearch-Dashboards
+     ------------------------------------------------------------
+
+ 17. Component: OpenSearch-Dashboards-ci-group-1
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 8590
+     Integration Test Build: 7710
+     Platform: linux/x64/tar
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755143782565
+     Repository: OpenSearch-Dashboards
+     ------------------------------------------------------------
+
+ 18. Component: OpenSearch-Dashboards-ci-group-2
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 8590
+     Integration Test Build: 7722
+     Platform: linux/x64/deb
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755192902707
+     Repository: OpenSearch-Dashboards
+     ------------------------------------------------------------
+
+ 19. Component: OpenSearch-Dashboards-ci-group-2
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 8590
+     Integration Test Build: 7720
+     Platform: linux/arm64/deb
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755151812396
+     Repository: OpenSearch-Dashboards
+     ------------------------------------------------------------
+
+ 20. Component: OpenSearch-Dashboards-ci-group-2
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 8590
+     Integration Test Build: 7718
+     Platform: linux/arm64/tar
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755150289425
+     Repository: OpenSearch-Dashboards
+     ------------------------------------------------------------
+
+ 21. Component: OpenSearch-Dashboards-ci-group-2
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 8590
+     Integration Test Build: 7716
+     Platform: windows/x64/zip
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755147410715
+     Repository: OpenSearch-Dashboards
+     ------------------------------------------------------------
+
+ 22. Component: OpenSearch-Dashboards-ci-group-2
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 8590
+     Integration Test Build: 7715
+     Platform: linux/arm64/deb
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755145598258
+     Repository: OpenSearch-Dashboards
+     ------------------------------------------------------------
+
+ 23. Component: OpenSearch-Dashboards-ci-group-2
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 8590
+     Integration Test Build: 7714
+     Platform: linux/arm64/rpm
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755145057867
+     Repository: OpenSearch-Dashboards
+     ------------------------------------------------------------
+
+ 24. Component: OpenSearch-Dashboards-ci-group-2
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: failed
+     Distribution Build: 8590
+     Integration Test Build: 7713
+     Platform: linux/x64/deb
+     Security Tests - With: pass, Without: fail
+     Build Start Time: 1755144879175
+     Repository: OpenSearch-Dashboards
+     *** FAILED TEST ***
+     ------------------------------------------------------------
+
+ 25. Component: OpenSearch-Dashboards-ci-group-2
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 8590
+     Integration Test Build: 7712
+     Platform: linux/x64/rpm
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755144357902
+     Repository: OpenSearch-Dashboards
+     ------------------------------------------------------------
+
+ 26. Component: OpenSearch-Dashboards-ci-group-2
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 8590
+     Integration Test Build: 7711
+     Platform: linux/arm64/tar
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755143876345
+     Repository: OpenSearch-Dashboards
+     ------------------------------------------------------------
+
+ 27. Component: OpenSearch-Dashboards-ci-group-2
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 8590
+     Integration Test Build: 7710
+     Platform: linux/x64/tar
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755143782565
+     Repository: OpenSearch-Dashboards
+     ------------------------------------------------------------
+
+ 28. Component: OpenSearch-Dashboards-ci-group-3
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 8590
+     Integration Test Build: 7722
+     Platform: linux/x64/deb
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755192902707
+     Repository: OpenSearch-Dashboards
+     ------------------------------------------------------------
+
+ 29. Component: OpenSearch-Dashboards-ci-group-3
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 8590
+     Integration Test Build: 7720
+     Platform: linux/arm64/deb
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755151812396
+     Repository: OpenSearch-Dashboards
+     ------------------------------------------------------------
+
+ 30. Component: OpenSearch-Dashboards-ci-group-3
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 8590
+     Integration Test Build: 7718
+     Platform: linux/arm64/tar
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755150289425
+     Repository: OpenSearch-Dashboards
+     ------------------------------------------------------------
+
+ 31. Component: OpenSearch-Dashboards-ci-group-3
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 8590
+     Integration Test Build: 7716
+     Platform: windows/x64/zip
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755147410715
+     Repository: OpenSearch-Dashboards
+     ------------------------------------------------------------
+
+ 32. Component: OpenSearch-Dashboards-ci-group-3
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 8590
+     Integration Test Build: 7715
+     Platform: linux/arm64/deb
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755145598258
+     Repository: OpenSearch-Dashboards
+     ------------------------------------------------------------
+
+ 33. Component: OpenSearch-Dashboards-ci-group-3
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 8590
+     Integration Test Build: 7714
+     Platform: linux/arm64/rpm
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755145057867
+     Repository: OpenSearch-Dashboards
+     ------------------------------------------------------------
+
+ 34. Component: OpenSearch-Dashboards-ci-group-3
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 8590
+     Integration Test Build: 7713
+     Platform: linux/x64/deb
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755144879175
+     Repository: OpenSearch-Dashboards
+     ------------------------------------------------------------
+
+ 35. Component: OpenSearch-Dashboards-ci-group-3
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 8590
+     Integration Test Build: 7712
+     Platform: linux/x64/rpm
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755144357902
+     Repository: OpenSearch-Dashboards
+     ------------------------------------------------------------
+
+ 36. Component: OpenSearch-Dashboards-ci-group-3
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 8590
+     Integration Test Build: 7711
+     Platform: linux/arm64/tar
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755143876345
+     Repository: OpenSearch-Dashboards
+     ------------------------------------------------------------
+
+ 37. Component: OpenSearch-Dashboards-ci-group-3
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 8590
+     Integration Test Build: 7710
+     Platform: linux/x64/tar
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755143782565
+     Repository: OpenSearch-Dashboards
+     ------------------------------------------------------------
+
+ 38. Component: OpenSearch-Dashboards-ci-group-4
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 8590
+     Integration Test Build: 7722
+     Platform: linux/x64/deb
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755192902707
+     Repository: OpenSearch-Dashboards
+     ------------------------------------------------------------
+
+ 39. Component: OpenSearch-Dashboards-ci-group-4
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 8590
+     Integration Test Build: 7720
+     Platform: linux/arm64/deb
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755151812396
+     Repository: OpenSearch-Dashboards
+     ------------------------------------------------------------
+
+ 40. Component: OpenSearch-Dashboards-ci-group-4
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 8590
+     Integration Test Build: 7718
+     Platform: linux/arm64/tar
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755150289425
+     Repository: OpenSearch-Dashboards
+     ------------------------------------------------------------
+
+ 41. Component: OpenSearch-Dashboards-ci-group-4
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 8590
+     Integration Test Build: 7716
+     Platform: windows/x64/zip
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755147410715
+     Repository: OpenSearch-Dashboards
+     ------------------------------------------------------------
+
+ 42. Component: OpenSearch-Dashboards-ci-group-4
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 8590
+     Integration Test Build: 7715
+     Platform: linux/arm64/deb
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755145598258
+     Repository: OpenSearch-Dashboards
+     ------------------------------------------------------------
+
+ 43. Component: OpenSearch-Dashboards-ci-group-4
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 8590
+     Integration Test Build: 7714
+     Platform: linux/arm64/rpm
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755145057867
+     Repository: OpenSearch-Dashboards
+     ------------------------------------------------------------
+
+ 44. Component: OpenSearch-Dashboards-ci-group-4
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 8590
+     Integration Test Build: 7713
+     Platform: linux/x64/deb
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755144879175
+     Repository: OpenSearch-Dashboards
+     ------------------------------------------------------------
+
+ 45. Component: OpenSearch-Dashboards-ci-group-4
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 8590
+     Integration Test Build: 7712
+     Platform: linux/x64/rpm
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755144357902
+     Repository: OpenSearch-Dashboards
+     ------------------------------------------------------------
+
+ 46. Component: OpenSearch-Dashboards-ci-group-4
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 8590
+     Integration Test Build: 7711
+     Platform: linux/arm64/tar
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755143876345
+     Repository: OpenSearch-Dashboards
+     ------------------------------------------------------------
+
+ 47. Component: OpenSearch-Dashboards-ci-group-4
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 8590
+     Integration Test Build: 7710
+     Platform: linux/x64/tar
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755143782565
+     Repository: OpenSearch-Dashboards
+     ------------------------------------------------------------
+
+ 48. Component: OpenSearch-Dashboards-ci-group-5
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 8590
+     Integration Test Build: 7722
+     Platform: linux/x64/deb
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755192902707
+     Repository: OpenSearch-Dashboards
+     ------------------------------------------------------------
+
+ 49. Component: OpenSearch-Dashboards-ci-group-5
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 8590
+     Integration Test Build: 7720
+     Platform: linux/arm64/deb
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755151812396
+     Repository: OpenSearch-Dashboards
+     ------------------------------------------------------------
+
+ 50. Component: OpenSearch-Dashboards-ci-group-5
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 8590
+     Integration Test Build: 7718
+     Platform: linux/arm64/tar
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755150289425
+     Repository: OpenSearch-Dashboards
+     ------------------------------------------------------------
+
+ 51. Component: OpenSearch-Dashboards-ci-group-5
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 8590
+     Integration Test Build: 7716
+     Platform: windows/x64/zip
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755147410715
+     Repository: OpenSearch-Dashboards
+     ------------------------------------------------------------
+
+ 52. Component: OpenSearch-Dashboards-ci-group-5
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 8590
+     Integration Test Build: 7715
+     Platform: linux/arm64/deb
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755145598258
+     Repository: OpenSearch-Dashboards
+     ------------------------------------------------------------
+
+ 53. Component: OpenSearch-Dashboards-ci-group-5
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 8590
+     Integration Test Build: 7714
+     Platform: linux/arm64/rpm
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755145057867
+     Repository: OpenSearch-Dashboards
+     ------------------------------------------------------------
+
+ 54. Component: OpenSearch-Dashboards-ci-group-5
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 8590
+     Integration Test Build: 7713
+     Platform: linux/x64/deb
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755144879175
+     Repository: OpenSearch-Dashboards
+     ------------------------------------------------------------
+
+ 55. Component: OpenSearch-Dashboards-ci-group-5
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 8590
+     Integration Test Build: 7712
+     Platform: linux/x64/rpm
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755144357902
+     Repository: OpenSearch-Dashboards
+     ------------------------------------------------------------
+
+ 56. Component: OpenSearch-Dashboards-ci-group-5
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 8590
+     Integration Test Build: 7711
+     Platform: linux/arm64/tar
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755143876345
+     Repository: OpenSearch-Dashboards
+     ------------------------------------------------------------
+
+ 57. Component: OpenSearch-Dashboards-ci-group-5
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 8590
+     Integration Test Build: 7710
+     Platform: linux/x64/tar
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755143782565
+     Repository: OpenSearch-Dashboards
+     ------------------------------------------------------------
+
+ 58. Component: OpenSearch-Dashboards-ci-group-6
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: failed
+     Distribution Build: 8590
+     Integration Test Build: 7722
+     Platform: linux/x64/deb
+     Security Tests - With: fail, Without: pass
+     Build Start Time: 1755192902707
+     Repository: OpenSearch-Dashboards
+     *** FAILED TEST ***
+     ------------------------------------------------------------
+
+ 59. Component: OpenSearch-Dashboards-ci-group-6
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 8590
+     Integration Test Build: 7720
+     Platform: linux/arm64/deb
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755151812396
+     Repository: OpenSearch-Dashboards
+     ------------------------------------------------------------
+
+ 60. Component: OpenSearch-Dashboards-ci-group-6
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 8590
+     Integration Test Build: 7718
+     Platform: linux/arm64/tar
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755150289425
+     Repository: OpenSearch-Dashboards
+     ------------------------------------------------------------
+
+ 61. Component: OpenSearch-Dashboards-ci-group-6
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 8590
+     Integration Test Build: 7716
+     Platform: windows/x64/zip
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755147410715
+     Repository: OpenSearch-Dashboards
+     ------------------------------------------------------------
+
+ 62. Component: OpenSearch-Dashboards-ci-group-6
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: failed
+     Distribution Build: 8590
+     Integration Test Build: 7715
+     Platform: linux/arm64/deb
+     Security Tests - With: fail, Without: pass
+     Build Start Time: 1755145598258
+     Repository: OpenSearch-Dashboards
+     *** FAILED TEST ***
+     ------------------------------------------------------------
+
+ 63. Component: OpenSearch-Dashboards-ci-group-6
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 8590
+     Integration Test Build: 7714
+     Platform: linux/arm64/rpm
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755145057867
+     Repository: OpenSearch-Dashboards
+     ------------------------------------------------------------
+
+ 64. Component: OpenSearch-Dashboards-ci-group-6
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: failed
+     Distribution Build: 8590
+     Integration Test Build: 7713
+     Platform: linux/x64/deb
+     Security Tests - With: fail, Without: pass
+     Build Start Time: 1755144879175
+     Repository: OpenSearch-Dashboards
+     *** FAILED TEST ***
+     ------------------------------------------------------------
+
+ 65. Component: OpenSearch-Dashboards-ci-group-6
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 8590
+     Integration Test Build: 7712
+     Platform: linux/x64/rpm
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755144357902
+     Repository: OpenSearch-Dashboards
+     ------------------------------------------------------------
+
+ 66. Component: OpenSearch-Dashboards-ci-group-6
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: failed
+     Distribution Build: 8590
+     Integration Test Build: 7711
+     Platform: linux/arm64/tar
+     Security Tests - With: pass, Without: fail
+     Build Start Time: 1755143876345
+     Repository: OpenSearch-Dashboards
+     *** FAILED TEST ***
+     ------------------------------------------------------------
+
+ 67. Component: OpenSearch-Dashboards-ci-group-6
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 8590
+     Integration Test Build: 7710
+     Platform: linux/x64/tar
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755143782565
+     Repository: OpenSearch-Dashboards
+     ------------------------------------------------------------
+
+ 68. Component: OpenSearch-Dashboards-ci-group-7
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 8590
+     Integration Test Build: 7722
+     Platform: linux/x64/deb
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755192902707
+     Repository: OpenSearch-Dashboards
+     ------------------------------------------------------------
+
+ 69. Component: OpenSearch-Dashboards-ci-group-7
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 8590
+     Integration Test Build: 7720
+     Platform: linux/arm64/deb
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755151812396
+     Repository: OpenSearch-Dashboards
+     ------------------------------------------------------------
+
+ 70. Component: OpenSearch-Dashboards-ci-group-7
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 8590
+     Integration Test Build: 7718
+     Platform: linux/arm64/tar
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755150289425
+     Repository: OpenSearch-Dashboards
+     ------------------------------------------------------------
+
+ 71. Component: OpenSearch-Dashboards-ci-group-7
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 8590
+     Integration Test Build: 7716
+     Platform: windows/x64/zip
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755147410715
+     Repository: OpenSearch-Dashboards
+     ------------------------------------------------------------
+
+ 72. Component: OpenSearch-Dashboards-ci-group-7
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: failed
+     Distribution Build: 8590
+     Integration Test Build: 7715
+     Platform: linux/arm64/deb
+     Security Tests - With: pass, Without: fail
+     Build Start Time: 1755145598258
+     Repository: OpenSearch-Dashboards
+     *** FAILED TEST ***
+     ------------------------------------------------------------
+
+ 73. Component: OpenSearch-Dashboards-ci-group-7
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 8590
+     Integration Test Build: 7714
+     Platform: linux/arm64/rpm
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755145057867
+     Repository: OpenSearch-Dashboards
+     ------------------------------------------------------------
+
+ 74. Component: OpenSearch-Dashboards-ci-group-7
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 8590
+     Integration Test Build: 7713
+     Platform: linux/x64/deb
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755144879175
+     Repository: OpenSearch-Dashboards
+     ------------------------------------------------------------
+
+ 75. Component: OpenSearch-Dashboards-ci-group-7
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 8590
+     Integration Test Build: 7712
+     Platform: linux/x64/rpm
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755144357902
+     Repository: OpenSearch-Dashboards
+     ------------------------------------------------------------
+
+ 76. Component: OpenSearch-Dashboards-ci-group-7
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 8590
+     Integration Test Build: 7711
+     Platform: linux/arm64/tar
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755143876345
+     Repository: OpenSearch-Dashboards
+     ------------------------------------------------------------
+
+ 77. Component: OpenSearch-Dashboards-ci-group-7
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 8590
+     Integration Test Build: 7710
+     Platform: linux/x64/tar
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755143782565
+     Repository: OpenSearch-Dashboards
+     ------------------------------------------------------------
+
+ 78. Component: OpenSearch-Dashboards-ci-group-8
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 8590
+     Integration Test Build: 7722
+     Platform: linux/x64/deb
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755192902707
+     Repository: OpenSearch-Dashboards
+     ------------------------------------------------------------
+
+ 79. Component: OpenSearch-Dashboards-ci-group-8
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 8590
+     Integration Test Build: 7720
+     Platform: linux/arm64/deb
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755151812396
+     Repository: OpenSearch-Dashboards
+     ------------------------------------------------------------
+
+ 80. Component: OpenSearch-Dashboards-ci-group-8
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 8590
+     Integration Test Build: 7718
+     Platform: linux/arm64/tar
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755150289425
+     Repository: OpenSearch-Dashboards
+     ------------------------------------------------------------
+
+ 81. Component: OpenSearch-Dashboards-ci-group-8
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 8590
+     Integration Test Build: 7716
+     Platform: windows/x64/zip
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755147410715
+     Repository: OpenSearch-Dashboards
+     ------------------------------------------------------------
+
+ 82. Component: OpenSearch-Dashboards-ci-group-8
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 8590
+     Integration Test Build: 7715
+     Platform: linux/arm64/deb
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755145598258
+     Repository: OpenSearch-Dashboards
+     ------------------------------------------------------------
+
+ 83. Component: OpenSearch-Dashboards-ci-group-8
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 8590
+     Integration Test Build: 7714
+     Platform: linux/arm64/rpm
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755145057867
+     Repository: OpenSearch-Dashboards
+     ------------------------------------------------------------
+
+ 84. Component: OpenSearch-Dashboards-ci-group-8
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 8590
+     Integration Test Build: 7713
+     Platform: linux/x64/deb
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755144879175
+     Repository: OpenSearch-Dashboards
+     ------------------------------------------------------------
+
+ 85. Component: OpenSearch-Dashboards-ci-group-8
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 8590
+     Integration Test Build: 7712
+     Platform: linux/x64/rpm
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755144357902
+     Repository: OpenSearch-Dashboards
+     ------------------------------------------------------------
+
+ 86. Component: OpenSearch-Dashboards-ci-group-8
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 8590
+     Integration Test Build: 7711
+     Platform: linux/arm64/tar
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755143876345
+     Repository: OpenSearch-Dashboards
+     ------------------------------------------------------------
+
+ 87. Component: OpenSearch-Dashboards-ci-group-8
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 8590
+     Integration Test Build: 7710
+     Platform: linux/x64/tar
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755143782565
+     Repository: OpenSearch-Dashboards
+     ------------------------------------------------------------
+
+ 88. Component: OpenSearch-Dashboards-ci-group-9
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 8590
+     Integration Test Build: 7722
+     Platform: linux/x64/deb
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755192902707
+     Repository: OpenSearch-Dashboards
+     ------------------------------------------------------------
+
+ 89. Component: OpenSearch-Dashboards-ci-group-9
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 8590
+     Integration Test Build: 7720
+     Platform: linux/arm64/deb
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755151812396
+     Repository: OpenSearch-Dashboards
+     ------------------------------------------------------------
+
+ 90. Component: OpenSearch-Dashboards-ci-group-9
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 8590
+     Integration Test Build: 7718
+     Platform: linux/arm64/tar
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755150289425
+     Repository: OpenSearch-Dashboards
+     ------------------------------------------------------------
+
+ 91. Component: OpenSearch-Dashboards-ci-group-9
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 8590
+     Integration Test Build: 7716
+     Platform: windows/x64/zip
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755147410715
+     Repository: OpenSearch-Dashboards
+     ------------------------------------------------------------
+
+ 92. Component: OpenSearch-Dashboards-ci-group-9
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 8590
+     Integration Test Build: 7715
+     Platform: linux/arm64/deb
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755145598258
+     Repository: OpenSearch-Dashboards
+     ------------------------------------------------------------
+
+ 93. Component: OpenSearch-Dashboards-ci-group-9
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 8590
+     Integration Test Build: 7714
+     Platform: linux/arm64/rpm
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755145057867
+     Repository: OpenSearch-Dashboards
+     ------------------------------------------------------------
+
+ 94. Component: OpenSearch-Dashboards-ci-group-9
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 8590
+     Integration Test Build: 7713
+     Platform: linux/x64/deb
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755144879175
+     Repository: OpenSearch-Dashboards
+     ------------------------------------------------------------
+
+ 95. Component: OpenSearch-Dashboards-ci-group-9
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 8590
+     Integration Test Build: 7712
+     Platform: linux/x64/rpm
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755144357902
+     Repository: OpenSearch-Dashboards
+     ------------------------------------------------------------
+
+ 96. Component: OpenSearch-Dashboards-ci-group-9
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 8590
+     Integration Test Build: 7711
+     Platform: linux/arm64/tar
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755143876345
+     Repository: OpenSearch-Dashboards
+     ------------------------------------------------------------
+
+ 97. Component: OpenSearch-Dashboards-ci-group-9
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 8590
+     Integration Test Build: 7710
+     Platform: linux/x64/tar
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755143782565
+     Repository: OpenSearch-Dashboards
+     ------------------------------------------------------------
+
+ 98. Component: alerting
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: failed
+     Distribution Build: 11330
+     Integration Test Build: 10300
+     Platform: linux/arm64/rpm
+     Security Tests - With: fail, Without: pass
+     Build Start Time: 1755192390800
+     Repository: alerting
+     *** FAILED TEST ***
+     ------------------------------------------------------------
+
+ 99. Component: alerting
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 11330
+     Integration Test Build: 10297
+     Platform: windows/x64/zip
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755145638015
+     Repository: alerting
+     ------------------------------------------------------------
+
+100. Component: alerting
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 11330
+     Integration Test Build: 10296
+     Platform: linux/x64/deb
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755144647971
+     Repository: alerting
+     ------------------------------------------------------------
+
+101. Component: alerting
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 11330
+     Integration Test Build: 10295
+     Platform: linux/arm64/deb
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755144438021
+     Repository: alerting
+     ------------------------------------------------------------
+
+102. Component: alerting
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 11330
+     Integration Test Build: 10294
+     Platform: linux/x64/rpm
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755143822972
+     Repository: alerting
+     ------------------------------------------------------------
+
+103. Component: alerting
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: failed
+     Distribution Build: 11330
+     Integration Test Build: 10293
+     Platform: linux/arm64/rpm
+     Security Tests - With: fail, Without: pass
+     Build Start Time: 1755143534378
+     Repository: alerting
+     *** FAILED TEST ***
+     ------------------------------------------------------------
+
+104. Component: alerting
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 11330
+     Integration Test Build: 10292
+     Platform: linux/x64/tar
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755143350675
+     Repository: alerting
+     ------------------------------------------------------------
+
+105. Component: alerting
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 11330
+     Integration Test Build: 10291
+     Platform: linux/arm64/tar
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755143040699
+     Repository: alerting
+     ------------------------------------------------------------
+
+106. Component: alertingDashboards
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: failed
+     Distribution Build: 8590
+     Integration Test Build: 7722
+     Platform: linux/x64/deb
+     Security Tests - With: fail, Without: pass
+     Build Start Time: 1755192902707
+     Repository: alerting-dashboards-plugin
+     *** FAILED TEST ***
+     ------------------------------------------------------------
+
+107. Component: alertingDashboards
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 8590
+     Integration Test Build: 7716
+     Platform: windows/x64/zip
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755147410715
+     Repository: alerting-dashboards-plugin
+     ------------------------------------------------------------
+
+108. Component: alertingDashboards
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 8590
+     Integration Test Build: 7715
+     Platform: linux/arm64/deb
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755145598258
+     Repository: alerting-dashboards-plugin
+     ------------------------------------------------------------
+
+109. Component: alertingDashboards
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 8590
+     Integration Test Build: 7714
+     Platform: linux/arm64/rpm
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755145057867
+     Repository: alerting-dashboards-plugin
+     ------------------------------------------------------------
+
+110. Component: alertingDashboards
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 8590
+     Integration Test Build: 7713
+     Platform: linux/x64/deb
+     Security Tests - With: not available, Without: not available
+     Build Start Time: 1755144879175
+     Repository: alerting-dashboards-plugin
+     ------------------------------------------------------------
+
+111. Component: alertingDashboards
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 8590
+     Integration Test Build: 7712
+     Platform: linux/x64/rpm
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755144357902
+     Repository: alerting-dashboards-plugin
+     ------------------------------------------------------------
+
+112. Component: alertingDashboards
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 8590
+     Integration Test Build: 7711
+     Platform: linux/arm64/tar
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755143876345
+     Repository: alerting-dashboards-plugin
+     ------------------------------------------------------------
+
+113. Component: alertingDashboards
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 8590
+     Integration Test Build: 7710
+     Platform: linux/x64/tar
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755143782565
+     Repository: alerting-dashboards-plugin
+     ------------------------------------------------------------
+
+114. Component: anomaly-detection
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 11330
+     Integration Test Build: 10299
+     Platform: linux/arm64/tar
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755192364957
+     Repository: anomaly-detection
+     ------------------------------------------------------------
+
+115. Component: anomaly-detection
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 11330
+     Integration Test Build: 10297
+     Platform: windows/x64/zip
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755145638015
+     Repository: anomaly-detection
+     ------------------------------------------------------------
+
+116. Component: anomaly-detection
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 11330
+     Integration Test Build: 10296
+     Platform: linux/x64/deb
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755144647971
+     Repository: anomaly-detection
+     ------------------------------------------------------------
+
+117. Component: anomaly-detection
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 11330
+     Integration Test Build: 10295
+     Platform: linux/arm64/deb
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755144438021
+     Repository: anomaly-detection
+     ------------------------------------------------------------
+
+118. Component: anomaly-detection
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 11330
+     Integration Test Build: 10294
+     Platform: linux/x64/rpm
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755143822972
+     Repository: anomaly-detection
+     ------------------------------------------------------------
+
+119. Component: anomaly-detection
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 11330
+     Integration Test Build: 10293
+     Platform: linux/arm64/rpm
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755143534378
+     Repository: anomaly-detection
+     ------------------------------------------------------------
+
+120. Component: anomaly-detection
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 11330
+     Integration Test Build: 10292
+     Platform: linux/x64/tar
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755143350675
+     Repository: anomaly-detection
+     ------------------------------------------------------------
+
+121. Component: anomaly-detection
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: failed
+     Distribution Build: 11330
+     Integration Test Build: 10291
+     Platform: linux/arm64/tar
+     Security Tests - With: fail, Without: pass
+     Build Start Time: 1755143040699
+     Repository: anomaly-detection
+     *** FAILED TEST ***
+     ------------------------------------------------------------
+
+122. Component: anomalyDetectionDashboards
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 8590
+     Integration Test Build: 7721
+     Platform: windows/x64/zip
+     Security Tests - With: not available, Without: not available
+     Build Start Time: 1755192870671
+     Repository: anomaly-detection-dashboards-plugin
+     ------------------------------------------------------------
+
+123. Component: anomalyDetectionDashboards
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 8590
+     Integration Test Build: 7716
+     Platform: windows/x64/zip
+     Security Tests - With: not available, Without: not available
+     Build Start Time: 1755147410715
+     Repository: anomaly-detection-dashboards-plugin
+     ------------------------------------------------------------
+
+124. Component: anomalyDetectionDashboards
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 8590
+     Integration Test Build: 7715
+     Platform: linux/arm64/deb
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755145598258
+     Repository: anomaly-detection-dashboards-plugin
+     ------------------------------------------------------------
+
+125. Component: anomalyDetectionDashboards
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 8590
+     Integration Test Build: 7714
+     Platform: linux/arm64/rpm
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755145057867
+     Repository: anomaly-detection-dashboards-plugin
+     ------------------------------------------------------------
+
+126. Component: anomalyDetectionDashboards
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 8590
+     Integration Test Build: 7713
+     Platform: linux/x64/deb
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755144879175
+     Repository: anomaly-detection-dashboards-plugin
+     ------------------------------------------------------------
+
+127. Component: anomalyDetectionDashboards
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 8590
+     Integration Test Build: 7712
+     Platform: linux/x64/rpm
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755144357902
+     Repository: anomaly-detection-dashboards-plugin
+     ------------------------------------------------------------
+
+128. Component: anomalyDetectionDashboards
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 8590
+     Integration Test Build: 7711
+     Platform: linux/arm64/tar
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755143876345
+     Repository: anomaly-detection-dashboards-plugin
+     ------------------------------------------------------------
+
+129. Component: anomalyDetectionDashboards
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 8590
+     Integration Test Build: 7710
+     Platform: linux/x64/tar
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755143782565
+     Repository: anomaly-detection-dashboards-plugin
+     ------------------------------------------------------------
+
+130. Component: assistantDashboards
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 8590
+     Integration Test Build: 7716
+     Platform: windows/x64/zip
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755147410715
+     Repository: dashboards-assistant
+     ------------------------------------------------------------
+
+131. Component: assistantDashboards
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 8590
+     Integration Test Build: 7715
+     Platform: linux/arm64/deb
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755145598258
+     Repository: dashboards-assistant
+     ------------------------------------------------------------
+
+132. Component: assistantDashboards
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 8590
+     Integration Test Build: 7714
+     Platform: linux/arm64/rpm
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755145057867
+     Repository: dashboards-assistant
+     ------------------------------------------------------------
+
+133. Component: assistantDashboards
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 8590
+     Integration Test Build: 7713
+     Platform: linux/x64/deb
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755144879175
+     Repository: dashboards-assistant
+     ------------------------------------------------------------
+
+134. Component: assistantDashboards
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 8590
+     Integration Test Build: 7712
+     Platform: linux/x64/rpm
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755144357902
+     Repository: dashboards-assistant
+     ------------------------------------------------------------
+
+135. Component: assistantDashboards
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 8590
+     Integration Test Build: 7711
+     Platform: linux/arm64/tar
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755143876345
+     Repository: dashboards-assistant
+     ------------------------------------------------------------
+
+136. Component: assistantDashboards
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 8590
+     Integration Test Build: 7710
+     Platform: linux/x64/tar
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755143782565
+     Repository: dashboards-assistant
+     ------------------------------------------------------------
+
+137. Component: asynchronous-search
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 11330
+     Integration Test Build: 10299
+     Platform: linux/arm64/tar
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755192364957
+     Repository: asynchronous-search
+     ------------------------------------------------------------
+
+138. Component: asynchronous-search
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 11330
+     Integration Test Build: 10297
+     Platform: windows/x64/zip
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755145638015
+     Repository: asynchronous-search
+     ------------------------------------------------------------
+
+139. Component: asynchronous-search
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 11330
+     Integration Test Build: 10296
+     Platform: linux/x64/deb
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755144647971
+     Repository: asynchronous-search
+     ------------------------------------------------------------
+
+140. Component: asynchronous-search
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 11330
+     Integration Test Build: 10295
+     Platform: linux/arm64/deb
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755144438021
+     Repository: asynchronous-search
+     ------------------------------------------------------------
+
+141. Component: asynchronous-search
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 11330
+     Integration Test Build: 10294
+     Platform: linux/x64/rpm
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755143822972
+     Repository: asynchronous-search
+     ------------------------------------------------------------
+
+142. Component: asynchronous-search
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 11330
+     Integration Test Build: 10293
+     Platform: linux/arm64/rpm
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755143534378
+     Repository: asynchronous-search
+     ------------------------------------------------------------
+
+143. Component: asynchronous-search
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 11330
+     Integration Test Build: 10292
+     Platform: linux/x64/tar
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755143350675
+     Repository: asynchronous-search
+     ------------------------------------------------------------
+
+144. Component: asynchronous-search
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: failed
+     Distribution Build: 11330
+     Integration Test Build: 10291
+     Platform: linux/arm64/tar
+     Security Tests - With: pass, Without: fail
+     Build Start Time: 1755143040699
+     Repository: asynchronous-search
+     *** FAILED TEST ***
+     ------------------------------------------------------------
+
+145. Component: cross-cluster-replication
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 11330
+     Integration Test Build: 10297
+     Platform: windows/x64/zip
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755145638015
+     Repository: cross-cluster-replication
+     ------------------------------------------------------------
+
+146. Component: cross-cluster-replication
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 11330
+     Integration Test Build: 10296
+     Platform: linux/x64/deb
+     Security Tests - With: not available, Without: not available
+     Build Start Time: 1755144647971
+     Repository: cross-cluster-replication
+     ------------------------------------------------------------
+
+147. Component: cross-cluster-replication
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 11330
+     Integration Test Build: 10295
+     Platform: linux/arm64/deb
+     Security Tests - With: not available, Without: not available
+     Build Start Time: 1755144438021
+     Repository: cross-cluster-replication
+     ------------------------------------------------------------
+
+148. Component: cross-cluster-replication
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 11330
+     Integration Test Build: 10294
+     Platform: linux/x64/rpm
+     Security Tests - With: not available, Without: not available
+     Build Start Time: 1755143822972
+     Repository: cross-cluster-replication
+     ------------------------------------------------------------
+
+149. Component: cross-cluster-replication
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 11330
+     Integration Test Build: 10293
+     Platform: linux/arm64/rpm
+     Security Tests - With: not available, Without: not available
+     Build Start Time: 1755143534378
+     Repository: cross-cluster-replication
+     ------------------------------------------------------------
+
+150. Component: cross-cluster-replication
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 11330
+     Integration Test Build: 10292
+     Platform: linux/x64/tar
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755143350675
+     Repository: cross-cluster-replication
+     ------------------------------------------------------------
+
+151. Component: cross-cluster-replication
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 11330
+     Integration Test Build: 10291
+     Platform: linux/arm64/tar
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755143040699
+     Repository: cross-cluster-replication
+     ------------------------------------------------------------
+
+152. Component: custom-codecs
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 11330
+     Integration Test Build: 10297
+     Platform: windows/x64/zip
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755145638015
+     Repository: custom-codecs
+     ------------------------------------------------------------
+
+153. Component: custom-codecs
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 11330
+     Integration Test Build: 10296
+     Platform: linux/x64/deb
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755144647971
+     Repository: custom-codecs
+     ------------------------------------------------------------
+
+154. Component: custom-codecs
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 11330
+     Integration Test Build: 10295
+     Platform: linux/arm64/deb
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755144438021
+     Repository: custom-codecs
+     ------------------------------------------------------------
+
+155. Component: custom-codecs
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 11330
+     Integration Test Build: 10294
+     Platform: linux/x64/rpm
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755143822972
+     Repository: custom-codecs
+     ------------------------------------------------------------
+
+156. Component: custom-codecs
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 11330
+     Integration Test Build: 10293
+     Platform: linux/arm64/rpm
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755143534378
+     Repository: custom-codecs
+     ------------------------------------------------------------
+
+157. Component: custom-codecs
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 11330
+     Integration Test Build: 10292
+     Platform: linux/x64/tar
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755143350675
+     Repository: custom-codecs
+     ------------------------------------------------------------
+
+158. Component: custom-codecs
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 11330
+     Integration Test Build: 10291
+     Platform: linux/arm64/tar
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755143040699
+     Repository: custom-codecs
+     ------------------------------------------------------------
+
+159. Component: customImportMapDashboards
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 8590
+     Integration Test Build: 7716
+     Platform: windows/x64/zip
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755147410715
+     Repository: dashboards-maps
+     ------------------------------------------------------------
+
+160. Component: customImportMapDashboards
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 8590
+     Integration Test Build: 7715
+     Platform: linux/arm64/deb
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755145598258
+     Repository: dashboards-maps
+     ------------------------------------------------------------
+
+161. Component: customImportMapDashboards
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 8590
+     Integration Test Build: 7714
+     Platform: linux/arm64/rpm
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755145057867
+     Repository: dashboards-maps
+     ------------------------------------------------------------
+
+162. Component: customImportMapDashboards
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 8590
+     Integration Test Build: 7713
+     Platform: linux/x64/deb
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755144879175
+     Repository: dashboards-maps
+     ------------------------------------------------------------
+
+163. Component: customImportMapDashboards
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 8590
+     Integration Test Build: 7712
+     Platform: linux/x64/rpm
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755144357902
+     Repository: dashboards-maps
+     ------------------------------------------------------------
+
+164. Component: customImportMapDashboards
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 8590
+     Integration Test Build: 7711
+     Platform: linux/arm64/tar
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755143876345
+     Repository: dashboards-maps
+     ------------------------------------------------------------
+
+165. Component: customImportMapDashboards
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 8590
+     Integration Test Build: 7710
+     Platform: linux/x64/tar
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755143782565
+     Repository: dashboards-maps
+     ------------------------------------------------------------
+
+166. Component: flow-framework
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 11330
+     Integration Test Build: 10297
+     Platform: windows/x64/zip
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755145638015
+     Repository: flow-framework
+     ------------------------------------------------------------
+
+167. Component: flow-framework
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 11330
+     Integration Test Build: 10296
+     Platform: linux/x64/deb
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755144647971
+     Repository: flow-framework
+     ------------------------------------------------------------
+
+168. Component: flow-framework
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 11330
+     Integration Test Build: 10295
+     Platform: linux/arm64/deb
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755144438021
+     Repository: flow-framework
+     ------------------------------------------------------------
+
+169. Component: flow-framework
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 11330
+     Integration Test Build: 10294
+     Platform: linux/x64/rpm
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755143822972
+     Repository: flow-framework
+     ------------------------------------------------------------
+
+170. Component: flow-framework
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 11330
+     Integration Test Build: 10293
+     Platform: linux/arm64/rpm
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755143534378
+     Repository: flow-framework
+     ------------------------------------------------------------
+
+171. Component: flow-framework
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 11330
+     Integration Test Build: 10292
+     Platform: linux/x64/tar
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755143350675
+     Repository: flow-framework
+     ------------------------------------------------------------
+
+172. Component: flow-framework
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 11330
+     Integration Test Build: 10291
+     Platform: linux/arm64/tar
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755143040699
+     Repository: flow-framework
+     ------------------------------------------------------------
+
+173. Component: flowFrameworkDashboards
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 8590
+     Integration Test Build: 7716
+     Platform: windows/x64/zip
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755147410715
+     Repository: dashboards-flow-framework
+     ------------------------------------------------------------
+
+174. Component: flowFrameworkDashboards
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 8590
+     Integration Test Build: 7715
+     Platform: linux/arm64/deb
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755145598258
+     Repository: dashboards-flow-framework
+     ------------------------------------------------------------
+
+175. Component: flowFrameworkDashboards
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 8590
+     Integration Test Build: 7714
+     Platform: linux/arm64/rpm
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755145057867
+     Repository: dashboards-flow-framework
+     ------------------------------------------------------------
+
+176. Component: flowFrameworkDashboards
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 8590
+     Integration Test Build: 7713
+     Platform: linux/x64/deb
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755144879175
+     Repository: dashboards-flow-framework
+     ------------------------------------------------------------
+
+177. Component: flowFrameworkDashboards
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 8590
+     Integration Test Build: 7712
+     Platform: linux/x64/rpm
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755144357902
+     Repository: dashboards-flow-framework
+     ------------------------------------------------------------
+
+178. Component: flowFrameworkDashboards
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 8590
+     Integration Test Build: 7711
+     Platform: linux/arm64/tar
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755143876345
+     Repository: dashboards-flow-framework
+     ------------------------------------------------------------
+
+179. Component: flowFrameworkDashboards
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 8590
+     Integration Test Build: 7710
+     Platform: linux/x64/tar
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755143782565
+     Repository: dashboards-flow-framework
+     ------------------------------------------------------------
+
+180. Component: geospatial
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 11330
+     Integration Test Build: 10297
+     Platform: windows/x64/zip
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755145638015
+     Repository: geospatial
+     ------------------------------------------------------------
+
+181. Component: geospatial
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 11330
+     Integration Test Build: 10296
+     Platform: linux/x64/deb
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755144647971
+     Repository: geospatial
+     ------------------------------------------------------------
+
+182. Component: geospatial
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 11330
+     Integration Test Build: 10295
+     Platform: linux/arm64/deb
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755144438021
+     Repository: geospatial
+     ------------------------------------------------------------
+
+183. Component: geospatial
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 11330
+     Integration Test Build: 10294
+     Platform: linux/x64/rpm
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755143822972
+     Repository: geospatial
+     ------------------------------------------------------------
+
+184. Component: geospatial
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 11330
+     Integration Test Build: 10293
+     Platform: linux/arm64/rpm
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755143534378
+     Repository: geospatial
+     ------------------------------------------------------------
+
+185. Component: geospatial
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 11330
+     Integration Test Build: 10292
+     Platform: linux/x64/tar
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755143350675
+     Repository: geospatial
+     ------------------------------------------------------------
+
+186. Component: geospatial
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 11330
+     Integration Test Build: 10291
+     Platform: linux/arm64/tar
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755143040699
+     Repository: geospatial
+     ------------------------------------------------------------
+
+187. Component: index-management
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 11330
+     Integration Test Build: 10300
+     Platform: linux/arm64/rpm
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755192390800
+     Repository: index-management
+     ------------------------------------------------------------
+
+188. Component: index-management
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 11330
+     Integration Test Build: 10297
+     Platform: windows/x64/zip
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755145638015
+     Repository: index-management
+     ------------------------------------------------------------
+
+189. Component: index-management
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 11330
+     Integration Test Build: 10296
+     Platform: linux/x64/deb
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755144647971
+     Repository: index-management
+     ------------------------------------------------------------
+
+190. Component: index-management
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 11330
+     Integration Test Build: 10295
+     Platform: linux/arm64/deb
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755144438021
+     Repository: index-management
+     ------------------------------------------------------------
+
+191. Component: index-management
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 11330
+     Integration Test Build: 10294
+     Platform: linux/x64/rpm
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755143822972
+     Repository: index-management
+     ------------------------------------------------------------
+
+192. Component: index-management
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: failed
+     Distribution Build: 11330
+     Integration Test Build: 10293
+     Platform: linux/arm64/rpm
+     Security Tests - With: fail, Without: pass
+     Build Start Time: 1755143534378
+     Repository: index-management
+     *** FAILED TEST ***
+     ------------------------------------------------------------
+
+193. Component: index-management
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 11330
+     Integration Test Build: 10292
+     Platform: linux/x64/tar
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755143350675
+     Repository: index-management
+     ------------------------------------------------------------
+
+194. Component: index-management
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 11330
+     Integration Test Build: 10291
+     Platform: linux/arm64/tar
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755143040699
+     Repository: index-management
+     ------------------------------------------------------------
+
+195. Component: indexManagementDashboards
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 8590
+     Integration Test Build: 7721
+     Platform: windows/x64/zip
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755192870671
+     Repository: index-management-dashboards-plugin
+     ------------------------------------------------------------
+
+196. Component: indexManagementDashboards
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: failed
+     Distribution Build: 8590
+     Integration Test Build: 7716
+     Platform: windows/x64/zip
+     Security Tests - With: fail, Without: fail
+     Build Start Time: 1755147410715
+     Repository: index-management-dashboards-plugin
+     *** FAILED TEST ***
+     ------------------------------------------------------------
+
+197. Component: indexManagementDashboards
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 8590
+     Integration Test Build: 7715
+     Platform: linux/arm64/deb
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755145598258
+     Repository: index-management-dashboards-plugin
+     ------------------------------------------------------------
+
+198. Component: indexManagementDashboards
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 8590
+     Integration Test Build: 7714
+     Platform: linux/arm64/rpm
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755145057867
+     Repository: index-management-dashboards-plugin
+     ------------------------------------------------------------
+
+199. Component: indexManagementDashboards
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 8590
+     Integration Test Build: 7713
+     Platform: linux/x64/deb
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755144879175
+     Repository: index-management-dashboards-plugin
+     ------------------------------------------------------------
+
+200. Component: indexManagementDashboards
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 8590
+     Integration Test Build: 7712
+     Platform: linux/x64/rpm
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755144357902
+     Repository: index-management-dashboards-plugin
+     ------------------------------------------------------------
+
+201. Component: indexManagementDashboards
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 8590
+     Integration Test Build: 7711
+     Platform: linux/arm64/tar
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755143876345
+     Repository: index-management-dashboards-plugin
+     ------------------------------------------------------------
+
+202. Component: indexManagementDashboards
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 8590
+     Integration Test Build: 7710
+     Platform: linux/x64/tar
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755143782565
+     Repository: index-management-dashboards-plugin
+     ------------------------------------------------------------
+
+203. Component: k-NN
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 11330
+     Integration Test Build: 10297
+     Platform: windows/x64/zip
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755145638015
+     Repository: k-NN
+     ------------------------------------------------------------
+
+204. Component: k-NN
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 11330
+     Integration Test Build: 10296
+     Platform: linux/x64/deb
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755144647971
+     Repository: k-NN
+     ------------------------------------------------------------
+
+205. Component: k-NN
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 11330
+     Integration Test Build: 10295
+     Platform: linux/arm64/deb
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755144438021
+     Repository: k-NN
+     ------------------------------------------------------------
+
+206. Component: k-NN
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 11330
+     Integration Test Build: 10294
+     Platform: linux/x64/rpm
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755143822972
+     Repository: k-NN
+     ------------------------------------------------------------
+
+207. Component: k-NN
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 11330
+     Integration Test Build: 10293
+     Platform: linux/arm64/rpm
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755143534378
+     Repository: k-NN
+     ------------------------------------------------------------
+
+208. Component: k-NN
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 11330
+     Integration Test Build: 10292
+     Platform: linux/x64/tar
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755143350675
+     Repository: k-NN
+     ------------------------------------------------------------
+
+209. Component: k-NN
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 11330
+     Integration Test Build: 10291
+     Platform: linux/arm64/tar
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755143040699
+     Repository: k-NN
+     ------------------------------------------------------------
+
+210. Component: ml-commons
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 11330
+     Integration Test Build: 10297
+     Platform: windows/x64/zip
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755145638015
+     Repository: ml-commons
+     ------------------------------------------------------------
+
+211. Component: ml-commons
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 11330
+     Integration Test Build: 10296
+     Platform: linux/x64/deb
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755144647971
+     Repository: ml-commons
+     ------------------------------------------------------------
+
+212. Component: ml-commons
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 11330
+     Integration Test Build: 10295
+     Platform: linux/arm64/deb
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755144438021
+     Repository: ml-commons
+     ------------------------------------------------------------
+
+213. Component: ml-commons
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 11330
+     Integration Test Build: 10294
+     Platform: linux/x64/rpm
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755143822972
+     Repository: ml-commons
+     ------------------------------------------------------------
+
+214. Component: ml-commons
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 11330
+     Integration Test Build: 10293
+     Platform: linux/arm64/rpm
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755143534378
+     Repository: ml-commons
+     ------------------------------------------------------------
+
+215. Component: ml-commons
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 11330
+     Integration Test Build: 10292
+     Platform: linux/x64/tar
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755143350675
+     Repository: ml-commons
+     ------------------------------------------------------------
+
+216. Component: ml-commons
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 11330
+     Integration Test Build: 10291
+     Platform: linux/arm64/tar
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755143040699
+     Repository: ml-commons
+     ------------------------------------------------------------
+
+217. Component: mlCommonsDashboards
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 8590
+     Integration Test Build: 7716
+     Platform: windows/x64/zip
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755147410715
+     Repository: ml-commons-dashboards
+     ------------------------------------------------------------
+
+218. Component: mlCommonsDashboards
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 8590
+     Integration Test Build: 7715
+     Platform: linux/arm64/deb
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755145598258
+     Repository: ml-commons-dashboards
+     ------------------------------------------------------------
+
+219. Component: mlCommonsDashboards
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 8590
+     Integration Test Build: 7714
+     Platform: linux/arm64/rpm
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755145057867
+     Repository: ml-commons-dashboards
+     ------------------------------------------------------------
+
+220. Component: mlCommonsDashboards
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 8590
+     Integration Test Build: 7713
+     Platform: linux/x64/deb
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755144879175
+     Repository: ml-commons-dashboards
+     ------------------------------------------------------------
+
+221. Component: mlCommonsDashboards
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 8590
+     Integration Test Build: 7712
+     Platform: linux/x64/rpm
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755144357902
+     Repository: ml-commons-dashboards
+     ------------------------------------------------------------
+
+222. Component: mlCommonsDashboards
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 8590
+     Integration Test Build: 7711
+     Platform: linux/arm64/tar
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755143876345
+     Repository: ml-commons-dashboards
+     ------------------------------------------------------------
+
+223. Component: mlCommonsDashboards
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 8590
+     Integration Test Build: 7710
+     Platform: linux/x64/tar
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755143782565
+     Repository: ml-commons-dashboards
+     ------------------------------------------------------------
+
+224. Component: neural-search
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 11330
+     Integration Test Build: 10302
+     Platform: linux/arm64/deb
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755192478664
+     Repository: neural-search
+     ------------------------------------------------------------
+
+225. Component: neural-search
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 11330
+     Integration Test Build: 10301
+     Platform: linux/x64/rpm
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755192413150
+     Repository: neural-search
+     ------------------------------------------------------------
+
+226. Component: neural-search
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 11330
+     Integration Test Build: 10298
+     Platform: linux/x64/deb
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755192282426
+     Repository: neural-search
+     ------------------------------------------------------------
+
+227. Component: neural-search
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 11330
+     Integration Test Build: 10297
+     Platform: windows/x64/zip
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755145638015
+     Repository: neural-search
+     ------------------------------------------------------------
+
+228. Component: neural-search
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: failed
+     Distribution Build: 11330
+     Integration Test Build: 10296
+     Platform: linux/x64/deb
+     Security Tests - With: fail, Without: pass
+     Build Start Time: 1755144647971
+     Repository: neural-search
+     *** FAILED TEST ***
+     ------------------------------------------------------------
+
+229. Component: neural-search
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: failed
+     Distribution Build: 11330
+     Integration Test Build: 10295
+     Platform: linux/arm64/deb
+     Security Tests - With: pass, Without: fail
+     Build Start Time: 1755144438021
+     Repository: neural-search
+     *** FAILED TEST ***
+     ------------------------------------------------------------
+
+230. Component: neural-search
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: failed
+     Distribution Build: 11330
+     Integration Test Build: 10294
+     Platform: linux/x64/rpm
+     Security Tests - With: fail, Without: pass
+     Build Start Time: 1755143822972
+     Repository: neural-search
+     *** FAILED TEST ***
+     ------------------------------------------------------------
+
+231. Component: neural-search
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 11330
+     Integration Test Build: 10293
+     Platform: linux/arm64/rpm
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755143534378
+     Repository: neural-search
+     ------------------------------------------------------------
+
+232. Component: neural-search
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 11330
+     Integration Test Build: 10292
+     Platform: linux/x64/tar
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755143350675
+     Repository: neural-search
+     ------------------------------------------------------------
+
+233. Component: neural-search
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 11330
+     Integration Test Build: 10291
+     Platform: linux/arm64/tar
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755143040699
+     Repository: neural-search
+     ------------------------------------------------------------
+
+234. Component: notifications
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 11330
+     Integration Test Build: 10297
+     Platform: windows/x64/zip
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755145638015
+     Repository: notifications
+     ------------------------------------------------------------
+
+235. Component: notifications
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 11330
+     Integration Test Build: 10296
+     Platform: linux/x64/deb
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755144647971
+     Repository: notifications
+     ------------------------------------------------------------
+
+236. Component: notifications
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 11330
+     Integration Test Build: 10295
+     Platform: linux/arm64/deb
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755144438021
+     Repository: notifications
+     ------------------------------------------------------------
+
+237. Component: notifications
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 11330
+     Integration Test Build: 10294
+     Platform: linux/x64/rpm
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755143822972
+     Repository: notifications
+     ------------------------------------------------------------
+
+238. Component: notifications
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 11330
+     Integration Test Build: 10293
+     Platform: linux/arm64/rpm
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755143534378
+     Repository: notifications
+     ------------------------------------------------------------
+
+239. Component: notifications
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 11330
+     Integration Test Build: 10292
+     Platform: linux/x64/tar
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755143350675
+     Repository: notifications
+     ------------------------------------------------------------
+
+240. Component: notifications
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 11330
+     Integration Test Build: 10291
+     Platform: linux/arm64/tar
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755143040699
+     Repository: notifications
+     ------------------------------------------------------------
+
+241. Component: notificationsDashboards
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 8590
+     Integration Test Build: 7716
+     Platform: windows/x64/zip
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755147410715
+     Repository: dashboards-notifications
+     ------------------------------------------------------------
+
+242. Component: notificationsDashboards
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 8590
+     Integration Test Build: 7715
+     Platform: linux/arm64/deb
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755145598258
+     Repository: dashboards-notifications
+     ------------------------------------------------------------
+
+243. Component: notificationsDashboards
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: failed
+     Distribution Build: 8590
+     Integration Test Build: 7714
+     Platform: linux/arm64/rpm
+     Security Tests - With: fail, Without: pass
+     Build Start Time: 1755145057867
+     Repository: dashboards-notifications
+     *** FAILED TEST ***
+     ------------------------------------------------------------
+
+244. Component: notificationsDashboards
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 8590
+     Integration Test Build: 7713
+     Platform: linux/x64/deb
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755144879175
+     Repository: dashboards-notifications
+     ------------------------------------------------------------
+
+245. Component: notificationsDashboards
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 8590
+     Integration Test Build: 7712
+     Platform: linux/x64/rpm
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755144357902
+     Repository: dashboards-notifications
+     ------------------------------------------------------------
+
+246. Component: notificationsDashboards
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 8590
+     Integration Test Build: 7711
+     Platform: linux/arm64/tar
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755143876345
+     Repository: dashboards-notifications
+     ------------------------------------------------------------
+
+247. Component: notificationsDashboards
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 8590
+     Integration Test Build: 7710
+     Platform: linux/x64/tar
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755143782565
+     Repository: dashboards-notifications
+     ------------------------------------------------------------
+
+248. Component: observabilityDashboards
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 8590
+     Integration Test Build: 7716
+     Platform: windows/x64/zip
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755147410715
+     Repository: dashboards-observability
+     ------------------------------------------------------------
+
+249. Component: observabilityDashboards
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 8590
+     Integration Test Build: 7715
+     Platform: linux/arm64/deb
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755145598258
+     Repository: dashboards-observability
+     ------------------------------------------------------------
+
+250. Component: observabilityDashboards
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 8590
+     Integration Test Build: 7714
+     Platform: linux/arm64/rpm
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755145057867
+     Repository: dashboards-observability
+     ------------------------------------------------------------
+
+251. Component: observabilityDashboards
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 8590
+     Integration Test Build: 7713
+     Platform: linux/x64/deb
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755144879175
+     Repository: dashboards-observability
+     ------------------------------------------------------------
+
+252. Component: observabilityDashboards
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 8590
+     Integration Test Build: 7712
+     Platform: linux/x64/rpm
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755144357902
+     Repository: dashboards-observability
+     ------------------------------------------------------------
+
+253. Component: observabilityDashboards
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 8590
+     Integration Test Build: 7711
+     Platform: linux/arm64/tar
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755143876345
+     Repository: dashboards-observability
+     ------------------------------------------------------------
+
+254. Component: observabilityDashboards
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 8590
+     Integration Test Build: 7710
+     Platform: linux/x64/tar
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755143782565
+     Repository: dashboards-observability
+     ------------------------------------------------------------
+
+255. Component: opensearch-learning-to-rank-base
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 11330
+     Integration Test Build: 10299
+     Platform: linux/arm64/tar
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755192364957
+     Repository: opensearch-learning-to-rank-base
+     ------------------------------------------------------------
+
+256. Component: opensearch-learning-to-rank-base
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 11330
+     Integration Test Build: 10297
+     Platform: windows/x64/zip
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755145638015
+     Repository: opensearch-learning-to-rank-base
+     ------------------------------------------------------------
+
+257. Component: opensearch-learning-to-rank-base
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 11330
+     Integration Test Build: 10296
+     Platform: linux/x64/deb
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755144647971
+     Repository: opensearch-learning-to-rank-base
+     ------------------------------------------------------------
+
+258. Component: opensearch-learning-to-rank-base
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 11330
+     Integration Test Build: 10295
+     Platform: linux/arm64/deb
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755144438021
+     Repository: opensearch-learning-to-rank-base
+     ------------------------------------------------------------
+
+259. Component: opensearch-learning-to-rank-base
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 11330
+     Integration Test Build: 10294
+     Platform: linux/x64/rpm
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755143822972
+     Repository: opensearch-learning-to-rank-base
+     ------------------------------------------------------------
+
+260. Component: opensearch-learning-to-rank-base
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 11330
+     Integration Test Build: 10293
+     Platform: linux/arm64/rpm
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755143534378
+     Repository: opensearch-learning-to-rank-base
+     ------------------------------------------------------------
+
+261. Component: opensearch-learning-to-rank-base
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 11330
+     Integration Test Build: 10292
+     Platform: linux/x64/tar
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755143350675
+     Repository: opensearch-learning-to-rank-base
+     ------------------------------------------------------------
+
+262. Component: opensearch-learning-to-rank-base
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: failed
+     Distribution Build: 11330
+     Integration Test Build: 10291
+     Platform: linux/arm64/tar
+     Security Tests - With: pass, Without: fail
+     Build Start Time: 1755143040699
+     Repository: opensearch-learning-to-rank-base
+     *** FAILED TEST ***
+     ------------------------------------------------------------
+
+263. Component: opensearch-observability
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 11330
+     Integration Test Build: 10297
+     Platform: windows/x64/zip
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755145638015
+     Repository: observability
+     ------------------------------------------------------------
+
+264. Component: opensearch-observability
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 11330
+     Integration Test Build: 10296
+     Platform: linux/x64/deb
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755144647971
+     Repository: observability
+     ------------------------------------------------------------
+
+265. Component: opensearch-observability
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 11330
+     Integration Test Build: 10295
+     Platform: linux/arm64/deb
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755144438021
+     Repository: observability
+     ------------------------------------------------------------
+
+266. Component: opensearch-observability
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 11330
+     Integration Test Build: 10294
+     Platform: linux/x64/rpm
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755143822972
+     Repository: observability
+     ------------------------------------------------------------
+
+267. Component: opensearch-observability
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 11330
+     Integration Test Build: 10293
+     Platform: linux/arm64/rpm
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755143534378
+     Repository: observability
+     ------------------------------------------------------------
+
+268. Component: opensearch-observability
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 11330
+     Integration Test Build: 10292
+     Platform: linux/x64/tar
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755143350675
+     Repository: observability
+     ------------------------------------------------------------
+
+269. Component: opensearch-observability
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 11330
+     Integration Test Build: 10291
+     Platform: linux/arm64/tar
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755143040699
+     Repository: observability
+     ------------------------------------------------------------
+
+270. Component: opensearch-reports
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 11330
+     Integration Test Build: 10297
+     Platform: windows/x64/zip
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755145638015
+     Repository: reporting
+     ------------------------------------------------------------
+
+271. Component: opensearch-reports
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 11330
+     Integration Test Build: 10296
+     Platform: linux/x64/deb
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755144647971
+     Repository: reporting
+     ------------------------------------------------------------
+
+272. Component: opensearch-reports
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 11330
+     Integration Test Build: 10295
+     Platform: linux/arm64/deb
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755144438021
+     Repository: reporting
+     ------------------------------------------------------------
+
+273. Component: opensearch-reports
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 11330
+     Integration Test Build: 10294
+     Platform: linux/x64/rpm
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755143822972
+     Repository: reporting
+     ------------------------------------------------------------
+
+274. Component: opensearch-reports
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 11330
+     Integration Test Build: 10293
+     Platform: linux/arm64/rpm
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755143534378
+     Repository: reporting
+     ------------------------------------------------------------
+
+275. Component: opensearch-reports
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 11330
+     Integration Test Build: 10292
+     Platform: linux/x64/tar
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755143350675
+     Repository: reporting
+     ------------------------------------------------------------
+
+276. Component: opensearch-reports
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 11330
+     Integration Test Build: 10291
+     Platform: linux/arm64/tar
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755143040699
+     Repository: reporting
+     ------------------------------------------------------------
+
+277. Component: opensearch-system-templates
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 11330
+     Integration Test Build: 10297
+     Platform: windows/x64/zip
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755145638015
+     Repository: opensearch-system-templates
+     ------------------------------------------------------------
+
+278. Component: opensearch-system-templates
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 11330
+     Integration Test Build: 10296
+     Platform: linux/x64/deb
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755144647971
+     Repository: opensearch-system-templates
+     ------------------------------------------------------------
+
+279. Component: opensearch-system-templates
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 11330
+     Integration Test Build: 10295
+     Platform: linux/arm64/deb
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755144438021
+     Repository: opensearch-system-templates
+     ------------------------------------------------------------
+
+280. Component: opensearch-system-templates
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 11330
+     Integration Test Build: 10294
+     Platform: linux/x64/rpm
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755143822972
+     Repository: opensearch-system-templates
+     ------------------------------------------------------------
+
+281. Component: opensearch-system-templates
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 11330
+     Integration Test Build: 10293
+     Platform: linux/arm64/rpm
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755143534378
+     Repository: opensearch-system-templates
+     ------------------------------------------------------------
+
+282. Component: opensearch-system-templates
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 11330
+     Integration Test Build: 10292
+     Platform: linux/x64/tar
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755143350675
+     Repository: opensearch-system-templates
+     ------------------------------------------------------------
+
+283. Component: opensearch-system-templates
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 11330
+     Integration Test Build: 10291
+     Platform: linux/arm64/tar
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755143040699
+     Repository: opensearch-system-templates
+     ------------------------------------------------------------
+
+284. Component: query-insights
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 11330
+     Integration Test Build: 10297
+     Platform: windows/x64/zip
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755145638015
+     Repository: query-insights
+     ------------------------------------------------------------
+
+285. Component: query-insights
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 11330
+     Integration Test Build: 10296
+     Platform: linux/x64/deb
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755144647971
+     Repository: query-insights
+     ------------------------------------------------------------
+
+286. Component: query-insights
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 11330
+     Integration Test Build: 10295
+     Platform: linux/arm64/deb
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755144438021
+     Repository: query-insights
+     ------------------------------------------------------------
+
+287. Component: query-insights
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 11330
+     Integration Test Build: 10294
+     Platform: linux/x64/rpm
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755143822972
+     Repository: query-insights
+     ------------------------------------------------------------
+
+288. Component: query-insights
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 11330
+     Integration Test Build: 10293
+     Platform: linux/arm64/rpm
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755143534378
+     Repository: query-insights
+     ------------------------------------------------------------
+
+289. Component: query-insights
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 11330
+     Integration Test Build: 10292
+     Platform: linux/x64/tar
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755143350675
+     Repository: query-insights
+     ------------------------------------------------------------
+
+290. Component: query-insights
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 11330
+     Integration Test Build: 10291
+     Platform: linux/arm64/tar
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755143040699
+     Repository: query-insights
+     ------------------------------------------------------------
+
+291. Component: queryInsightsDashboards
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 8590
+     Integration Test Build: 7716
+     Platform: windows/x64/zip
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755147410715
+     Repository: query-insights-dashboards
+     ------------------------------------------------------------
+
+292. Component: queryInsightsDashboards
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 8590
+     Integration Test Build: 7715
+     Platform: linux/arm64/deb
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755145598258
+     Repository: query-insights-dashboards
+     ------------------------------------------------------------
+
+293. Component: queryInsightsDashboards
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 8590
+     Integration Test Build: 7714
+     Platform: linux/arm64/rpm
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755145057867
+     Repository: query-insights-dashboards
+     ------------------------------------------------------------
+
+294. Component: queryInsightsDashboards
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 8590
+     Integration Test Build: 7713
+     Platform: linux/x64/deb
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755144879175
+     Repository: query-insights-dashboards
+     ------------------------------------------------------------
+
+295. Component: queryInsightsDashboards
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 8590
+     Integration Test Build: 7712
+     Platform: linux/x64/rpm
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755144357902
+     Repository: query-insights-dashboards
+     ------------------------------------------------------------
+
+296. Component: queryInsightsDashboards
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 8590
+     Integration Test Build: 7711
+     Platform: linux/arm64/tar
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755143876345
+     Repository: query-insights-dashboards
+     ------------------------------------------------------------
+
+297. Component: queryInsightsDashboards
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 8590
+     Integration Test Build: 7710
+     Platform: linux/x64/tar
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755143782565
+     Repository: query-insights-dashboards
+     ------------------------------------------------------------
+
+298. Component: queryWorkbenchDashboards
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 8590
+     Integration Test Build: 7716
+     Platform: windows/x64/zip
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755147410715
+     Repository: dashboards-query-workbench
+     ------------------------------------------------------------
+
+299. Component: queryWorkbenchDashboards
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 8590
+     Integration Test Build: 7715
+     Platform: linux/arm64/deb
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755145598258
+     Repository: dashboards-query-workbench
+     ------------------------------------------------------------
+
+300. Component: queryWorkbenchDashboards
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 8590
+     Integration Test Build: 7714
+     Platform: linux/arm64/rpm
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755145057867
+     Repository: dashboards-query-workbench
+     ------------------------------------------------------------
+
+301. Component: queryWorkbenchDashboards
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 8590
+     Integration Test Build: 7713
+     Platform: linux/x64/deb
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755144879175
+     Repository: dashboards-query-workbench
+     ------------------------------------------------------------
+
+302. Component: queryWorkbenchDashboards
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 8590
+     Integration Test Build: 7712
+     Platform: linux/x64/rpm
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755144357902
+     Repository: dashboards-query-workbench
+     ------------------------------------------------------------
+
+303. Component: queryWorkbenchDashboards
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 8590
+     Integration Test Build: 7711
+     Platform: linux/arm64/tar
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755143876345
+     Repository: dashboards-query-workbench
+     ------------------------------------------------------------
+
+304. Component: queryWorkbenchDashboards
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 8590
+     Integration Test Build: 7710
+     Platform: linux/x64/tar
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755143782565
+     Repository: dashboards-query-workbench
+     ------------------------------------------------------------
+
+305. Component: reportsDashboards
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 8590
+     Integration Test Build: 7716
+     Platform: windows/x64/zip
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755147410715
+     Repository: dashboards-reporting
+     ------------------------------------------------------------
+
+306. Component: reportsDashboards
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 8590
+     Integration Test Build: 7715
+     Platform: linux/arm64/deb
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755145598258
+     Repository: dashboards-reporting
+     ------------------------------------------------------------
+
+307. Component: reportsDashboards
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 8590
+     Integration Test Build: 7714
+     Platform: linux/arm64/rpm
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755145057867
+     Repository: dashboards-reporting
+     ------------------------------------------------------------
+
+308. Component: reportsDashboards
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 8590
+     Integration Test Build: 7713
+     Platform: linux/x64/deb
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755144879175
+     Repository: dashboards-reporting
+     ------------------------------------------------------------
+
+309. Component: reportsDashboards
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 8590
+     Integration Test Build: 7712
+     Platform: linux/x64/rpm
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755144357902
+     Repository: dashboards-reporting
+     ------------------------------------------------------------
+
+310. Component: reportsDashboards
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 8590
+     Integration Test Build: 7711
+     Platform: linux/arm64/tar
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755143876345
+     Repository: dashboards-reporting
+     ------------------------------------------------------------
+
+311. Component: reportsDashboards
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 8590
+     Integration Test Build: 7710
+     Platform: linux/x64/tar
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755143782565
+     Repository: dashboards-reporting
+     ------------------------------------------------------------
+
+312. Component: search-relevance
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 11330
+     Integration Test Build: 10297
+     Platform: windows/x64/zip
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755145638015
+     Repository: search-relevance
+     ------------------------------------------------------------
+
+313. Component: search-relevance
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 11330
+     Integration Test Build: 10296
+     Platform: linux/x64/deb
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755144647971
+     Repository: search-relevance
+     ------------------------------------------------------------
+
+314. Component: search-relevance
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 11330
+     Integration Test Build: 10295
+     Platform: linux/arm64/deb
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755144438021
+     Repository: search-relevance
+     ------------------------------------------------------------
+
+315. Component: search-relevance
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 11330
+     Integration Test Build: 10294
+     Platform: linux/x64/rpm
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755143822972
+     Repository: search-relevance
+     ------------------------------------------------------------
+
+316. Component: search-relevance
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 11330
+     Integration Test Build: 10293
+     Platform: linux/arm64/rpm
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755143534378
+     Repository: search-relevance
+     ------------------------------------------------------------
+
+317. Component: search-relevance
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 11330
+     Integration Test Build: 10292
+     Platform: linux/x64/tar
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755143350675
+     Repository: search-relevance
+     ------------------------------------------------------------
+
+318. Component: search-relevance
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 11330
+     Integration Test Build: 10291
+     Platform: linux/arm64/tar
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755143040699
+     Repository: search-relevance
+     ------------------------------------------------------------
+
+319. Component: searchRelevanceDashboards
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 8590
+     Integration Test Build: 7716
+     Platform: windows/x64/zip
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755147410715
+     Repository: dashboards-search-relevance
+     ------------------------------------------------------------
+
+320. Component: searchRelevanceDashboards
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 8590
+     Integration Test Build: 7715
+     Platform: linux/arm64/deb
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755145598258
+     Repository: dashboards-search-relevance
+     ------------------------------------------------------------
+
+321. Component: searchRelevanceDashboards
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 8590
+     Integration Test Build: 7714
+     Platform: linux/arm64/rpm
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755145057867
+     Repository: dashboards-search-relevance
+     ------------------------------------------------------------
+
+322. Component: searchRelevanceDashboards
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 8590
+     Integration Test Build: 7713
+     Platform: linux/x64/deb
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755144879175
+     Repository: dashboards-search-relevance
+     ------------------------------------------------------------
+
+323. Component: searchRelevanceDashboards
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 8590
+     Integration Test Build: 7712
+     Platform: linux/x64/rpm
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755144357902
+     Repository: dashboards-search-relevance
+     ------------------------------------------------------------
+
+324. Component: searchRelevanceDashboards
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 8590
+     Integration Test Build: 7711
+     Platform: linux/arm64/tar
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755143876345
+     Repository: dashboards-search-relevance
+     ------------------------------------------------------------
+
+325. Component: searchRelevanceDashboards
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 8590
+     Integration Test Build: 7710
+     Platform: linux/x64/tar
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755143782565
+     Repository: dashboards-search-relevance
+     ------------------------------------------------------------
+
+326. Component: security
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 11330
+     Integration Test Build: 10297
+     Platform: windows/x64/zip
+     Security Tests - With: pass, Without: unknown
+     Build Start Time: 1755145638015
+     Repository: security
+     ------------------------------------------------------------
+
+327. Component: security
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 11330
+     Integration Test Build: 10296
+     Platform: linux/x64/deb
+     Security Tests - With: pass, Without: unknown
+     Build Start Time: 1755144647971
+     Repository: security
+     ------------------------------------------------------------
+
+328. Component: security
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 11330
+     Integration Test Build: 10295
+     Platform: linux/arm64/deb
+     Security Tests - With: pass, Without: unknown
+     Build Start Time: 1755144438021
+     Repository: security
+     ------------------------------------------------------------
+
+329. Component: security
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 11330
+     Integration Test Build: 10294
+     Platform: linux/x64/rpm
+     Security Tests - With: pass, Without: unknown
+     Build Start Time: 1755143822972
+     Repository: security
+     ------------------------------------------------------------
+
+330. Component: security
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 11330
+     Integration Test Build: 10293
+     Platform: linux/arm64/rpm
+     Security Tests - With: pass, Without: unknown
+     Build Start Time: 1755143534378
+     Repository: security
+     ------------------------------------------------------------
+
+331. Component: security
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 11330
+     Integration Test Build: 10292
+     Platform: linux/x64/tar
+     Security Tests - With: pass, Without: unknown
+     Build Start Time: 1755143350675
+     Repository: security
+     ------------------------------------------------------------
+
+332. Component: security
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 11330
+     Integration Test Build: 10291
+     Platform: linux/arm64/tar
+     Security Tests - With: pass, Without: unknown
+     Build Start Time: 1755143040699
+     Repository: security
+     ------------------------------------------------------------
+
+333. Component: security-analytics
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 11330
+     Integration Test Build: 10297
+     Platform: windows/x64/zip
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755145638015
+     Repository: security-analytics
+     ------------------------------------------------------------
+
+334. Component: security-analytics
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 11330
+     Integration Test Build: 10296
+     Platform: linux/x64/deb
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755144647971
+     Repository: security-analytics
+     ------------------------------------------------------------
+
+335. Component: security-analytics
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 11330
+     Integration Test Build: 10295
+     Platform: linux/arm64/deb
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755144438021
+     Repository: security-analytics
+     ------------------------------------------------------------
+
+336. Component: security-analytics
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 11330
+     Integration Test Build: 10294
+     Platform: linux/x64/rpm
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755143822972
+     Repository: security-analytics
+     ------------------------------------------------------------
+
+337. Component: security-analytics
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 11330
+     Integration Test Build: 10293
+     Platform: linux/arm64/rpm
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755143534378
+     Repository: security-analytics
+     ------------------------------------------------------------
+
+338. Component: security-analytics
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 11330
+     Integration Test Build: 10292
+     Platform: linux/x64/tar
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755143350675
+     Repository: security-analytics
+     ------------------------------------------------------------
+
+339. Component: security-analytics
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 11330
+     Integration Test Build: 10291
+     Platform: linux/arm64/tar
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755143040699
+     Repository: security-analytics
+     ------------------------------------------------------------
+
+340. Component: securityAnalyticsDashboards
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 8590
+     Integration Test Build: 7719
+     Platform: linux/x64/rpm
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755150311149
+     Repository: security-analytics-dashboards-plugin
+     ------------------------------------------------------------
+
+341. Component: securityAnalyticsDashboards
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 8590
+     Integration Test Build: 7717
+     Platform: linux/x64/tar
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755150260424
+     Repository: security-analytics-dashboards-plugin
+     ------------------------------------------------------------
+
+342. Component: securityAnalyticsDashboards
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 8590
+     Integration Test Build: 7716
+     Platform: windows/x64/zip
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755147410715
+     Repository: security-analytics-dashboards-plugin
+     ------------------------------------------------------------
+
+343. Component: securityAnalyticsDashboards
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 8590
+     Integration Test Build: 7715
+     Platform: linux/arm64/deb
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755145598258
+     Repository: security-analytics-dashboards-plugin
+     ------------------------------------------------------------
+
+344. Component: securityAnalyticsDashboards
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 8590
+     Integration Test Build: 7714
+     Platform: linux/arm64/rpm
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755145057867
+     Repository: security-analytics-dashboards-plugin
+     ------------------------------------------------------------
+
+345. Component: securityAnalyticsDashboards
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 8590
+     Integration Test Build: 7713
+     Platform: linux/x64/deb
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755144879175
+     Repository: security-analytics-dashboards-plugin
+     ------------------------------------------------------------
+
+346. Component: securityAnalyticsDashboards
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: failed
+     Distribution Build: 8590
+     Integration Test Build: 7712
+     Platform: linux/x64/rpm
+     Security Tests - With: fail, Without: pass
+     Build Start Time: 1755144357902
+     Repository: security-analytics-dashboards-plugin
+     *** FAILED TEST ***
+     ------------------------------------------------------------
+
+347. Component: securityAnalyticsDashboards
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 8590
+     Integration Test Build: 7711
+     Platform: linux/arm64/tar
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755143876345
+     Repository: security-analytics-dashboards-plugin
+     ------------------------------------------------------------
+
+348. Component: securityAnalyticsDashboards
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: failed
+     Distribution Build: 8590
+     Integration Test Build: 7710
+     Platform: linux/x64/tar
+     Security Tests - With: fail, Without: pass
+     Build Start Time: 1755143782565
+     Repository: security-analytics-dashboards-plugin
+     *** FAILED TEST ***
+     ------------------------------------------------------------
+
+349. Component: securityDashboards
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 8590
+     Integration Test Build: 7716
+     Platform: windows/x64/zip
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755147410715
+     Repository: security-dashboards-plugin
+     ------------------------------------------------------------
+
+350. Component: securityDashboards
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 8590
+     Integration Test Build: 7715
+     Platform: linux/arm64/deb
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755145598258
+     Repository: security-dashboards-plugin
+     ------------------------------------------------------------
+
+351. Component: securityDashboards
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 8590
+     Integration Test Build: 7714
+     Platform: linux/arm64/rpm
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755145057867
+     Repository: security-dashboards-plugin
+     ------------------------------------------------------------
+
+352. Component: securityDashboards
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 8590
+     Integration Test Build: 7713
+     Platform: linux/x64/deb
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755144879175
+     Repository: security-dashboards-plugin
+     ------------------------------------------------------------
+
+353. Component: securityDashboards
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 8590
+     Integration Test Build: 7712
+     Platform: linux/x64/rpm
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755144357902
+     Repository: security-dashboards-plugin
+     ------------------------------------------------------------
+
+354. Component: securityDashboards
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 8590
+     Integration Test Build: 7711
+     Platform: linux/arm64/tar
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755143876345
+     Repository: security-dashboards-plugin
+     ------------------------------------------------------------
+
+355. Component: securityDashboards
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 8590
+     Integration Test Build: 7710
+     Platform: linux/x64/tar
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755143782565
+     Repository: security-dashboards-plugin
+     ------------------------------------------------------------
+
+356. Component: skills
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 11330
+     Integration Test Build: 10297
+     Platform: windows/x64/zip
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755145638015
+     Repository: skills
+     ------------------------------------------------------------
+
+357. Component: skills
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 11330
+     Integration Test Build: 10296
+     Platform: linux/x64/deb
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755144647971
+     Repository: skills
+     ------------------------------------------------------------
+
+358. Component: skills
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 11330
+     Integration Test Build: 10295
+     Platform: linux/arm64/deb
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755144438021
+     Repository: skills
+     ------------------------------------------------------------
+
+359. Component: skills
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 11330
+     Integration Test Build: 10294
+     Platform: linux/x64/rpm
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755143822972
+     Repository: skills
+     ------------------------------------------------------------
+
+360. Component: skills
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 11330
+     Integration Test Build: 10293
+     Platform: linux/arm64/rpm
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755143534378
+     Repository: skills
+     ------------------------------------------------------------
+
+361. Component: skills
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 11330
+     Integration Test Build: 10292
+     Platform: linux/x64/tar
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755143350675
+     Repository: skills
+     ------------------------------------------------------------
+
+362. Component: skills
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 11330
+     Integration Test Build: 10291
+     Platform: linux/arm64/tar
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755143040699
+     Repository: skills
+     ------------------------------------------------------------
+
+363. Component: sql
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 11330
+     Integration Test Build: 10297
+     Platform: windows/x64/zip
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755145638015
+     Repository: sql
+     ------------------------------------------------------------
+
+364. Component: sql
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 11330
+     Integration Test Build: 10296
+     Platform: linux/x64/deb
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755144647971
+     Repository: sql
+     ------------------------------------------------------------
+
+365. Component: sql
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 11330
+     Integration Test Build: 10295
+     Platform: linux/arm64/deb
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755144438021
+     Repository: sql
+     ------------------------------------------------------------
+
+366. Component: sql
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 11330
+     Integration Test Build: 10294
+     Platform: linux/x64/rpm
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755143822972
+     Repository: sql
+     ------------------------------------------------------------
+
+367. Component: sql
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 11330
+     Integration Test Build: 10293
+     Platform: linux/arm64/rpm
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755143534378
+     Repository: sql
+     ------------------------------------------------------------
+
+368. Component: sql
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 11330
+     Integration Test Build: 10292
+     Platform: linux/x64/tar
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755143350675
+     Repository: sql
+     ------------------------------------------------------------
+
+369. Component: sql
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 11330
+     Integration Test Build: 10291
+     Platform: linux/arm64/tar
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755143040699
+     Repository: sql
+     ------------------------------------------------------------
+
+370. Component: user-behavior-insights
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 11330
+     Integration Test Build: 10302
+     Platform: linux/arm64/deb
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755192478664
+     Repository: user-behavior-insights
+     ------------------------------------------------------------
+
+371. Component: user-behavior-insights
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 11330
+     Integration Test Build: 10297
+     Platform: windows/x64/zip
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755145638015
+     Repository: user-behavior-insights
+     ------------------------------------------------------------
+
+372. Component: user-behavior-insights
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 11330
+     Integration Test Build: 10296
+     Platform: linux/x64/deb
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755144647971
+     Repository: user-behavior-insights
+     ------------------------------------------------------------
+
+373. Component: user-behavior-insights
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 11330
+     Integration Test Build: 10295
+     Platform: linux/arm64/deb
+     Security Tests - With: not available, Without: not available
+     Build Start Time: 1755144438021
+     Repository: user-behavior-insights
+     ------------------------------------------------------------
+
+374. Component: user-behavior-insights
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 11330
+     Integration Test Build: 10294
+     Platform: linux/x64/rpm
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755143822972
+     Repository: user-behavior-insights
+     ------------------------------------------------------------
+
+375. Component: user-behavior-insights
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 11330
+     Integration Test Build: 10293
+     Platform: linux/arm64/rpm
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755143534378
+     Repository: user-behavior-insights
+     ------------------------------------------------------------
+
+376. Component: user-behavior-insights
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 11330
+     Integration Test Build: 10292
+     Platform: linux/x64/tar
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755143350675
+     Repository: user-behavior-insights
+     ------------------------------------------------------------
+
+377. Component: user-behavior-insights
+     Version: 3.2.0
+     RC Number: 6
+     Build Result: passed
+     Distribution Build: 11330
+     Integration Test Build: 10291
+     Platform: linux/arm64/tar
+     Security Tests - With: pass, Without: pass
+     Build Start Time: 1755143040699
+     Repository: user-behavior-insights
+     ------------------------------------------------------------
+
+
+FAILED COMPONENTS DETAILED ANALYSIS:
+================================================================================
+
+Failure 1: alertingDashboards
+  RC: 6
+  Distribution Build: 8590
+  Integration Test Build: 7722
+  Platform: linux/x64/deb
+  Security Test Results:
+    With Security: fail
+    Without Security: pass
+  Analysis: Security-specific failure - component works without security but fails with security enabled
+
+
+Failure 2: OpenSearch-Dashboards-ci-group-6
+  RC: 6
+  Distribution Build: 8590
+  Integration Test Build: 7722
+  Platform: linux/x64/deb
+  Security Test Results:
+    With Security: fail
+    Without Security: pass
+  Analysis: Security-specific failure - component works without security but fails with security enabled
+
+
+Failure 3: alerting
+  RC: 6
+  Distribution Build: 11330
+  Integration Test Build: 10300
+  Platform: linux/arm64/rpm
+  Security Test Results:
+    With Security: fail
+    Without Security: pass
+  Analysis: Security-specific failure - component works without security but fails with security enabled
+
+
+Failure 4: indexManagementDashboards
+  RC: 6
+  Distribution Build: 8590
+  Integration Test Build: 7716
+  Platform: windows/x64/zip
+  Security Test Results:
+    With Security: fail
+    Without Security: fail
+  Analysis: Complete failure - component fails both with and without security
+
+
+Failure 5: OpenSearch-Dashboards-ci-group-6
+  RC: 6
+  Distribution Build: 8590
+  Integration Test Build: 7715
+  Platform: linux/arm64/deb
+  Security Test Results:
+    With Security: fail
+    Without Security: pass
+  Analysis: Security-specific failure - component works without security but fails with security enabled
+
+
+Failure 6: OpenSearch-Dashboards-ci-group-7
+  RC: 6
+  Distribution Build: 8590
+  Integration Test Build: 7715
+  Platform: linux/arm64/deb
+  Security Test Results:
+    With Security: pass
+    Without Security: fail
+  Analysis: Non-security failure - component fails without security but works with security
+
+
+Failure 7: notificationsDashboards
+  RC: 6
+  Distribution Build: 8590
+  Integration Test Build: 7714
+  Platform: linux/arm64/rpm
+  Security Test Results:
+    With Security: fail
+    Without Security: pass
+  Analysis: Security-specific failure - component works without security but fails with security enabled
+
+
+Failure 8: OpenSearch-Dashboards-ci-group-2
+  RC: 6
+  Distribution Build: 8590
+  Integration Test Build: 7713
+  Platform: linux/x64/deb
+  Security Test Results:
+    With Security: pass
+    Without Security: fail
+  Analysis: Non-security failure - component fails without security but works with security
+
+
+Failure 9: OpenSearch-Dashboards-ci-group-6
+  RC: 6
+  Distribution Build: 8590
+  Integration Test Build: 7713
+  Platform: linux/x64/deb
+  Security Test Results:
+    With Security: fail
+    Without Security: pass
+  Analysis: Security-specific failure - component works without security but fails with security enabled
+
+
+Failure 10: neural-search
+  RC: 6
+  Distribution Build: 11330
+  Integration Test Build: 10296
+  Platform: linux/x64/deb
+  Security Test Results:
+    With Security: fail
+    Without Security: pass
+  Analysis: Security-specific failure - component works without security but fails with security enabled
+
+
+Failure 11: neural-search
+  RC: 6
+  Distribution Build: 11330
+  Integration Test Build: 10295
+  Platform: linux/arm64/deb
+  Security Test Results:
+    With Security: pass
+    Without Security: fail
+  Analysis: Non-security failure - component fails without security but works with security
+
+
+Failure 12: securityAnalyticsDashboards
+  RC: 6
+  Distribution Build: 8590
+  Integration Test Build: 7712
+  Platform: linux/x64/rpm
+  Security Test Results:
+    With Security: fail
+    Without Security: pass
+  Analysis: Security-specific failure - component works without security but fails with security enabled
+
+
+Failure 13: OpenSearch-Dashboards-ci-group-6
+  RC: 6
+  Distribution Build: 8590
+  Integration Test Build: 7711
+  Platform: linux/arm64/tar
+  Security Test Results:
+    With Security: pass
+    Without Security: fail
+  Analysis: Non-security failure - component fails without security but works with security
+
+
+Failure 14: neural-search
+  RC: 6
+  Distribution Build: 11330
+  Integration Test Build: 10294
+  Platform: linux/x64/rpm
+  Security Test Results:
+    With Security: fail
+    Without Security: pass
+  Analysis: Security-specific failure - component works without security but fails with security enabled
+
+
+Failure 15: securityAnalyticsDashboards
+  RC: 6
+  Distribution Build: 8590
+  Integration Test Build: 7710
+  Platform: linux/x64/tar
+  Security Test Results:
+    With Security: fail
+    Without Security: pass
+  Analysis: Security-specific failure - component works without security but fails with security enabled
+
+
+Failure 16: index-management
+  RC: 6
+  Distribution Build: 11330
+  Integration Test Build: 10293
+  Platform: linux/arm64/rpm
+  Security Test Results:
+    With Security: fail
+    Without Security: pass
+  Analysis: Security-specific failure - component works without security but fails with security enabled
+
+
+Failure 17: alerting
+  RC: 6
+  Distribution Build: 11330
+  Integration Test Build: 10293
+  Platform: linux/arm64/rpm
+  Security Test Results:
+    With Security: fail
+    Without Security: pass
+  Analysis: Security-specific failure - component works without security but fails with security enabled
+
+
+Failure 18: anomaly-detection
+  RC: 6
+  Distribution Build: 11330
+  Integration Test Build: 10291
+  Platform: linux/arm64/tar
+  Security Test Results:
+    With Security: fail
+    Without Security: pass
+  Analysis: Security-specific failure - component works without security but fails with security enabled
+
+
+Failure 19: opensearch-learning-to-rank-base
+  RC: 6
+  Distribution Build: 11330
+  Integration Test Build: 10291
+  Platform: linux/arm64/tar
+  Security Test Results:
+    With Security: pass
+    Without Security: fail
+  Analysis: Non-security failure - component fails without security but works with security
+
+
+Failure 20: asynchronous-search
+  RC: 6
+  Distribution Build: 11330
+  Integration Test Build: 10291
+  Platform: linux/arm64/tar
+  Security Test Results:
+    With Security: pass
+    Without Security: fail
+  Analysis: Non-security failure - component fails without security but works with security
+
