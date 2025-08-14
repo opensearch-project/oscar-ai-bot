@@ -32,6 +32,12 @@ AWS_REGION=${AWS_REGION:-us-east-1}
 FUNCTION_NAME="oscar-supervisor-agent"
 LAMBDA_ROLE_NAME="oscar-supervisor-agent-role"
 
+# Verify region configuration
+echo "🌍 Using AWS Region: $AWS_REGION"
+if [ "$AWS_REGION" != "us-east-1" ]; then
+    echo "⚠️  Warning: Expected region us-east-1, but using $AWS_REGION"
+fi
+
 echo "📦 Creating deployment package..."
 
 # Create temporary directory for deployment
@@ -52,7 +58,35 @@ EOF
 
 # Install dependencies
 echo "📦 Installing Python dependencies..."
-pip install -r $TEMP_DIR/requirements.txt -t $TEMP_DIR/ --quiet
+if ! pip install -r $TEMP_DIR/requirements.txt -t $TEMP_DIR/ --quiet; then
+    echo "❌ Failed to install dependencies with pip. Trying with --user flag..."
+    pip install -r $TEMP_DIR/requirements.txt -t $TEMP_DIR/ --user --quiet || {
+        echo "❌ Failed to install dependencies. Please check your pip installation."
+        exit 1
+    }
+fi
+
+# Verify critical dependencies were installed
+echo "🔍 Verifying dependencies..."
+if [ ! -d "$TEMP_DIR/slack_bolt" ]; then
+    echo "❌ slack_bolt not found in deployment package"
+    echo "📦 Attempting manual installation..."
+    pip install slack_bolt>=1.14.0 -t $TEMP_DIR/ --quiet || {
+        echo "❌ Failed to install slack_bolt"
+        exit 1
+    }
+fi
+
+if [ ! -d "$TEMP_DIR/slack_sdk" ]; then
+    echo "❌ slack_sdk not found in deployment package"
+    echo "📦 Attempting manual installation..."
+    pip install slack_sdk>=3.19.0 -t $TEMP_DIR/ --quiet || {
+        echo "❌ Failed to install slack_sdk"
+        exit 1
+    }
+fi
+
+echo "✅ Dependencies verified"
 
 # Create deployment package
 cd $TEMP_DIR
@@ -60,7 +94,16 @@ zip -r ../slack-agent.zip . -x "*.pyc" "*/__pycache__/*" -q
 cd - > /dev/null
 
 DEPLOYMENT_PACKAGE="$TEMP_DIR/../slack-agent.zip"
+PACKAGE_SIZE=$(ls -la $DEPLOYMENT_PACKAGE | awk '{print $5}')
 echo "✅ Created deployment package: $DEPLOYMENT_PACKAGE"
+echo "📏 Package size: $(numfmt --to=iec $PACKAGE_SIZE)"
+
+# Verify package size is reasonable (should be > 1MB with dependencies)
+if [ $PACKAGE_SIZE -lt 1000000 ]; then
+    echo "⚠️  Warning: Package size is unusually small ($PACKAGE_SIZE bytes)"
+    echo "   This might indicate missing dependencies"
+    echo "   Expected size: >10MB with all dependencies"
+fi
 
 # Check if IAM role exists, create if not
 echo "🔐 Checking IAM role..."
@@ -157,8 +200,30 @@ fi
 ROLE_ARN=$(aws iam get-role --role-name $LAMBDA_ROLE_NAME --region $AWS_REGION --query 'Role.Arn' --output text)
 echo "📋 Using IAM role: $ROLE_ARN"
 
-# Prepare environment variables (AWS_REGION is reserved and automatically set by Lambda)
-ENV_VARS="{SLACK_BOT_TOKEN=$SLACK_BOT_TOKEN,SLACK_SIGNING_SECRET=$SLACK_SIGNING_SECRET,OSCAR_BEDROCK_AGENT_ID=$OSCAR_BEDROCK_AGENT_ID,OSCAR_BEDROCK_AGENT_ALIAS_ID=${OSCAR_BEDROCK_AGENT_ALIAS_ID:-TSTALIASID},SESSIONS_TABLE_NAME=${SESSIONS_TABLE_NAME:-oscar-sessions-v2},CONTEXT_TABLE_NAME=${CONTEXT_TABLE_NAME:-oscar-context},ENABLE_DM=$ENABLE_DM,DEDUP_TTL=${DEDUP_TTL:-300},SESSION_TTL=${SESSION_TTL:-3600},CONTEXT_TTL=${CONTEXT_TTL:-604800},MAX_CONTEXT_LENGTH=${MAX_CONTEXT_LENGTH:-3000},CONTEXT_SUMMARY_LENGTH=${CONTEXT_SUMMARY_LENGTH:-500},AGENT_TIMEOUT=${AGENT_TIMEOUT:-60},AGENT_MAX_RETRIES=${AGENT_MAX_RETRIES:-2}}"
+# Create environment variables JSON file
+cat > $TEMP_DIR/env-vars.json << EOF
+{
+    "Variables": {
+        "SLACK_BOT_TOKEN": "$SLACK_BOT_TOKEN",
+        "SLACK_SIGNING_SECRET": "$SLACK_SIGNING_SECRET",
+        "OSCAR_BEDROCK_AGENT_ID": "$OSCAR_BEDROCK_AGENT_ID",
+        "OSCAR_BEDROCK_AGENT_ALIAS_ID": "${OSCAR_BEDROCK_AGENT_ALIAS_ID:-TSTALIASID}",
+        "SESSIONS_TABLE_NAME": "${SESSIONS_TABLE_NAME:-oscar-sessions-v2}",
+        "CONTEXT_TABLE_NAME": "${CONTEXT_TABLE_NAME:-oscar-context}",
+        "ENABLE_DM": "$ENABLE_DM",
+        "DEDUP_TTL": "${DEDUP_TTL:-300}",
+        "SESSION_TTL": "${SESSION_TTL:-3600}",
+        "CONTEXT_TTL": "${CONTEXT_TTL:-604800}",
+        "MAX_CONTEXT_LENGTH": "${MAX_CONTEXT_LENGTH:-3000}",
+        "CONTEXT_SUMMARY_LENGTH": "${CONTEXT_SUMMARY_LENGTH:-500}",
+        "AGENT_TIMEOUT": "${AGENT_TIMEOUT:-60}",
+        "AGENT_MAX_RETRIES": "${AGENT_MAX_RETRIES:-2}",
+        "CHANNEL_ALLOW_LIST": "$CHANNEL_ALLOW_LIST",
+        "AUTHORIZED_MESSAGE_SENDERS": "$AUTHORIZED_MESSAGE_SENDERS",
+        "METRICS_CROSS_ACCOUNT_ROLE_ARN": "$METRICS_CROSS_ACCOUNT_ROLE_ARN"
+    }
+}
+EOF
 
 # Check if Lambda function exists
 echo "🔍 Checking if Lambda function exists..."
@@ -174,11 +239,11 @@ if aws lambda get-function --function-name $FUNCTION_NAME --region $AWS_REGION >
     # Update function configuration
     aws lambda update-function-configuration \
         --function-name $FUNCTION_NAME \
-        --runtime python3.9 \
+        --runtime python3.12 \
         --handler lambda_function.lambda_handler \
         --timeout 60 \
         --memory-size 512 \
-        --environment Variables="$ENV_VARS" \
+        --environment file://$TEMP_DIR/env-vars.json \
         --region $AWS_REGION
 
     echo "✅ Updated Lambda function: $FUNCTION_NAME"
@@ -187,13 +252,13 @@ else
     
     aws lambda create-function \
         --function-name $FUNCTION_NAME \
-        --runtime python3.9 \
+        --runtime python3.12 \
         --role $ROLE_ARN \
         --handler lambda_function.lambda_handler \
         --zip-file fileb://$DEPLOYMENT_PACKAGE \
         --timeout 60 \
         --memory-size 512 \
-        --environment Variables="$ENV_VARS" \
+        --environment file://$TEMP_DIR/env-vars.json \
         --region $AWS_REGION
 
     echo "✅ Created Lambda function: $FUNCTION_NAME"

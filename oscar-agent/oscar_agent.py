@@ -158,45 +158,6 @@ class EnhancedBedrockOSCARAgent(OSCARAgentInterface):
             logger.error(f"Error invoking metrics function {function_name}: {e}")
             raise
     
-    def _determine_query_type(self, query: str) -> str:
-        """
-        Determine the type of query to route appropriately.
-        
-        Args:
-            query: The user's query
-            
-        Returns:
-            Query type: 'knowledge', 'metrics', or 'hybrid'
-        """
-        query_lower = query.lower()
-        
-        # Metrics-related keywords
-        metrics_keywords = [
-            'test', 'build', 'release', 'deployment', 'metrics', 'performance',
-            'failure', 'success rate', 'coverage', 'pipeline', 'ci/cd',
-            'current', 'recent', 'last week', 'last month', 'trends'
-        ]
-        
-        # Knowledge-related keywords  
-        knowledge_keywords = [
-            'how to', 'configure', 'setup', 'install', 'documentation',
-            'best practice', 'guide', 'tutorial', 'explain', 'what is',
-            'troubleshoot', 'error', 'issue', 'problem'
-        ]
-        
-        # Count keyword matches
-        metrics_matches = sum(1 for keyword in metrics_keywords if keyword in query_lower)
-        knowledge_matches = sum(1 for keyword in knowledge_keywords if keyword in query_lower)
-        
-        # Determine query type
-        if metrics_matches > knowledge_matches and metrics_matches > 0:
-            return 'metrics'
-        elif knowledge_matches > metrics_matches and knowledge_matches > 0:
-            return 'knowledge'
-        else:
-            # Default to hybrid for complex queries
-            return 'hybrid'
-    
     def _invoke_agent(self, query: str, session_id: Optional[str] = None) -> Tuple[str, Optional[str]]:
         """
         Invoke the Bedrock agent with the given query.
@@ -233,13 +194,25 @@ class EnhancedBedrockOSCARAgent(OSCARAgentInterface):
                         # Extract session ID from the chunk if available
                         if 'sessionId' in chunk:
                             returned_session_id = chunk['sessionId']
+                            logger.debug(f"Found session ID in chunk: {returned_session_id}")
             
             # Also check for session ID at the top level of the response
             if 'sessionId' in response:
                 returned_session_id = response['sessionId']
+                logger.debug(f"Found session ID at top level: {returned_session_id}")
+            
+            # If no session ID found in response, use the one from request
+            elif not returned_session_id and session_id:
+                returned_session_id = session_id
+                logger.debug(f"Using request session ID: {returned_session_id}")
+            
+            # If still no session ID, generate one for consistency
+            else:
+                returned_session_id = f"session-{int(time.time())}"
+                logger.debug(f"Generated new session ID: {returned_session_id}")
             
             logger.info(f"Agent response received, length: {len(response_text)} characters")
-            logger.info(f"Session ID: {returned_session_id}")
+            logger.info(f"Final session ID: {returned_session_id}")
             
             return response_text.strip(), returned_session_id
             
@@ -251,58 +224,7 @@ class EnhancedBedrockOSCARAgent(OSCARAgentInterface):
         except Exception as e:
             logger.error(f"Unexpected error invoking agent: {e}", exc_info=True)
             raise
-    
-    def _retry_with_backoff(self, func, *args, **kwargs):
-        """
-        Retry a function with exponential backoff.
-        
-        Args:
-            func: The function to retry
-            *args: Arguments to pass to the function
-            **kwargs: Keyword arguments to pass to the function
-            
-        Returns:
-            The result of the function call
-            
-        Raises:
-            Exception: If all retries are exhausted
-        """
-        last_exception = None
-        
-        for attempt in range(self.max_retries + 1):
-            try:
-                return func(*args, **kwargs)
-            except ClientError as e:
-                error_code = e.response['Error']['Code']
-                
-                # Don't retry certain errors
-                if error_code in ['AccessDeniedException', 'ValidationException']:
-                    raise
-                
-                # For throttling and other retryable errors, use backoff
-                if error_code in ['ThrottlingException', 'ServiceUnavailableException', 'InternalServerException']:
-                    last_exception = e
-                    if attempt < self.max_retries:
-                        wait_time = (2 ** attempt) + (time.time() % 1)  # Add jitter
-                        logger.warning(f"Retryable error ({error_code}), attempt {attempt + 1}/{self.max_retries + 1}. Waiting {wait_time:.2f}s")
-                        time.sleep(wait_time)
-                        continue
-                
-                # For other client errors, don't retry
-                raise
-            except Exception as e:
-                last_exception = e
-                if attempt < self.max_retries:
-                    wait_time = (2 ** attempt) + (time.time() % 1)  # Add jitter
-                    logger.warning(f"Unexpected error, attempt {attempt + 1}/{self.max_retries + 1}. Waiting {wait_time:.2f}s")
-                    time.sleep(wait_time)
-                    continue
-                raise
-        
-        # If we get here, all retries were exhausted
-        if last_exception:
-            raise last_exception
-    
+     
     def query(self, query: str, session_id: Optional[str] = None, 
               context_summary: Optional[str] = None) -> Tuple[str, Optional[str]]:
         """
@@ -321,6 +243,9 @@ class EnhancedBedrockOSCARAgent(OSCARAgentInterface):
         """
         logger.info(f"Querying Enhanced OSCAR agent with: {query[:100]}...")
         
+        # Store original session ID for context preservation
+        original_session_id = session_id
+        
         # The supervisor agent handles all routing internally through its
         # knowledge base integration and collaborator agents, so we just
         # need to invoke it directly
@@ -329,29 +254,58 @@ class EnhancedBedrockOSCARAgent(OSCARAgentInterface):
         if session_id:
             try:
                 logger.info(f"Attempting query with session_id: {session_id}")
-                return self._retry_with_backoff(self._invoke_agent, query, session_id)
+                response, returned_session_id = self._invoke_agent(query, session_id)
+                # Ensure we return the session ID (either returned or original)
+                final_session_id = returned_session_id or session_id
+                logger.info(f"Session-based query succeeded with session_id: {final_session_id}")
+                return response, final_session_id
             except Exception as e:
+                proceed = False
                 logger.warning(f"Session-based query failed (possibly expired session): {e}")
-                # Session ID might be expired, fall through to context summary fallback
-        
         # Second attempt: Use enhanced query with context summary (without session_id)
-        if context_summary:
-            logger.info("Falling back to context-enhanced query without session_id")
+        if context_summary and context_summary.strip():  # Check for non-empty context
+            logger.info("Using context-enhanced query without session_id")
             enhanced_query = f"Previous conversation context:\n{context_summary}\n\nCurrent question: {query}"
             try:
-                return self._retry_with_backoff(self._invoke_agent, enhanced_query, None)
+                response, new_session_id = self._invoke_agent(enhanced_query, None)
+                logger.info(f"Context-enhanced query succeeded with new session: {new_session_id}")
+                return response, new_session_id
             except Exception as e:
                 logger.warning(f"Context-enhanced query failed: {e}")
-                # Fall through to plain query
-        
         # Third attempt: Just use the plain query as last resort
         logger.info("Using plain query without context or session")
         try:
-            return self._retry_with_backoff(self._invoke_agent, query, None)
+            response, new_session_id = self._invoke_agent(query, None)
+            logger.info(f"Plain query succeeded with new session: {new_session_id}")
+            return response, new_session_id
         except Exception as e:
             logger.error(f"All query attempts failed: {e}", exc_info=True)
             error_message = self._handle_agent_error(e, query)
-            return error_message, None
+            return error_message, original_session_id  # Return original session ID to preserve context
+    
+    def _is_session_expired_error(self, error: Exception) -> bool:
+        """
+        Check if the error indicates a session expiration.
+        
+        Args:
+            error: The exception to check
+            
+        Returns:
+            True if the error indicates session expiration
+        """
+        if isinstance(error, ClientError):
+            error_code = error.response['Error']['Code']
+            error_message = error.response['Error']['Message'].lower()
+            
+            # Check for session-related errors
+            if error_code in ['ValidationException', 'BadRequestException']:
+                if any(keyword in error_message for keyword in ['session', 'expired', 'invalid']):
+                    return True
+        
+        # Check error message for session-related keywords
+        error_str = str(error).lower()
+        session_keywords = ['session expired', 'invalid session', 'session not found', 'session timeout']
+        return any(keyword in error_str for keyword in session_keywords)
     
     def _handle_agent_error(self, error: Exception, query: str) -> str:
         """

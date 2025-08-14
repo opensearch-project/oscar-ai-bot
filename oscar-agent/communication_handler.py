@@ -13,6 +13,7 @@ import json
 import logging
 import os
 import re
+import time
 from typing import Any, Dict, List, Optional
 
 import boto3
@@ -30,6 +31,12 @@ CHANNEL_ALLOW_LIST = ['C096MV7JZ0T', 'C09827S7CEB', 'C091EH1JKCL', 'C088XMSH4DA'
 slack_token = os.environ.get('SLACK_BOT_TOKEN')
 slack_client = WebClient(token=slack_token) if slack_token else None
 bedrock_agent_runtime = boto3.client('bedrock-agent-runtime', region_name='us-east-1')
+
+# Initialize DynamoDB for context storage
+dynamodb = boto3.resource('dynamodb', region_name='us-east-1')
+context_table_name = os.environ.get('CONTEXT_TABLE_NAME', 'oscar-agent-context')
+context_table = dynamodb.Table(context_table_name)
+context_ttl = 7 * 24 * 60 * 60  # 7 days in seconds
 
 # Hardcoded message templates from the templates directory
 MESSAGE_TEMPLATES = {
@@ -170,6 +177,11 @@ def handle_send_message(params: Dict[str, Any]) -> Dict[str, Any]:
                     unfurl_media=False
                 )
                 logger.info(f"Slack API response: {response.get('ok')}, ts: {response.get('ts')}")
+                
+                # Store context for the sent message to enable follow-up conversations
+                if response.get('ok') and response.get('ts'):
+                    store_cross_channel_context(target_channel, response.get('ts'), query, processed_message)
+                
                 result = {
                     'success': True,
                     'message': f'✅ Message sent successfully to channel {target_channel}',
@@ -454,6 +466,50 @@ def determine_message_type_from_query(query: str) -> str:
         return 'release_announcement'
     else:
         return 'missing_release_notes'  # Default
+
+def store_cross_channel_context(channel: str, message_ts: str, original_query: str, sent_message: str) -> None:
+    """
+    Store context for a message sent to a different channel to enable follow-up conversations.
+    
+    Args:
+        channel: Target channel where the message was sent
+        message_ts: Timestamp of the sent message
+        original_query: Original user query that triggered the message (will be redacted for privacy)
+        sent_message: The actual message that was sent
+    """
+    try:
+        thread_key = f"{channel}_{message_ts}"
+        
+        # Redact the original query for privacy/security reasons
+        # The original query could contain sensitive info or reveal who made the request
+        redacted_query = "[Automated message - original request details redacted for privacy]"
+        
+        # Create context for the sent message
+        context = {
+            "session_id": None,  # New conversation thread
+            "history": [
+                {
+                    "query": redacted_query,
+                    "response": sent_message,
+                    "timestamp": int(time.time())
+                }
+            ]
+        }
+        
+        # Store with TTL
+        expiration = int(time.time()) + context_ttl
+        item = {
+            'thread_key': thread_key,
+            'context': context,
+            'ttl': expiration,
+            'updated_at': int(time.time())
+        }
+        
+        context_table.put_item(Item=item)
+        logger.info(f"Stored cross-channel context for thread {thread_key} in channel {channel}")
+        
+    except Exception as e:
+        logger.error(f"Error storing cross-channel context for {channel}_{message_ts}: {e}", exc_info=True)
 
 def create_error_response(error_message: str) -> Dict[str, Any]:
     """

@@ -22,6 +22,12 @@ fi
 # Set function name
 FUNCTION_NAME="oscar-supervisor-agent"
 
+# Verify region configuration
+echo "🌍 Using AWS Region: $AWS_REGION"
+if [ "$AWS_REGION" != "us-east-1" ]; then
+    echo "⚠️  Warning: Expected region us-east-1, but using $AWS_REGION"
+fi
+
 echo "📦 Creating deployment package..."
 
 # Create temporary directory for deployment
@@ -42,15 +48,87 @@ EOF
 
 # Install dependencies
 echo "📦 Installing Python dependencies..."
-pip install -r $TEMP_DIR/requirements.txt -t $TEMP_DIR/ --quiet
+if ! pip install -r $TEMP_DIR/requirements.txt -t $TEMP_DIR/ --quiet; then
+    echo "❌ Failed to install dependencies with pip. Trying with --user flag..."
+    pip install -r $TEMP_DIR/requirements.txt -t $TEMP_DIR/ --user --quiet || {
+        echo "❌ Failed to install dependencies. Please check your pip installation."
+        exit 1
+    }
+fi
 
-# Create deployment package
-cd $TEMP_DIR
-zip -r ../slack-agent-update.zip . -x "*.pyc" "*/__pycache__/*" -q
-cd - > /dev/null
+# Verify critical dependencies were installed
+echo "🔍 Verifying dependencies..."
+if [ ! -d "$TEMP_DIR/slack_bolt" ]; then
+    echo "❌ slack_bolt not found in deployment package"
+    echo "📦 Attempting manual installation..."
+    pip install slack_bolt>=1.14.0 -t $TEMP_DIR/ --quiet || {
+        echo "❌ Failed to install slack_bolt"
+        exit 1
+    }
+fi
+
+if [ ! -d "$TEMP_DIR/slack_sdk" ]; then
+    echo "❌ slack_sdk not found in deployment package"
+    echo "📦 Attempting manual installation..."
+    pip install slack_sdk>=3.19.0 -t $TEMP_DIR/ --quiet || {
+        echo "❌ Failed to install slack_sdk"
+        exit 1
+    }
+fi
+
+echo "✅ Dependencies verified"
+
+# Verify critical code fixes are in place
+echo "🔍 Verifying critical code fixes..."
+if ! grep -q "def get_context_for_query" oscar-agent/storage.py; then
+    echo "❌ CRITICAL: storage.py is missing get_context_for_query method"
+    echo "   This will cause AttributeError. Please restore the correct storage.py file."
+    exit 1
+fi
+
+if grep -q "^[[:space:]]*context = self.storage.get_context_for_query" oscar-agent/slack_handler.py; then
+    echo "❌ CRITICAL: slack_handler.py has variable name collision bug"
+    echo "   This will cause context to be overwritten. Please fix variable naming."
+    exit 1
+fi
+
+echo "✅ Critical code fixes verified"
+
+# Create deployment package using Python to ensure correct structure
+echo "📦 Creating deployment package..."
+python3 -c "
+import os
+import zipfile
+import sys
+
+# Change to the directory
+os.chdir('$TEMP_DIR')
+
+# Create zip file
+with zipfile.ZipFile('../slack-agent-update.zip', 'w', zipfile.ZIP_DEFLATED) as zipf:
+    for root, dirs, files in os.walk('.'):
+        # Skip __pycache__ directories
+        dirs[:] = [d for d in dirs if d != '__pycache__']
+        for file in files:
+            if not file.endswith('.pyc'):
+                file_path = os.path.join(root, file)
+                arcname = os.path.relpath(file_path, '.')
+                zipf.write(file_path, arcname)
+
+print('✅ Deployment package created successfully')
+"
 
 DEPLOYMENT_PACKAGE="$TEMP_DIR/../slack-agent-update.zip"
+PACKAGE_SIZE=$(ls -la $DEPLOYMENT_PACKAGE | awk '{print $5}')
 echo "✅ Created deployment package: $DEPLOYMENT_PACKAGE"
+echo "📏 Package size: $(numfmt --to=iec $PACKAGE_SIZE)"
+
+# Verify package size is reasonable (should be > 1MB with dependencies)
+if [ $PACKAGE_SIZE -lt 1000000 ]; then
+    echo "⚠️  Warning: Package size is unusually small ($PACKAGE_SIZE bytes)"
+    echo "   This might indicate missing dependencies"
+    echo "   Expected size: >10MB with all dependencies"
+fi
 
 # Check if Lambda function exists
 echo "🔍 Checking if Lambda function exists..."
@@ -67,10 +145,35 @@ if aws lambda get-function --function-name $FUNCTION_NAME --region $AWS_REGION >
     echo "⏳ Waiting for code update to complete..."
     aws lambda wait function-updated --function-name $FUNCTION_NAME --region $AWS_REGION
 
-    # Update environment variables using individual variables (AWS_REGION is reserved)
+    # Create environment variables JSON file
+    cat > $TEMP_DIR/env-vars.json << EOF
+{
+    "Variables": {
+        "SLACK_BOT_TOKEN": "$SLACK_BOT_TOKEN",
+        "SLACK_SIGNING_SECRET": "$SLACK_SIGNING_SECRET",
+        "OSCAR_BEDROCK_AGENT_ID": "$OSCAR_BEDROCK_AGENT_ID",
+        "OSCAR_BEDROCK_AGENT_ALIAS_ID": "${OSCAR_BEDROCK_AGENT_ALIAS_ID:-TSTALIASID}",
+        "SESSIONS_TABLE_NAME": "${SESSIONS_TABLE_NAME:-oscar-agent-sessions}",
+        "CONTEXT_TABLE_NAME": "${CONTEXT_TABLE_NAME:-oscar-agent-context}",
+        "ENABLE_DM": "$ENABLE_DM",
+        "DEDUP_TTL": "${DEDUP_TTL:-300}",
+        "SESSION_TTL": "${SESSION_TTL:-3600}",
+        "CONTEXT_TTL": "${CONTEXT_TTL:-604800}",
+        "MAX_CONTEXT_LENGTH": "${MAX_CONTEXT_LENGTH:-3000}",
+        "CONTEXT_SUMMARY_LENGTH": "${CONTEXT_SUMMARY_LENGTH:-500}",
+        "AGENT_TIMEOUT": "${AGENT_TIMEOUT:-60}",
+        "AGENT_MAX_RETRIES": "${AGENT_MAX_RETRIES:-2}",
+        "CHANNEL_ALLOW_LIST": "$CHANNEL_ALLOW_LIST",
+        "AUTHORIZED_MESSAGE_SENDERS": "$AUTHORIZED_MESSAGE_SENDERS",
+        "METRICS_CROSS_ACCOUNT_ROLE_ARN": "$METRICS_CROSS_ACCOUNT_ROLE_ARN"
+    }
+}
+EOF
+
+    # Update environment variables using JSON file
     aws lambda update-function-configuration \
         --function-name $FUNCTION_NAME \
-        --environment Variables="{SLACK_BOT_TOKEN=$SLACK_BOT_TOKEN,SLACK_SIGNING_SECRET=$SLACK_SIGNING_SECRET,OSCAR_BEDROCK_AGENT_ID=$OSCAR_BEDROCK_AGENT_ID,OSCAR_BEDROCK_AGENT_ALIAS_ID=${OSCAR_BEDROCK_AGENT_ALIAS_ID:-TSTALIASID},SESSIONS_TABLE_NAME=${SESSIONS_TABLE_NAME:-oscar-sessions-v2},CONTEXT_TABLE_NAME=${CONTEXT_TABLE_NAME:-oscar-context},ENABLE_DM=$ENABLE_DM,DEDUP_TTL=${DEDUP_TTL:-300},SESSION_TTL=${SESSION_TTL:-3600},CONTEXT_TTL=${CONTEXT_TTL:-604800},MAX_CONTEXT_LENGTH=${MAX_CONTEXT_LENGTH:-3000},CONTEXT_SUMMARY_LENGTH=${CONTEXT_SUMMARY_LENGTH:-500},AGENT_TIMEOUT=${AGENT_TIMEOUT:-60},AGENT_MAX_RETRIES=${AGENT_MAX_RETRIES:-2}}" \
+        --environment file://$TEMP_DIR/env-vars.json \
         --region $AWS_REGION >/dev/null
 
     echo "✅ Updated Lambda function code and configuration: $FUNCTION_NAME"

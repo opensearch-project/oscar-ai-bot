@@ -85,6 +85,19 @@ class StorageInterface(ABC):
             True if the event was successfully marked as seen, False otherwise
         """
         pass
+    
+    @abstractmethod
+    def get_context_for_query(self, thread_key: str) -> str:
+        """
+        Get conversation context formatted for prepending to a query.
+        
+        Args:
+            thread_key: Unique identifier for the conversation thread
+            
+        Returns:
+            Formatted context string to prepend to query, empty string if no context
+        """
+        pass
 
 class DynamoDBStorage(StorageInterface):
     """DynamoDB implementation with automatic TTL and error handling.
@@ -122,26 +135,32 @@ class DynamoDBStorage(StorageInterface):
             True if storage was successful, False otherwise
         """
         try:
-            # Ensure context size is within limits
-            if len(str(context)) > config.max_context_length:
-                logger.warning(f"Context for {thread_key} exceeds max length, truncating history")
-                # Keep only the most recent history entries
-                while len(str(context)) > config.max_context_length and len(context.get("history", [])) > 1:
-                    context["history"].pop(0)
+            # Validate context structure
+            if not isinstance(context, dict):
+                logger.error(f"Invalid context type for {thread_key}: {type(context)}")
+                return False
+            
+            # Ensure required fields exist
+            if "history" not in context:
+                context["history"] = []
+            if "session_id" not in context:
+                context["session_id"] = None
             
             # Store with TTL
             expiration = int(time.time()) + self.context_ttl
-            self.context_table.put_item(
-                Item={
-                    'thread_key': thread_key,
-                    'context': context,
-                    'ttl': expiration
-                }
-            )
-            logger.info(f"Stored context for thread {thread_key}")
+            item = {
+                'thread_key': thread_key,
+                'context': context,
+                'ttl': expiration,
+                'updated_at': int(time.time())
+            }
+            
+            self.context_table.put_item(Item=item)
+            logger.info(f"Stored context for thread {thread_key} (history: {len(context.get('history', []))} entries, session: {context.get('session_id')})")
             return True
+            
         except Exception as e:
-            logger.error(f"Error storing context: {e}")
+            logger.error(f"Error storing context for {thread_key}: {e}", exc_info=True)
             return False
     
     def get_context(self, thread_key: str) -> Optional[Dict[str, Any]]:
@@ -158,13 +177,34 @@ class DynamoDBStorage(StorageInterface):
             response = self.context_table.get_item(
                 Key={'thread_key': thread_key}
             )
+            
             if 'Item' in response:
-                logger.info(f"Retrieved context for thread {thread_key}")
-                return response['Item'].get('context')
+                context = response['Item'].get('context')
+                if context:
+                    # Validate context structure
+                    if not isinstance(context, dict):
+                        logger.warning(f"Invalid context structure for {thread_key}, returning None")
+                        return None
+                    
+                    # Ensure required fields exist
+                    if "history" not in context:
+                        context["history"] = []
+                    if "session_id" not in context:
+                        context["session_id"] = None
+                    
+                    history_count = len(context.get("history", []))
+                    session_id = context.get("session_id")
+                    logger.info(f"Retrieved context for thread {thread_key} (history: {history_count} entries, session: {session_id})")
+                    return context
+                else:
+                    logger.warning(f"Context field missing for thread {thread_key}")
+                    return None
+            
             logger.info(f"No context found for thread {thread_key}")
             return None
+            
         except Exception as e:
-            logger.error(f"Error retrieving context: {e}")
+            logger.error(f"Error retrieving context for {thread_key}: {e}", exc_info=True)
             return None
     
     def has_seen_event(self, event_id: str) -> bool:
@@ -227,6 +267,40 @@ class DynamoDBStorage(StorageInterface):
         except Exception as e:
             logger.error(f"Error marking event: {e}")
             return False
+    
+    def get_context_for_query(self, thread_key: str) -> str:
+        """
+        Get conversation context formatted for prepending to a query.
+        
+        Args:
+            thread_key: Unique identifier for the conversation thread
+            
+        Returns:
+            Formatted context string to prepend to query, empty string if no context
+        """
+        try:
+            context = self.get_context(thread_key)
+            if not context or not context.get("history"):
+                return ""
+            
+            # Format all conversation history for context
+            context_lines = [""]
+            
+            for entry in context["history"]:
+                query = entry.get("query", "")
+                response = entry.get("response", "")
+                
+                context_lines.append(f"User: {query}")
+                context_lines.append(f"Assistant: {response}")
+                context_lines.append("")  # Empty line for readability
+                        
+            formatted_context = "\n".join(context_lines)
+            logger.info(f"Generated context for query (thread {thread_key}): {len(formatted_context)} characters")
+            return formatted_context
+            
+        except Exception as e:
+            logger.error(f"Error generating context for query (thread {thread_key}): {e}", exc_info=True)
+            return ""
 
 def get_storage(storage_type: str = 'dynamodb', region: Optional[str] = None) -> StorageInterface:
     """

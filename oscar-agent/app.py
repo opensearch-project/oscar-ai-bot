@@ -106,7 +106,7 @@ def lambda_handler(event: Dict[str, Any], context: Optional[object]) -> Dict[str
     
     # Extract event body for processing
     body = None
-    if event.get('body'):
+    if event.get('body') and event['body'].strip():  # Check if body exists and is not empty/whitespace
         try:
             body = json.loads(event['body']) if isinstance(event['body'], str) else event['body']
         except (json.JSONDecodeError, TypeError) as e:

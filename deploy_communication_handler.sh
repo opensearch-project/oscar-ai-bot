@@ -32,6 +32,12 @@ AWS_REGION=${AWS_REGION:-us-east-1}
 FUNCTION_NAME="oscar-communication-handler"
 LAMBDA_ROLE_NAME="oscar-communication-handler-role"
 
+# Verify region configuration
+echo "🌍 Using AWS Region: $AWS_REGION"
+if [ "$AWS_REGION" != "us-east-1" ]; then
+    echo "⚠️  Warning: Expected region us-east-1, but using $AWS_REGION"
+fi
+
 echo "📦 Creating deployment package..."
 
 # Create temporary directory for deployment
@@ -95,7 +101,7 @@ EOF
         --policy-arn arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole \
         --region $AWS_REGION
 
-    # Create and attach custom policy for Bedrock access
+    # Create and attach custom policy for Bedrock and DynamoDB access
     cat > $TEMP_DIR/lambda-policy.json << EOF
 {
   "Version": "2012-10-17",
@@ -109,6 +115,21 @@ EOF
         "bedrock:GetKnowledgeBase"
       ],
       "Resource": "*"
+    },
+    {
+      "Effect": "Allow",
+      "Action": [
+        "dynamodb:PutItem",
+        "dynamodb:GetItem",
+        "dynamodb:UpdateItem",
+        "dynamodb:DeleteItem",
+        "dynamodb:Query",
+        "dynamodb:Scan"
+      ],
+      "Resource": [
+        "arn:aws:dynamodb:*:*:table/oscar-agent-context",
+        "arn:aws:dynamodb:*:*:table/oscar-agent-sessions"
+      ]
     },
     {
       "Effect": "Allow",
@@ -156,11 +177,11 @@ if aws lambda get-function --function-name $FUNCTION_NAME --region $AWS_REGION >
     # Update function configuration
     aws lambda update-function-configuration \
         --function-name $FUNCTION_NAME \
-        --runtime python3.9 \
+        --runtime python3.12 \
         --handler lambda_function.lambda_handler \
         --timeout 30 \
         --memory-size 256 \
-        --environment Variables="{SLACK_BOT_TOKEN=$SLACK_BOT_TOKEN}" \
+        --environment Variables="{SLACK_BOT_TOKEN=$SLACK_BOT_TOKEN,CONTEXT_TABLE_NAME=oscar-agent-context}" \
         --region $AWS_REGION
 
     echo "✅ Updated Lambda function: $FUNCTION_NAME"
@@ -169,13 +190,13 @@ else
     
     aws lambda create-function \
         --function-name $FUNCTION_NAME \
-        --runtime python3.9 \
+        --runtime python3.12 \
         --role $ROLE_ARN \
         --handler lambda_function.lambda_handler \
         --zip-file fileb://$DEPLOYMENT_PACKAGE \
         --timeout 30 \
         --memory-size 256 \
-        --environment Variables="{SLACK_BOT_TOKEN=$SLACK_BOT_TOKEN}" \
+        --environment Variables="{SLACK_BOT_TOKEN=$SLACK_BOT_TOKEN,CONTEXT_TABLE_NAME=oscar-agent-context}" \
         --region $AWS_REGION
 
     echo "✅ Created Lambda function: $FUNCTION_NAME"

@@ -27,6 +27,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 import slack_bolt
 from slack_bolt import App
 from slack_sdk.errors import SlackApiError
+import os
 
 from config import config
 from oscar_agent import OSCARAgentInterface
@@ -186,36 +187,57 @@ class SlackHandler:
         Returns:
             The updated context
         """
-        # Get existing context or create a new one
-        context = self.storage.get_context(thread_key)
-        if not context:
-            context = {
-                "session_id": new_session_id,
-                "history": [],
-                "summary": ""
+        try:
+            # Get existing context or create a new one
+            context = self.storage.get_context(thread_key)
+            if not context:
+                logger.info(f"Creating new context for thread {thread_key}")
+                context = {
+                    "session_id": new_session_id or session_id,
+                    "history": []
+                }
+             
+            else:
+                logger.info(f"Updating existing context for thread {thread_key} (current history: {len(context.get('history', []))} entries)")
+            
+            # Update session ID - prefer new_session_id, but keep existing if new one is None
+            if new_session_id:
+                if new_session_id != context.get("session_id"):
+                    logger.info(f"Session ID changed from {context.get('session_id')} to {new_session_id}")
+                context["session_id"] = new_session_id
+            elif session_id and not context.get("session_id"):
+                # If we have a session_id but context doesn't, use it
+                context["session_id"] = session_id
+            
+            # Ensure history exists
+            if "history" not in context:
+                context["history"] = []
+            
+            # Append to history (no size limits - let the agent handle context)
+            new_entry = {
+                "query": query,
+                "response": response,
+                "timestamp": int(time.time())
             }
-        
-        # Update session ID if it changed
-        if new_session_id and new_session_id != session_id:
-            context["session_id"] = new_session_id
-        
-        # Append to history
-        context["history"].append({
-            "query": query,
-            "response": response,
-            "timestamp": int(time.time())
-        })
-        
-        # Generate summary (simple for now, just the last few exchanges)
-        history_text = ""
-        for entry in context["history"][-3:]:  # Last 3 exchanges
-            history_text += f"User: {entry['query']}\nAssistant: {entry['response']}\n\n"
-        context["summary"] = history_text[:config.context_summary_length]
-        
-        # Store updated context
-        self.storage.store_context(thread_key, context)
-        
-        return context
+            context["history"].append(new_entry)
+            logger.info(f"Added new entry to history. Total entries: {len(context['history'])}")
+            
+            # Store updated context
+            success = self.storage.store_context(thread_key, context)
+            if success:
+                logger.info(f"Successfully stored context for thread {thread_key}")
+            else:
+                logger.error(f"Failed to store context for thread {thread_key}")
+            
+            return context
+            
+        except Exception as e:
+            logger.error(f"Error updating context for thread {thread_key}: {e}", exc_info=True)
+            # Return a minimal context to prevent complete failure
+            return {
+                "session_id": new_session_id or session_id,
+                "history": [{"query": query, "response": response, "timestamp": int(time.time())}]
+            }
     
     def _store_bot_message_context(self, channel: str, thread_ts: str, bot_message: str, 
                                   session_id: Optional[str] = None, user_query: str = None) -> None:
@@ -233,8 +255,7 @@ class SlackHandler:
         # Create context for bot-initiated message
         context = {
             "session_id": session_id,
-            "history": [],
-            "summary": ""
+            "history": []
         }
         
         # If there was a user query (slash command), add it to history
@@ -244,7 +265,6 @@ class SlackHandler:
                 "response": bot_message,
                 "timestamp": int(time.time())
             })
-            context["summary"] = f"User: {user_query}\nAssistant: {bot_message}\n\n"
         else:
             # For pure bot-initiated messages, create a synthetic entry
             context["history"].append({
@@ -252,7 +272,6 @@ class SlackHandler:
                 "response": bot_message,
                 "timestamp": int(time.time())
             })
-            context["summary"] = f"Assistant: {bot_message}\n\n"
         
         # Store the context
         self.storage.store_context(thread_key, context)
@@ -307,28 +326,6 @@ class SlackHandler:
                         logger.warning(f"Error adding reaction {add_reaction}: {e}")
         except Exception as e:
             logger.warning(f"Error managing reactions: {e}")
-    
-    def _attempt_bedrock_cancellation(self, session_id: str) -> None:
-        """
-        Attempt to cancel a Bedrock agent session.
-        Note: This may not immediately stop the agent but can help with resource cleanup.
-        """
-        if not session_id:
-            return
-            
-        try:
-            # There's no direct "cancel" API for Bedrock agents, but we can try:
-            # 1. End the session (if the agent supports it)
-            # 2. Log the cancellation attempt for monitoring
-            logger.warning(f"Attempting to cancel Bedrock session: {session_id}")
-            
-            # Note: Bedrock agents don't have a direct cancellation API
-            # The session will eventually timeout on AWS side
-            # This is mainly for logging and future enhancement
-            
-        except Exception as e:
-            logger.error(f"Failed to cancel Bedrock session {session_id}: {e}")
-    
 
     def _query_agent_with_timeout(self, query: str, session_id: str, context_summary: str, 
                                  channel: str, reaction_ts: str, start_time: float,
@@ -362,15 +359,11 @@ class SlackHandler:
                 # Check if cancelled before starting
                 with self.monitor_lock:
                     if self.active_queries.get(query_id, {}).get('cancelled'):
-                        result_queue.put(("cancelled", "Query was cancelled", None))
+                        result_queue.put(("cancelled", "Query was cancelled", None)) #bedrock will still run until stuff like lambda times out?
+                        self.active_queries.pop(query_id) # CHECK IF THIS IS CORRECT, I MUST KNOW IF IT's CORRECT
                         return
                 
-                # Test delay for timeout verification (remove in production)
-                import os
-                if os.getenv('OSCAR_TEST_TIMEOUT') == 'true':
-                    logger.warning(f"TEST MODE: Adding 60s delay to test timeout for query {query_id}")
-                    time.sleep(60)  # This will trigger timeout
-                
+                # Note: context_summary is now None since context is included in the query itself --> This is dumb, add in context summary as a separate field again.
                 response, new_session_id = self.oscar_agent.query(
                     query, session_id=session_id, context_summary=context_summary
                 )
@@ -382,11 +375,11 @@ class SlackHandler:
         thread = threading.Thread(target=agent_worker, daemon=True)
         thread.start()
         
-        # Monitor every 10 seconds for better timing accuracy
+        # Monitor every 15 seconds for better timing accuracy
         while thread.is_alive():
             try:
-                # Wait 10 seconds for result
-                status, response, new_session_id = result_queue.get(timeout=10)
+                # Wait 15 seconds for result
+                status, response, new_session_id = result_queue.get(timeout=15)
                 
                 # Clean up on success
                 with self.monitor_lock:
@@ -415,20 +408,18 @@ class SlackHandler:
                     except Exception as e:
                         logger.error(f"FAILED TO ADD HOURGLASS: {e}")
                 
-                # Timeout at 50s
+                # Timeout at timeout_threshold seconds
                 if elapsed >= timeout_threshold:
                     logger.error(f"TIMEOUT TRIGGERED: Query {query_id} timed out after {elapsed:.2f}s")
                     
                     # Force thread termination attempt (though this won't stop Bedrock)
                     logger.warning(f"Thread still alive: {thread.is_alive()}, attempting cleanup")
                     
-                    # Mark as cancelled and attempt to stop Bedrock session
+                    # Mark as cancelled
                     with self.monitor_lock:
                         query_info = self.active_queries.get(query_id)
                         if query_info:
                             query_info['cancelled'] = True
-                            # Attempt to cancel Bedrock session if possible
-                            self._attempt_bedrock_cancellation(query_info.get('session_id'))
                         self.active_queries.pop(query_id, None)
                     
                     try:
@@ -450,7 +441,8 @@ class SlackHandler:
                 
                 # Clean up
                 with self.monitor_lock:
-                    self.active_queries.pop(query_id, None)
+                    if self.active_queries.get(query_id):
+                        self.active_queries.pop(query_id, None) #CHECK IF THIS IS FINE TOO: WE ONLY DELETE IF IT EXISTS? IS THIS THE RIGHT LOGIC/SYNTAX FOR THAT???
                 
                 if status == "success":
                     return response, new_session_id
@@ -502,7 +494,7 @@ class SlackHandler:
         
         try:
             # Extract or generate query based on source
-            if slash_command:
+            if slash_command or channel == 'im':
                 # For slash commands, text is already the formatted query
                 query = text
                 logger.info(f"Using pre-formatted slash command query: {query}")
@@ -522,14 +514,16 @@ class SlackHandler:
                 logger.info(f"Processing automated message sending request from authorized user {user_id}")
                 # Continue with normal agent processing - agent will handle message sending via action group
             
-            # Get context from storage
-            context = self.storage.get_context(thread_key)
-            context_summary = context.get("summary") if context else None
-            session_id = context.get("session_id") if context else None
+            # Get context from storage and format for query
+            stored_context = self.storage.get_context(thread_key)
+            session_id = stored_context.get("session_id") if stored_context else None
             
-            # Query OSCAR agent with timeout monitoring
+            # Get formatted context for the query
+            formatted_context = self.storage.get_context_for_query(thread_key)
+            
+            # Query OSCAR agent with timeout monitoring (using formatted context)
             response, new_session_id = self._query_agent_with_timeout(
-                query, session_id, context_summary, channel, reaction_ts, 
+                query, session_id, formatted_context, channel, reaction_ts, 
                 start_time, hourglass_threshold, timeout_threshold, say, thread_ts, user_id
             )
             
@@ -584,7 +578,7 @@ class SlackHandler:
             # Send user-friendly error message based on error type
             try:
                 error_str = str(e).lower()
-                if 'throttl' in error_str or 'rate' in error_str:
+                if 'throttl' in error_str or 'rate' in error_str or 'throttle' in error_str:
                     error_message = "I'm currently experiencing high load. Please wait a moment and try again."
                 elif 'timeout' in error_str:
                     error_message = "Your request is taking longer than expected. Please try a simpler question."
@@ -634,7 +628,8 @@ class SlackHandler:
             True if user is authorized
         """
         return user_id in AUTHORIZED_MESSAGE_SENDERS
-    
+
+    # THERE IS NO ACTION GROUP FUNCTION IN THE MAIN/OSCAR_SUPERVISOR REGARDING SENDING SLACK MSG, THAT'S JUST IN COMMUNICATION HANDLER, SO DELETE THIS
     def send_slack_message(self, channel: str, message: str) -> Dict[str, Any]:
         """Send a message to a Slack channel.
         
@@ -766,11 +761,12 @@ class SlackHandler:
             response = say(text=text, **kwargs)
             if response and 'ts' in response:
                 actual_thread_ts = response['ts']
-                original_query = f"/{slash_command_type.replace('_', '-')} {channel_param} {version_param} {params[2] if len(params) == 3 else ''}".strip()
-                # Get session_id from existing context if available
-                existing_context = self.storage.get_context(f"{channel_id}_{actual_thread_ts}")
-                session_id = existing_context.get("session_id") if existing_context else None
-                self._store_bot_message_context(channel_id, actual_thread_ts, text, session_id, original_query)
+                original_query = f"/{slash_command_type.replace('_', '-')} {channel_param} {version_param} {params[2] if len(params) == 3 else ''}".strip() #hoping this works correctly? check?
+                #EXISTING CONTEXT SHOULDN'T EXIST, RIGHT? THE WHOLE IDEA IS THAT YOU CAN'T USE SLASH COMMANDS IN THREADS
+                # # Get session_id from existing context if available
+                # existing_context = self.storage.get_context(f"{channel_id}_{actual_thread_ts}")
+                # session_id = existing_context.get("session_id") if existing_context else None
+                self._store_bot_message_context(channel_id, actual_thread_ts, text, None, original_query)
             return response
         
         # Process directly with context storage skipped (handled by say_with_context_storage)
@@ -812,10 +808,11 @@ class SlackHandler:
             if response and 'ts' in response:
                 actual_thread_ts = response['ts']
                 original_query = f"/oscar-broadcast {channel_param} {user_query}"
-                # Get session_id from existing context if available
-                existing_context = self.storage.get_context(f"{channel_id}_{actual_thread_ts}")
-                session_id = existing_context.get("session_id") if existing_context else None
-                self._store_bot_message_context(channel_id, actual_thread_ts, text, session_id, original_query)
+                #SAME THING AS IN THE ABOVE FUNCTION
+                # # Get session_id from existing context if available
+                # existing_context = self.storage.get_context(f"{channel_id}_{actual_thread_ts}")
+                # session_id = existing_context.get("session_id") if existing_context else None
+                self._store_bot_message_context(channel_id, actual_thread_ts, text, None, original_query)
             return response
         
         # Process directly with context storage skipped (handled by say_with_context_storage)

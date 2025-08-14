@@ -67,11 +67,21 @@ def lambda_handler(event, context):
         function_name = event.get('function', '')
         parameters = event.get('parameters', [])
         
-        # Convert parameters to dict
+        # Convert parameters to dict with proper array handling
         params = {}
         for param in parameters:
             if isinstance(param, dict) and 'name' in param and 'value' in param:
-                params[param['name']] = param['value']
+                value = param['value']
+                # Handle array parameters that might be passed as JSON strings
+                if isinstance(value, str) and value.startswith('[') and value.endswith(']'):
+                    try:
+                        value = json.loads(value)
+                    except json.JSONDecodeError:
+                        pass  # Keep as string if not valid JSON
+                elif isinstance(value, str) and ',' in value and param['name'] in ['rc_numbers', 'build_numbers', 'components']:
+                    # Handle comma-separated values for array parameters
+                    value = [item.strip() for item in value.split(',')]
+                params[param['name']] = value
         
         agent_type = os.getenv('AGENT_TYPE', 'integration-test') # --> How does this work?
         
@@ -127,6 +137,9 @@ def handle_integration_test_queries(intent, params):
         version = intent.get('version')
         if not version:
             return {'error': 'Version is required for integration test queries'}
+        
+        # Validate and normalize parameters
+        intent = validate_and_normalize_intent(intent)
         
         # Execute multi-strategy query
         results = execute_integration_test_strategy(intent)
@@ -196,11 +209,14 @@ def parse_query_intent(query_text, params=None):
         'version': params.get('version'),
         'rc_numbers': params.get('rc_numbers', []),
         'build_numbers': params.get('build_numbers', []),
+        'integ_test_build_numbers': params.get('integ_test_build_numbers', []),
         'components': params.get('components', []),
         'status_filter': params.get('status_filter'),
         'distribution': params.get('distribution', 'tar'),
         'architecture': params.get('architecture', 'x64'),
         'platform': params.get('platform', 'linux'),
+        'with_security': params.get('with_security'),
+        'without_security': params.get('without_security'),
         'time_range': params.get('time_range', '7d'),
         'query_type': 'general'
     }
@@ -221,9 +237,9 @@ def parse_query_intent(query_text, params=None):
         rc_matches = re.findall(r'RC\s+(?:number\s+)?(\d+)', query_text, re.IGNORECASE)
         intent['rc_numbers'] = [int(rc) for rc in rc_matches]
     
-    # Extract build numbers - handle both singular and plural
+    # Extract build numbers - handle both distribution and integration test build numbers
     if not intent['build_numbers']:
-        build_matches = re.findall(r'build\s+numbers?\s+(\d+(?:,\s*\d+)*)', query_text, re.IGNORECASE)
+        build_matches = re.findall(r'(?:distribution\s+)?build\s+numbers?\s+(\d+(?:,\s*\d+)*)', query_text, re.IGNORECASE)
         if build_matches:
             # Handle comma-separated build numbers
             build_nums = []
@@ -233,15 +249,30 @@ def parse_query_intent(query_text, params=None):
             intent['build_numbers'] = build_nums
         else:
             # Fallback to individual build number pattern
-            single_matches = re.findall(r'build\s+(?:number\s+)?(\d+)', query_text, re.IGNORECASE)
+            single_matches = re.findall(r'(?:distribution\s+)?build\s+(?:number\s+)?(\d+)', query_text, re.IGNORECASE)
             intent['build_numbers'] = [int(build) for build in single_matches]
     
-    # Extract components
+    # Extract integration test build numbers
+    if not intent['integ_test_build_numbers']:
+        integ_matches = re.findall(r'(?:integ|integration)\s+test\s+build\s+numbers?\s+(\d+(?:,\s*\d+)*)', query_text, re.IGNORECASE)
+        if integ_matches:
+            integ_nums = []
+            for match in integ_matches:
+                nums = [int(n.strip()) for n in match.split(',')]
+                integ_nums.extend(nums)
+            intent['integ_test_build_numbers'] = integ_nums
+    
+    # Extract components with improved Dashboards plugin detection
     if not intent['components']:
         if 'opensearch-dashboards' in query_lower or 'dashboards' in query_lower:
             intent['components'].append('OpenSearch-Dashboards')
         if 'opensearch' in query_lower and 'dashboards' not in query_lower:
             intent['components'].append('OpenSearch')
+        
+        # Generic detection for dashboards-related components
+        if 'dashboards' in query_lower and 'opensearch-dashboards' not in query_lower:
+            # This will be handled by the improved component filtering in the query
+            pass
     
     # Determine query type
     if 'failed' in query_lower or 'failure' in query_lower:
@@ -257,7 +288,7 @@ def parse_query_intent(query_text, params=None):
     elif 'release' in query_lower:
         intent['query_type'] = 'release_analysis'
     
-    # Extract platform/architecture
+    # Extract platform/architecture/distribution
     if 'arm64' in query_lower:
         intent['architecture'] = 'arm64'
     if 'windows' in query_lower:
@@ -266,6 +297,54 @@ def parse_query_intent(query_text, params=None):
         intent['distribution'] = 'rpm'
     elif 'deb' in query_lower:
         intent['distribution'] = 'deb'
+    
+    # Extract security test filters
+    if 'with security' in query_lower:
+        if 'failed' in query_lower or 'fail' in query_lower:
+            intent['with_security'] = 'fail'
+        elif 'passed' in query_lower or 'pass' in query_lower:
+            intent['with_security'] = 'pass'
+    
+    if 'without security' in query_lower:
+        if 'failed' in query_lower or 'fail' in query_lower:
+            intent['without_security'] = 'fail'
+        elif 'passed' in query_lower or 'pass' in query_lower:
+            intent['without_security'] = 'pass'
+    
+    return intent
+
+def validate_and_normalize_intent(intent):
+    """Validate and normalize intent parameters."""
+    # Ensure arrays are properly formatted
+    for array_field in ['rc_numbers', 'build_numbers', 'integ_test_build_numbers', 'components']:
+        value = intent.get(array_field, [])
+        if isinstance(value, str):
+            # Handle comma-separated values or single values
+            if ',' in value:
+                intent[array_field] = [item.strip() for item in value.split(',') if item.strip()]
+            elif value.strip():
+                intent[array_field] = [value.strip()]
+            else:
+                intent[array_field] = []
+        elif not isinstance(value, list):
+            # Convert other types to list
+            intent[array_field] = [value] if value is not None else []
+    
+    # Convert RC and build numbers to appropriate types
+    if intent.get('rc_numbers'):
+        intent['rc_numbers'] = [int(rc) if str(rc).isdigit() else rc for rc in intent['rc_numbers']]
+    
+    if intent.get('build_numbers'):
+        intent['build_numbers'] = [str(bn) for bn in intent['build_numbers']]  # Keep as strings for OpenSearch
+    
+    if intent.get('integ_test_build_numbers'):
+        intent['integ_test_build_numbers'] = [str(bn) for bn in intent['integ_test_build_numbers']]
+    
+    # Validate security test parameters
+    for security_field in ['with_security', 'without_security']:
+        value = intent.get(security_field)
+        if value and value not in ['pass', 'fail']:
+            intent[security_field] = None  # Invalid value, clear it
     
     return intent
 
@@ -279,29 +358,28 @@ def execute_integration_test_strategy(intent):
     
     results = []
     
-    # Strategy 1: RC-based queries
+    # Strategy 1: RC-based queries (improved to handle multiple builds per RC)
     if rc_numbers:
         for rc_num in rc_numbers:
             if components:
-                for component in components:
-                    build_num = get_rc_distribution_build_number(version, rc_num, component)
-                    if build_num:
-                        result = query_integration_test_results(
-                            version=version,
-                            rc_number=rc_num,
-                            build_numbers=[build_num],
-                            components=[component],
-                            status_filter=status_filter,
-                            distribution=intent.get('distribution'),
-                            architecture=intent.get('architecture')
-                        )
-                        results.append({
-                            'strategy': 'rc_component_based',
-                            'rc_number': rc_num,
-                            'component': component,
-                            'build_number': build_num,
-                            'test_results': extract_test_results(result)
-                        })
+                # For specific components, query directly without build number restriction
+                result = query_integration_test_results(
+                    version=version,
+                    rc_number=rc_num,
+                    components=components,
+                    status_filter=status_filter,
+                    distribution=intent.get('distribution'),
+                    architecture=intent.get('architecture'),
+                    platform=intent.get('platform'),
+                    with_security=intent.get('with_security'),
+                    without_security=intent.get('without_security')
+                )
+                results.append({
+                    'strategy': 'rc_component_based',
+                    'rc_number': rc_num,
+                    'components': components,
+                    'test_results': extract_test_results(result)
+                })
             else:
                 # Query all components for this RC
                 result = query_integration_test_results(
@@ -309,7 +387,10 @@ def execute_integration_test_strategy(intent):
                     rc_number=rc_num,
                     status_filter=status_filter,
                     distribution=intent.get('distribution'),
-                    architecture=intent.get('architecture')
+                    architecture=intent.get('architecture'),
+                    platform=intent.get('platform'),
+                    with_security=intent.get('with_security'),
+                    without_security=intent.get('without_security')
                 )
                 results.append({
                     'strategy': 'rc_based',
@@ -317,14 +398,22 @@ def execute_integration_test_strategy(intent):
                     'test_results': extract_test_results(result)
                 })
     
-    # Strategy 2: Direct build number queries
+    # Strategy 2: Direct build number queries (improved component resolution)
     elif build_numbers:
+        # Convert build numbers to strings for consistency
+        build_numbers = [str(bn) for bn in build_numbers]
+        
         if not components:
-            component_map = resolve_components_from_build_numbers(version, build_numbers)
-            all_components = []
-            for comps in component_map.values():
-                all_components.extend(comps)
-            components = list(set(all_components))
+            # Try to resolve components, but don't fail if we can't
+            try:
+                component_map = resolve_components_from_build_numbers(version, build_numbers)
+                all_components = []
+                for comps in component_map.values():
+                    all_components.extend(comps)
+                components = list(set(all_components)) if all_components else None
+            except Exception as e:
+                logger.warning(f"Could not resolve components from build numbers: {e}")
+                components = None
         
         result = query_integration_test_results(
             version=version,
@@ -332,7 +421,11 @@ def execute_integration_test_strategy(intent):
             components=components,
             status_filter=status_filter,
             distribution=intent.get('distribution'),
-            architecture=intent.get('architecture')
+            architecture=intent.get('architecture'),
+            platform=intent.get('platform'),
+            with_security=intent.get('with_security'),
+            without_security=intent.get('without_security'),
+            integ_test_build_numbers=intent.get('integ_test_build_numbers')
         )
         results.append({
             'strategy': 'build_number_based',
@@ -348,7 +441,10 @@ def execute_integration_test_strategy(intent):
             components=components,
             status_filter=status_filter,
             distribution=intent.get('distribution'),
-            architecture=intent.get('architecture')
+            architecture=intent.get('architecture'),
+            platform=intent.get('platform'),
+            with_security=intent.get('with_security'),
+            without_security=intent.get('without_security')
         )
         results.append({
             'strategy': 'component_based',
@@ -362,7 +458,10 @@ def execute_integration_test_strategy(intent):
             version=version,
             status_filter=status_filter,
             distribution=intent.get('distribution'),
-            architecture=intent.get('architecture')
+            architecture=intent.get('architecture'),
+            platform=intent.get('platform'),
+            with_security=intent.get('with_security'),
+            without_security=intent.get('without_security')
         )
         results.append({
             'strategy': 'general',
@@ -413,16 +512,19 @@ def execute_release_strategy(intent):
         'release_results': extract_release_results(result)
     }]
 
-def query_integration_test_results(version, rc_number=None, build_numbers=None, components=None, status_filter=None, distribution="tar", architecture="x64"):
+def query_integration_test_results(version, rc_number=None, build_numbers=None, components=None, status_filter=None, distribution="tar", architecture="x64", platform="linux", with_security=None, without_security=None, integ_test_build_numbers=None):
     """Comprehensive integration test results query."""
     query_body = {
         "size": 100,
         "sort": [{"build_start_time": {"order": "desc"}}],
         "_source": [
-            "component", "component_build_result", "distribution_build_number",
-            "rc_number", "version", "platform", "architecture", "distribution",
-            "test_report_manifest_yml", "integ_test_build_url", "build_start_time",
-            "component_category", "qualifier"
+            "component", "component_repo", "component_repo_url", "component_build_result", 
+            "distribution_build_number", "distribution_build_url", "integ_test_build_number", 
+            "integ_test_build_url", "rc_number", "rc", "version", "qualifier",
+            "platform", "architecture", "distribution", "component_category",
+            "test_report_manifest_yml", "build_start_time",
+            "with_security", "with_security_build_yml", "with_security_test_stdout", "with_security_test_stderr",
+            "without_security", "without_security_build_yml", "without_security_test_stdout", "without_security_test_stderr"
         ],
         "query": {
             "bool": {
@@ -451,23 +553,37 @@ def query_integration_test_results(version, rc_number=None, build_numbers=None, 
             {"terms": {"distribution_build_number": [str(bn) for bn in build_numbers]}}
         )
     
-    # Add component filter with OpenSearch-Dashboards special handling
+    # Add component filter with improved Dashboards handling
     if components:
-        if "OpenSearch-Dashboards" in components:
-            query_body["query"]["bool"]["must"].append({
-                "bool": {
-                    "should": [
-                        {"regexp": {"component": "OpenSearch-Dashboards-ci-group-.*"}},
-                        {"terms": {"component": components}}
-                    ]
-                }
-            })
-        else:
-            query_body["query"]["bool"]["must"].append(
-                {"terms": {"component": components}}
-            )
+        should_clauses = []
+        regular_components = []
+        
+        for component in components:
+            if component == "OpenSearch-Dashboards":
+                # Match ci-group patterns and any dashboards-related components
+                should_clauses.extend([
+                    {"regexp": {"component": "OpenSearch-Dashboards-ci-group-.*"}},
+                    {"regexp": {"component": ".*[Dd]ashboards.*"}}
+                ])
+            elif "dashboards" in component.lower():
+                # Handle any dashboards-related components generically
+                should_clauses.append({"match_phrase": {"component": component}})
+            else:
+                regular_components.append(component)
+        
+        # Add regular components
+        if regular_components:
+            should_clauses.append({"terms": {"component": regular_components}})
+        
+        if should_clauses:
+            if len(should_clauses) == 1:
+                query_body["query"]["bool"]["must"].append(should_clauses[0])
+            else:
+                query_body["query"]["bool"]["must"].append({
+                    "bool": {"should": should_clauses}
+                })
     
-    # Add platform/architecture filters
+    # Add platform/architecture/distribution filters
     if distribution:
         query_body["query"]["bool"]["must"].append(
             {"match_phrase": {"distribution": distribution}}
@@ -475,6 +591,26 @@ def query_integration_test_results(version, rc_number=None, build_numbers=None, 
     if architecture:
         query_body["query"]["bool"]["must"].append(
             {"match_phrase": {"architecture": architecture}}
+        )
+    if platform:
+        query_body["query"]["bool"]["must"].append(
+            {"match_phrase": {"platform": platform}}
+        )
+    
+    # Add security test filters
+    if with_security is not None:
+        query_body["query"]["bool"]["must"].append(
+            {"match_phrase": {"with_security": with_security}}
+        )
+    if without_security is not None:
+        query_body["query"]["bool"]["must"].append(
+            {"match_phrase": {"without_security": without_security}}
+        )
+    
+    # Add integration test build number filter
+    if integ_test_build_numbers:
+        query_body["query"]["bool"]["must"].append(
+            {"terms": {"integ_test_build_number": [int(bn) for bn in integ_test_build_numbers]}}
         )
     
     # Remove collapse since component.keyword mapping doesn't exist
@@ -488,8 +624,9 @@ def query_distribution_build_results(version, build_numbers=None, components=Non
         "size": 100,
         "sort": [{"build_start_time": {"order": "desc"}}],
         "_source": [
-            "component", "component_build_result", "distribution_build_number",
-            "rc_number", "build_start_time", "component_category", "qualifier", "version"
+            "component", "component_repo", "component_repo_url", "component_ref",
+            "version", "qualifier", "distribution_build_number", "distribution_build_url",
+            "build_start_time", "rc", "rc_number", "component_category", "component_build_result"
         ],
         "query": {
             "bool": {
@@ -518,15 +655,20 @@ def query_distribution_build_results(version, build_numbers=None, components=Non
     return opensearch_request('POST', '/opensearch-distribution-build-results/_search', query_body)
 
 def query_release_readiness(version, components=None):
-    """Query release readiness metrics with improved error handling."""
+    """Query release readiness metrics with comprehensive field coverage."""
     query_body = {
         "size": 100,
         "sort": [{"current_date": {"order": "desc"}}],
         "_source": [
-            "component", "repository", "version", "current_date",
-            "release_state", "release_branch", "release_issue_exists",
-            "release_notes", "version_increment", "release_owners",
-            "issues_open", "issues_closed", "pulls_open", "pulls_closed"
+            # Core identification fields
+            "id", "component", "repository", "version", "release_version", "current_date",
+            # Release state and branch information
+            "release_state", "release_branch", "release_issue_exists", "release_issue",
+            "release_notes", "version_increment", "release_owner_exists", "release_owners",
+            # Issue and PR metrics
+            "issues_open", "issues_closed", "pulls_open", "pulls_closed",
+            # Autocut metrics
+            "autocut_issues_open"
         ],
         "query": {
             "bool": {
@@ -556,11 +698,15 @@ def query_release_readiness(version, components=None):
     return opensearch_request('POST', '/opensearch_release_metrics/_search', query_body)
 
 def deduplicate_by_highest_build_number(results):
-    """Keep only highest build number for each (component, version, rc_number) combination."""
+    """Keep only highest build number for each (component, version, rc_number) combination.
+    
+    Updated logic: Only deduplicate when we have exact duplicate components for the same RC.
+    Different components can legitimately have different build numbers for the same RC.
+    """
     if not results:
         return results
     
-    # Group by (component, version, rc_number)
+    # Group by (component, version, rc_number) - only deduplicate exact component matches
     groups = {}
     ungrouped = []
     
@@ -570,13 +716,17 @@ def deduplicate_by_highest_build_number(results):
         rc_number = result.get('rc_number')
         build_number = result.get('build_number')
         
-        # Only group if we have all required fields
+        # Only deduplicate if we have all required fields and it's the exact same component
         if component and version and rc_number is not None and build_number is not None:
             key = (component, str(version), str(rc_number))
             try:
                 build_num_int = int(build_number)
-                if key not in groups or build_num_int > int(groups[key]['build_number']):
+                if key not in groups:
                     groups[key] = result
+                elif build_num_int > int(groups[key]['build_number']):
+                    # Only replace if it's a higher build number for the SAME component
+                    groups[key] = result
+                # If same component/RC but lower build number, skip (keep existing)
             except (ValueError, TypeError):
                 # If build_number is not convertible to int, keep as ungrouped
                 ungrouped.append(result)
@@ -651,16 +801,25 @@ def resolve_components_from_build_numbers(version, build_numbers):
     
     return build_component_map
 
-def get_rc_distribution_build_number(version, rc_number, component_name="OpenSearch"):
-    """Get highest build number for RC."""
+def get_rc_distribution_build_number(version, rc_number, component_name=None):
+    """Get build numbers for RC. Returns all builds, not just highest.
+    
+    Args:
+        version: Version string
+        rc_number: RC number
+        component_name: Optional component filter
+        
+    Returns:
+        If component_name specified: list of build numbers for that component
+        If no component_name: dict of component -> list of build numbers
+    """
     query_body = {
         "_source": ["distribution_build_number", "component"],
         "sort": [{"distribution_build_number": {"order": "desc"}}],
-        "size": 100,
+        "size": 1000,  # Increased to get all builds
         "query": {
             "bool": {
-                "filter": [
-                    {"match_phrase": {"rc": "true"}},
+                "must": [
                     {"match_phrase": {"version": version}},
                     {"match_phrase": {"rc_number": str(rc_number)}}
                 ]
@@ -670,7 +829,7 @@ def get_rc_distribution_build_number(version, rc_number, component_name="OpenSea
     
     # Add component filter if specified
     if component_name:
-        query_body["query"]["bool"]["filter"].append(
+        query_body["query"]["bool"]["must"].append(
             {"match_phrase": {"component": component_name}}
         )
     
@@ -678,13 +837,18 @@ def get_rc_distribution_build_number(version, rc_number, component_name="OpenSea
     hits = result.get('hits', {}).get('hits', [])
     
     if not hits:
-        return None
+        return [] if component_name else {}
     
-    # If single component requested, return highest build number
+    # If single component requested, return all build numbers for that component
     if component_name:
-        return hits[0]['_source']['distribution_build_number']
+        build_numbers = []
+        for hit in hits:
+            build_num = hit['_source'].get('distribution_build_number')
+            if build_num and build_num not in build_numbers:
+                build_numbers.append(build_num)
+        return build_numbers
     
-    # If multiple components, return dict of component -> highest build number
+    # If multiple components, return dict of component -> all build numbers
     component_builds = {}
     for hit in hits:
         source = hit['_source']
@@ -692,36 +856,66 @@ def get_rc_distribution_build_number(version, rc_number, component_name="OpenSea
         build_num = source.get('distribution_build_number')
         
         if component and build_num:
-            try:
-                build_num_int = int(build_num)
-                if component not in component_builds or build_num_int > int(component_builds[component]):
-                    component_builds[component] = build_num
-            except (ValueError, TypeError):
-                continue
+            if component not in component_builds:
+                component_builds[component] = []
+            if build_num not in component_builds[component]:
+                component_builds[component].append(build_num)
     
     return component_builds
 
 def extract_test_results(opensearch_result):
-    """Extract comprehensive test result information."""
+    """Extract comprehensive test result information based on real data structure."""
     results = []
     hits = opensearch_result.get('hits', {}).get('hits', [])
     
     for hit in hits:
         source = hit['_source']
+        
+        # Determine overall test status based on with_security and without_security results
+        with_security = source.get('with_security', '')
+        without_security = source.get('without_security', '')
+        component_build_result = source.get('component_build_result', '')
+        
+        # Calculate overall status - if either security test fails, overall is failed
+        overall_status = 'passed'
+        if component_build_result == 'failed':
+            overall_status = 'failed'
+        elif with_security == 'fail' or without_security == 'fail':
+            overall_status = 'failed'
+        elif with_security == 'pass' and without_security == 'pass':
+            overall_status = 'passed'
+        elif component_build_result in ['passed', 'success']:
+            overall_status = 'passed'
+        
         results.append({
             'component': source.get('component'),
-            'status': source.get('component_build_result'),
+            'component_repo': source.get('component_repo'),
+            'component_repo_url': source.get('component_repo_url'),
+            'status': overall_status,
+            'component_build_result': component_build_result,
             'build_number': source.get('distribution_build_number'),
+            'distribution_build_url': source.get('distribution_build_url'),
+            'integ_test_build_number': source.get('integ_test_build_number'),
+            'integ_test_build_url': source.get('integ_test_build_url'),
             'rc_number': source.get('rc_number'),
+            'rc': source.get('rc'),
             'version': source.get('version'),
+            'qualifier': source.get('qualifier'),
             'platform': source.get('platform'),
             'architecture': source.get('architecture'),
             'distribution': source.get('distribution'),
-            'test_report': source.get('test_report_manifest_yml'),
-            'build_url': source.get('integ_test_build_url'),
-            'timestamp': source.get('build_start_time'),
             'category': source.get('component_category'),
-            'qualifier': source.get('qualifier')
+            'test_report': source.get('test_report_manifest_yml'),
+            'timestamp': source.get('build_start_time'),
+            # Security test details
+            'with_security': with_security,
+            'with_security_build_yml': source.get('with_security_build_yml'),
+            'with_security_test_stdout': source.get('with_security_test_stdout'),
+            'with_security_test_stderr': source.get('with_security_test_stderr'),
+            'without_security': without_security,
+            'without_security_build_yml': source.get('without_security_build_yml'),
+            'without_security_test_stdout': source.get('without_security_test_stdout'),
+            'without_security_test_stderr': source.get('without_security_test_stderr')
         })
     
     return deduplicate_by_highest_build_number(results)
@@ -735,49 +929,106 @@ def extract_build_results(opensearch_result):
         source = hit['_source']
         results.append({
             'component': source.get('component'),
+            'component_repo': source.get('component_repo'),
+            'component_repo_url': source.get('component_repo_url'),
+            'component_ref': source.get('component_ref'),
+            'version': source.get('version'),
+            'qualifier': source.get('qualifier'),
+            'distribution_build_number': source.get('distribution_build_number'),
+            'distribution_build_url': source.get('distribution_build_url'),
+            'build_start_time': source.get('build_start_time'),
+            'rc': source.get('rc'),
+            'rc_number': source.get('rc_number'),
+            'component_category': source.get('component_category'),
+            'component_build_result': source.get('component_build_result'),
+            # Legacy fields for backward compatibility
             'status': source.get('component_build_result'),
             'build_number': source.get('distribution_build_number'),
-            'rc_number': source.get('rc_number'),
-            'version': source.get('version'),
             'timestamp': source.get('build_start_time'),
-            'category': source.get('component_category'),
-            'qualifier': source.get('qualifier')
+            'category': source.get('component_category')
         })
     
     return deduplicate_by_highest_build_number(results)
 
 def extract_release_results(opensearch_result):
-    """Extract release readiness information."""
+    """Extract comprehensive release readiness information."""
     results = []
     hits = opensearch_result.get('hits', {}).get('hits', [])
     
     for hit in hits:
         source = hit['_source']
         
-        # Calculate readiness score
+        # Calculate enhanced readiness score based on all available metrics
         readiness_score = 0
-        if source.get('release_issue_exists'): readiness_score += 1
-        if source.get('release_notes'): readiness_score += 1
-        if source.get('version_increment'): readiness_score += 1
-        if source.get('release_state') == 'closed' or source.get('release_branch'): readiness_score += 1
+        readiness_checks = []
+        
+        # Core release readiness checks
+        if source.get('release_issue_exists'):
+            readiness_score += 1
+            readiness_checks.append('release_issue_exists')
+        if source.get('release_notes'):
+            readiness_score += 1
+            readiness_checks.append('release_notes')
+        if source.get('version_increment'):
+            readiness_score += 1
+            readiness_checks.append('version_increment')
+        if source.get('release_branch'):
+            readiness_score += 1
+            readiness_checks.append('release_branch')
+        if source.get('release_owner_exists'):
+            readiness_score += 1
+            readiness_checks.append('release_owner_exists')
+        
+        # Additional quality checks
+        issues_open = source.get('issues_open', 0)
+        pulls_open = source.get('pulls_open', 0)
+        autocut_issues_open = source.get('autocut_issues_open', 0)
+        
+        # Bonus points for clean state
+        if issues_open == 0:
+            readiness_score += 0.5
+        if pulls_open == 0:
+            readiness_score += 0.5
+        if autocut_issues_open == 0:
+            readiness_score += 0.5
         
         results.append({
+            # Core identification
+            'id': source.get('id'),
             'component': source.get('component'),
             'repository': source.get('repository'),
             'version': source.get('version'),
+            'release_version': source.get('release_version'),
+            'timestamp': source.get('current_date'),
+            
+            # Release state information
             'release_state': source.get('release_state'),
             'release_branch': source.get('release_branch'),
             'release_issue_exists': source.get('release_issue_exists'),
+            'release_issue': source.get('release_issue'),
             'release_notes': source.get('release_notes'),
             'version_increment': source.get('version_increment'),
+            'release_owner_exists': source.get('release_owner_exists'),
             'release_owners': source.get('release_owners', []),
-            'issues_open': source.get('issues_open'),
-            'issues_closed': source.get('issues_closed'),
-            'pulls_open': source.get('pulls_open'),
-            'pulls_closed': source.get('pulls_closed'),
-            'readiness_score': readiness_score,
-            'is_ready': readiness_score >= 3,
-            'timestamp': source.get('current_date')
+            
+            # Issue and PR metrics
+            'issues_open': issues_open,
+            'issues_closed': source.get('issues_closed', 0),
+            'pulls_open': pulls_open,
+            'pulls_closed': source.get('pulls_closed', 0),
+            'autocut_issues_open': autocut_issues_open,
+            
+            # Calculated readiness metrics
+            'readiness_score': round(readiness_score, 1),
+            'readiness_checks_passed': readiness_checks,
+            'is_ready': readiness_score >= 4,  # Adjusted threshold for enhanced scoring
+            'readiness_percentage': round((readiness_score / 6.5) * 100, 1),  # Out of max possible score
+            
+            # Quality indicators
+            'has_open_issues': issues_open > 0,
+            'has_open_pulls': pulls_open > 0,
+            'has_autocut_issues': autocut_issues_open > 0,
+            'clean_state': issues_open == 0 and pulls_open == 0 and autocut_issues_open == 0
         })
     
     # Apply deduplication to avoid duplicate component entries
@@ -831,7 +1082,7 @@ def generate_build_summary(results):
     }
 
 def generate_release_summary(results):
-    """Generate summary for release results."""
+    """Generate comprehensive summary for release results."""
     all_results = []
     for result_set in results:
         all_results.extend(result_set.get('release_results', []))
@@ -842,12 +1093,47 @@ def generate_release_summary(results):
     ready = len([r for r in all_results if r.get('is_ready')])
     total = len(all_results)
     
+    # Calculate additional metrics
+    components_with_issues = len([r for r in all_results if r.get('has_open_issues')])
+    components_with_pulls = len([r for r in all_results if r.get('has_open_pulls')])
+    components_with_autocut_issues = len([r for r in all_results if r.get('has_autocut_issues')])
+    components_in_clean_state = len([r for r in all_results if r.get('clean_state')])
+    
+    # Calculate average readiness score
+    avg_readiness_score = sum(r.get('readiness_score', 0) for r in all_results) / total if total > 0 else 0
+    avg_readiness_percentage = sum(r.get('readiness_percentage', 0) for r in all_results) / total if total > 0 else 0
+    
+    # Count by release state
+    release_states = {}
+    for result in all_results:
+        state = result.get('release_state', 'unknown')
+        release_states[state] = release_states.get(state, 0) + 1
+    
     return {
         'total': total,
         'ready': ready,
         'not_ready': total - ready,
         'readiness_rate': round((ready / total * 100), 1) if total > 0 else 0,
-        'unique_components': len(set(r.get('component') for r in all_results if r.get('component')))
+        'average_readiness_score': round(avg_readiness_score, 2),
+        'average_readiness_percentage': round(avg_readiness_percentage, 1),
+        'unique_components': len(set(r.get('component') for r in all_results if r.get('component'))),
+        
+        # Quality metrics
+        'components_with_open_issues': components_with_issues,
+        'components_with_open_pulls': components_with_pulls,
+        'components_with_autocut_issues': components_with_autocut_issues,
+        'components_in_clean_state': components_in_clean_state,
+        'clean_state_percentage': round((components_in_clean_state / total * 100), 1) if total > 0 else 0,
+        
+        # Release state breakdown
+        'release_states': release_states,
+        
+        # Total issue/PR counts
+        'total_open_issues': sum(r.get('issues_open', 0) for r in all_results),
+        'total_closed_issues': sum(r.get('issues_closed', 0) for r in all_results),
+        'total_open_pulls': sum(r.get('pulls_open', 0) for r in all_results),
+        'total_closed_pulls': sum(r.get('pulls_closed', 0) for r in all_results),
+        'total_autocut_issues': sum(r.get('autocut_issues_open', 0) for r in all_results)
     }
 
 def test_role_assumption():
@@ -936,15 +1222,19 @@ def handle_rc_build_mapping(params):
     try:
         version = params.get('version')
         rc_numbers = params.get('rc_numbers', [])
-        component = params.get('component', 'OpenSearch')
+        component = params.get('component')  # Optional now
         
         if not version or not rc_numbers:
             return {'error': 'Version and rc_numbers are required for RC build mapping'}
         
+        # Ensure rc_numbers is a list
+        if not isinstance(rc_numbers, list):
+            rc_numbers = [rc_numbers]
+        
         rc_build_map = {}
         for rc_num in rc_numbers:
-            build_num = get_rc_distribution_build_number(version, rc_num, component)
-            rc_build_map[str(rc_num)] = build_num
+            build_data = get_rc_distribution_build_number(version, rc_num, component)
+            rc_build_map[str(rc_num)] = build_data
         
         return {
             'function': 'get_rc_build_mapping',

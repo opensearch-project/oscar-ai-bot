@@ -9,13 +9,19 @@ set -e
 
 echo "🚀 Deploying new minimal metrics implementation"
 
-# Load environment
-if [ -f ".env" ]; then
-    while IFS= read -r line; do
-        [[ $line =~ ^[[:space:]]*# ]] && continue
-        [[ -z $line ]] && continue
-        export "$line"
-    done < .env
+# Load environment variables
+if [ -f .env ]; then
+    export $(cat .env | grep -v '^#' | xargs)
+    echo "✅ Loaded environment variables from .env"
+else
+    echo "❌ .env file not found. Please create it with required variables."
+    exit 1
+fi
+
+# Verify region configuration
+echo "🌍 Using AWS Region: $AWS_REGION"
+if [ "$AWS_REGION" != "us-east-1" ]; then
+    echo "⚠️  Warning: Expected region us-east-1, but using $AWS_REGION"
 fi
 
 # Use the correct VPC role ARN

@@ -54,8 +54,8 @@ class Config:
             raise ValueError("OSCAR_BEDROCK_AGENT_ALIAS_ID environment variable is required")
         
         # DynamoDB tables
-        self.sessions_table_name = os.environ.get('SESSIONS_TABLE_NAME', 'oscar-sessions-v2')
-        self.context_table_name = os.environ.get('CONTEXT_TABLE_NAME', 'oscar-context')
+        self.sessions_table_name = os.environ.get('SESSIONS_TABLE_NAME', 'oscar-agent-sessions')
+        self.context_table_name = os.environ.get('CONTEXT_TABLE_NAME', 'oscar-agent-context')
         
         # Slack credentials
         self.slack_bot_token = os.environ.get('SLACK_BOT_TOKEN')
@@ -74,8 +74,8 @@ class Config:
         self.context_ttl = int(os.environ.get('CONTEXT_TTL', 604800))  # 7 days
         
         # Context settings
-        self.max_context_length = int(os.environ.get('MAX_CONTEXT_LENGTH', 3000))
-        self.context_summary_length = int(os.environ.get('CONTEXT_SUMMARY_LENGTH', 500))
+        self.max_context_length = int(os.environ.get('MAX_CONTEXT_LENGTH', 8000))  # Increased from 3000
+        self.context_summary_length = int(os.environ.get('CONTEXT_SUMMARY_LENGTH', 1000))  # Increased from 500
         
         # Feature flags
         self.enable_dm = os.environ.get('ENABLE_DM', 'false').lower() == 'true'
