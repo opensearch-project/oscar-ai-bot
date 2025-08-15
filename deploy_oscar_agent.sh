@@ -2,13 +2,12 @@
 # Copyright OpenSearch Contributors
 # SPDX-License-Identifier: Apache-2.0
 
-# Update ONLY the code for Slack Agent Lambda function
-# Preserves all permissions and configurations
-# Updates slack_handler.py and communication_handler.py
+# Deploy OSCAR Main Agent Lambda Function
+# FULL DEPLOYMENT - Creates function, role, and permissions
 
 set -e
 
-echo "🔄 Updating Slack Agent Lambda Function (Code Only)..."
+echo "🚀 Deploying OSCAR Main Agent Lambda Function..."
 
 # Load environment variables
 if [ -f .env ]; then
@@ -19,8 +18,19 @@ else
     exit 1
 fi
 
-# Set function name
+# Validate required environment variables
+required_vars=("SLACK_BOT_TOKEN" "SLACK_SIGNING_SECRET" "OSCAR_BEDROCK_AGENT_ID" "AWS_REGION")
+for var in "${required_vars[@]}"; do
+    if [ -z "${!var}" ]; then
+        echo "❌ Required environment variable $var is not set"
+        exit 1
+    fi
+done
+
+# Set default values
+AWS_REGION=${AWS_REGION:-us-east-1}
 FUNCTION_NAME="oscar-supervisor-agent"
+LAMBDA_ROLE_NAME="oscar-supervisor-lambda-role"
 
 # Verify region configuration
 echo "🌍 Using AWS Region: $AWS_REGION"
@@ -34,7 +44,7 @@ echo "📦 Creating deployment package..."
 TEMP_DIR=$(mktemp -d)
 echo "Using temporary directory: $TEMP_DIR"
 
-# Copy the main agent files (including slack_handler.py and communication_handler.py)
+# Copy all OSCAR agent files
 cp oscar-agent/*.py $TEMP_DIR/
 cp oscar-agent/app.py $TEMP_DIR/lambda_function.py
 
@@ -158,7 +168,7 @@ import sys
 os.chdir('$TEMP_DIR')
 
 # Create zip file
-with zipfile.ZipFile('../slack-agent-update.zip', 'w', zipfile.ZIP_DEFLATED) as zipf:
+with zipfile.ZipFile('../oscar-agent-deploy.zip', 'w', zipfile.ZIP_DEFLATED) as zipf:
     for root, dirs, files in os.walk('.'):
         # Skip __pycache__ directories
         dirs[:] = [d for d in dirs if d != '__pycache__']
@@ -171,35 +181,115 @@ with zipfile.ZipFile('../slack-agent-update.zip', 'w', zipfile.ZIP_DEFLATED) as 
 print('✅ Deployment package created successfully')
 "
 
-DEPLOYMENT_PACKAGE="$TEMP_DIR/../slack-agent-update.zip"
+DEPLOYMENT_PACKAGE="$TEMP_DIR/../oscar-agent-deploy.zip"
 PACKAGE_SIZE=$(ls -la $DEPLOYMENT_PACKAGE | awk '{print $5}')
 echo "✅ Created deployment package: $DEPLOYMENT_PACKAGE"
 echo "📏 Package size: $(numfmt --to=iec $PACKAGE_SIZE)"
 
-# Verify package size is reasonable (should be > 1MB with dependencies)
-if [ $PACKAGE_SIZE -lt 1000000 ]; then
+# Verify package size is reasonable (should be > 10MB with dependencies)
+if [ $PACKAGE_SIZE -lt 10000000 ]; then
     echo "⚠️  Warning: Package size is unusually small ($PACKAGE_SIZE bytes)"
     echo "   This might indicate missing dependencies"
     echo "   Expected size: >10MB with all dependencies"
 fi
 
-# Check if Lambda function exists
-echo "🔍 Checking if Lambda function exists..."
-if aws lambda get-function --function-name $FUNCTION_NAME --region $AWS_REGION > /dev/null 2>&1; then
-    echo "🔄 Updating Lambda function code and environment variables..."
+# Check if IAM role exists, create if not
+echo "🔐 Checking IAM role..."
+if ! aws iam get-role --role-name $LAMBDA_ROLE_NAME --region $AWS_REGION > /dev/null 2>&1; then
+    echo "Creating IAM role: $LAMBDA_ROLE_NAME"
     
-    # Update function code
-    aws lambda update-function-code \
-        --function-name $FUNCTION_NAME \
-        --zip-file fileb://$DEPLOYMENT_PACKAGE \
-        --region $AWS_REGION >/dev/null
+    # Create trust policy
+    cat > $TEMP_DIR/trust-policy.json << EOF
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Principal": {
+        "Service": "lambda.amazonaws.com"
+      },
+      "Action": "sts:AssumeRole"
+    }
+  ]
+}
+EOF
 
-    # Wait for code update to complete
-    echo "⏳ Waiting for code update to complete..."
-    aws lambda wait function-updated --function-name $FUNCTION_NAME --region $AWS_REGION
+    # Create the role
+    aws iam create-role \
+        --role-name $LAMBDA_ROLE_NAME \
+        --assume-role-policy-document file://$TEMP_DIR/trust-policy.json \
+        --region $AWS_REGION
 
-    # Create environment variables JSON file
-    cat > $TEMP_DIR/env-vars.json << EOF
+    # Attach basic Lambda execution policy
+    aws iam attach-role-policy \
+        --role-name $LAMBDA_ROLE_NAME \
+        --policy-arn arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole \
+        --region $AWS_REGION
+
+    # Create and attach custom policy for Bedrock and DynamoDB access
+    cat > $TEMP_DIR/lambda-policy.json << EOF
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": [
+        "bedrock:InvokeAgent",
+        "bedrock:InvokeModel",
+        "bedrock:GetAgent",
+        "bedrock:GetKnowledgeBase"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Effect": "Allow",
+      "Action": [
+        "dynamodb:PutItem",
+        "dynamodb:GetItem",
+        "dynamodb:UpdateItem",
+        "dynamodb:DeleteItem",
+        "dynamodb:Query",
+        "dynamodb:Scan"
+      ],
+      "Resource": [
+        "arn:aws:dynamodb:*:*:table/oscar-agent-context",
+        "arn:aws:dynamodb:*:*:table/oscar-agent-sessions"
+      ]
+    },
+    {
+      "Effect": "Allow",
+      "Action": [
+        "logs:CreateLogGroup",
+        "logs:CreateLogStream",
+        "logs:PutLogEvents"
+      ],
+      "Resource": "arn:aws:logs:*:*:*"
+    }
+  ]
+}
+EOF
+
+    aws iam put-role-policy \
+        --role-name $LAMBDA_ROLE_NAME \
+        --policy-name "OSCARAgentPolicy" \
+        --policy-document file://$TEMP_DIR/lambda-policy.json \
+        --region $AWS_REGION
+
+    echo "✅ Created IAM role: $LAMBDA_ROLE_NAME"
+    
+    # Wait for role to be available
+    echo "⏳ Waiting for IAM role to be available..."
+    sleep 10
+else
+    echo "✅ IAM role already exists: $LAMBDA_ROLE_NAME"
+fi
+
+# Get role ARN
+ROLE_ARN=$(aws iam get-role --role-name $LAMBDA_ROLE_NAME --region $AWS_REGION --query 'Role.Arn' --output text)
+echo "📋 Using IAM role: $ROLE_ARN"
+
+# Create environment variables JSON file
+cat > $TEMP_DIR/env-vars.json << EOF
 {
     "Variables": {
         "SLACK_BOT_TOKEN": "$SLACK_BOT_TOKEN",
@@ -223,53 +313,93 @@ if aws lambda get-function --function-name $FUNCTION_NAME --region $AWS_REGION >
 }
 EOF
 
-    # Update environment variables using JSON file
+# Check if Lambda function exists
+echo "🔍 Checking if Lambda function exists..."
+if aws lambda get-function --function-name $FUNCTION_NAME --region $AWS_REGION > /dev/null 2>&1; then
+    echo "📝 Updating existing Lambda function..."
+    
+    # Update function code
+    aws lambda update-function-code \
+        --function-name $FUNCTION_NAME \
+        --zip-file fileb://$DEPLOYMENT_PACKAGE \
+        --region $AWS_REGION >/dev/null
+
+    # Wait for code update to complete
+    echo "⏳ Waiting for code update to complete..."
+    aws lambda wait function-updated --function-name $FUNCTION_NAME --region $AWS_REGION
+
+    # Update function configuration
     aws lambda update-function-configuration \
         --function-name $FUNCTION_NAME \
+        --runtime python3.12 \
+        --handler lambda_function.lambda_handler \
+        --timeout 150 \
+        --memory-size 512 \
         --environment file://$TEMP_DIR/env-vars.json \
         --region $AWS_REGION >/dev/null
 
-    echo "✅ Updated Lambda function code and configuration: $FUNCTION_NAME"
-    
-    # Wait for function to be ready
-    echo "⏳ Waiting for function to be ready..."
-    aws lambda wait function-updated --function-name $FUNCTION_NAME --region $AWS_REGION
-    aws lambda wait function-active --function-name $FUNCTION_NAME --region $AWS_REGION
-    
+    echo "✅ Updated Lambda function: $FUNCTION_NAME"
 else
-    echo "❌ Lambda function $FUNCTION_NAME does not exist!"
-    echo "   Please run ./deploy_slack_agent.sh first to create the function."
-    exit 1
+    echo "🆕 Creating new Lambda function..."
+    
+    aws lambda create-function \
+        --function-name $FUNCTION_NAME \
+        --runtime python3.12 \
+        --role $ROLE_ARN \
+        --handler lambda_function.lambda_handler \
+        --zip-file fileb://$DEPLOYMENT_PACKAGE \
+        --timeout 150 \
+        --memory-size 512 \
+        --environment file://$TEMP_DIR/env-vars.json \
+        --region $AWS_REGION >/dev/null
+
+    echo "✅ Created Lambda function: $FUNCTION_NAME"
 fi
 
-# Get function ARN for confirmation
+# Get function ARN
 FUNCTION_ARN=$(aws lambda get-function --function-name $FUNCTION_NAME --region $AWS_REGION --query 'Configuration.FunctionArn' --output text)
+echo "📋 Lambda function ARN: $FUNCTION_ARN"
+
+# Wait for function to be ready
+echo "⏳ Waiting for function to be ready..."
+aws lambda wait function-updated --function-name $FUNCTION_NAME --region $AWS_REGION
+aws lambda wait function-active --function-name $FUNCTION_NAME --region $AWS_REGION
+
+# Test the function
+echo "🧪 Testing Lambda function..."
+cat > $TEMP_DIR/test-event.json << 'EOF'
+{
+  "test": "connectivity"
+}
+EOF
+
+echo "📤 Invoking test..."
+aws lambda invoke \
+    --function-name $FUNCTION_NAME \
+    --payload file://$TEMP_DIR/test-event.json \
+    --region $AWS_REGION \
+    $TEMP_DIR/response.json
+
+echo "📥 Test response:"
+cat $TEMP_DIR/response.json | jq '.' 2>/dev/null || cat $TEMP_DIR/response.json
 
 # Cleanup
 echo "🧹 Cleaning up temporary files..."
 rm -rf $TEMP_DIR
 
 echo ""
-echo "🎉 Slack Agent Lambda Function Code Updated!"
+echo "🎉 OSCAR Main Agent Lambda Function Deployment Complete!"
 echo ""
 echo "📋 Summary:"
 echo "   Function Name: $FUNCTION_NAME"
 echo "   Function ARN:  $FUNCTION_ARN"
+echo "   IAM Role:      $ROLE_ARN"
 echo "   Region:        $AWS_REGION"
 echo ""
-echo "🔒 Preserved:"
-echo "   ✅ All IAM permissions"
-echo "   ✅ Environment variables"
-echo "   ✅ API Gateway permissions"
-echo "   ✅ Bedrock agent access"
-echo "   ✅ DynamoDB permissions"
-echo ""
-echo "📝 Updated Files:"
-echo "   ✅ slack_handler.py"
-echo "   ✅ communication_handler.py"
-echo "   ✅ oscar_agent.py"
-echo "   ✅ storage.py"
-echo "   ✅ config.py"
-echo "   ✅ app.py (lambda handler)"
+echo "📝 Next Steps:"
+echo "   1. Setup DynamoDB tables: python setup_dynamodb_tables.py"
+echo "   2. Configure API Gateway for Slack webhook"
+echo "   3. Update Slack app with webhook URL"
+echo "   4. Test with: @oscar hello"
 echo ""
 echo "🧪 Test with: @oscar hello"

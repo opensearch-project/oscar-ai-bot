@@ -33,11 +33,62 @@ echo "📦 Creating deployment package..."
 rm -rf new-package new-package.zip
 mkdir new-package
 
-# Install dependencies (only boto3 and requests now)
-pip install boto3 requests -t new-package/ --quiet
+# Create comprehensive requirements.txt for metrics
+cat > new-package/requirements.txt << EOF
+# Core AWS dependencies
+boto3>=1.34.0
+botocore>=1.34.0
+
+# HTTP and networking
+requests>=2.31.0
+urllib3>=2.0.0
+
+# Additional dependencies for metrics functionality
+certifi>=2023.7.22
+charset-normalizer>=3.0.0
+idna>=3.0.0
+python-dateutil>=2.8.0
+jmespath>=1.0.0
+s3transfer>=0.6.0
+six>=1.16.0
+EOF
+
+# Install dependencies with upgrade flag
+echo "📦 Installing Python dependencies..."
+if ! pip install -r new-package/requirements.txt -t new-package/ --upgrade --quiet; then
+    echo "❌ Failed to install dependencies with pip. Trying alternative approach..."
+    # Try installing each dependency individually
+    while IFS= read -r line; do
+        if [[ $line =~ ^[a-zA-Z] ]]; then
+            echo "  Installing: $line"
+            pip install "$line" -t new-package/ --upgrade --quiet || {
+                echo "❌ Failed to install $line"
+                exit 1
+            }
+        fi
+    done < new-package/requirements.txt
+fi
+
+# Verify critical dependencies
+echo "🔍 Verifying dependencies..."
+CRITICAL_DEPS=("boto3" "botocore" "requests")
+for dep in "${CRITICAL_DEPS[@]}"; do
+    if [ ! -d "new-package/$dep" ] && [ ! -d "new-package/${dep//_/-}" ]; then
+        echo "❌ Missing dependency: $dep"
+        pip install "$dep" -t new-package/ --upgrade --quiet || {
+            echo "❌ Failed to install $dep"
+            exit 1
+        }
+    fi
+done
+
+echo "✅ Dependencies verified"
 
 # Copy source code
 cp metrics/*.py new-package/
+
+# Remove requirements.txt from package (not needed in Lambda)
+rm -f new-package/requirements.txt
 
 # Create zip
 cd new-package && zip -r ../new-package.zip . -q && cd ..

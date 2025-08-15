@@ -30,16 +30,57 @@ echo "Using temporary directory: $TEMP_DIR"
 # Copy the communication handler
 cp oscar-agent/communication_handler.py $TEMP_DIR/lambda_function.py
 
-# Create requirements.txt for the Lambda function
+# Create comprehensive requirements.txt for the Lambda function
 cat > $TEMP_DIR/requirements.txt << EOF
-boto3>=1.26.0
-botocore>=1.29.0
+# Core AWS and Slack dependencies
+boto3>=1.34.0
+botocore>=1.34.0
 slack_sdk>=3.19.0
+
+# HTTP and networking
+requests>=2.31.0
+urllib3>=2.0.0
+
+# Additional dependencies
+certifi>=2023.7.22
+charset-normalizer>=3.0.0
+idna>=3.0.0
+python-dateutil>=2.8.0
+jmespath>=1.0.0
+s3transfer>=0.6.0
+six>=1.16.0
 EOF
 
-# Install dependencies
+# Install dependencies with upgrade flag
 echo "📦 Installing Python dependencies..."
-pip install -r $TEMP_DIR/requirements.txt -t $TEMP_DIR/ --quiet
+if ! pip install -r $TEMP_DIR/requirements.txt -t $TEMP_DIR/ --upgrade --quiet; then
+    echo "❌ Failed to install dependencies with pip. Trying alternative approach..."
+    # Try installing each dependency individually
+    while IFS= read -r line; do
+        if [[ $line =~ ^[a-zA-Z] ]]; then
+            echo "  Installing: $line"
+            pip install "$line" -t $TEMP_DIR/ --upgrade --quiet || {
+                echo "❌ Failed to install $line"
+                exit 1
+            }
+        fi
+    done < $TEMP_DIR/requirements.txt
+fi
+
+# Verify critical dependencies
+echo "🔍 Verifying dependencies..."
+CRITICAL_DEPS=("slack_sdk" "boto3" "botocore" "requests")
+for dep in "${CRITICAL_DEPS[@]}"; do
+    if [ ! -d "$TEMP_DIR/$dep" ] && [ ! -d "$TEMP_DIR/${dep//_/-}" ]; then
+        echo "❌ Missing dependency: $dep"
+        pip install "$dep" -t $TEMP_DIR/ --upgrade --quiet || {
+            echo "❌ Failed to install $dep"
+            exit 1
+        }
+    fi
+done
+
+echo "✅ Dependencies verified"
 
 # Create deployment package
 cd $TEMP_DIR
