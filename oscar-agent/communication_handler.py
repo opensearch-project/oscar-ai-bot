@@ -93,6 +93,9 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         if function_name == 'send_automated_message':
             logger.info(f"Calling handle_send_message with params: {params}")
             return handle_send_message(params)
+        elif function_name == 'format_message_for_slack':
+            logger.info(f"Calling handle_format_message with params: {params}")
+            return handle_format_message(params)
         else:
             logger.error(f"Unknown function: {function_name}")
             return {
@@ -518,6 +521,142 @@ def store_cross_channel_context(channel: str, message_ts: str, original_query: s
         
     except Exception as e:
         logger.error(f"❌ CROSS_CHANNEL_CONTEXT: Error storing cross-channel context for {channel}_{message_ts}: {e}", exc_info=True)
+
+def handle_format_message(params: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Handle the format_message_for_slack action.
+    
+    Args:
+        params: Parameters from the agent request
+        
+    Returns:
+        Response for the agent with formatted message
+    """
+    try:
+        # Extract parameters
+        message_content = params.get('message_content', '')
+        
+        logger.info(f"Processing message formatting request for content length: {len(message_content)}")
+        
+        if not message_content:
+            return create_format_error_response('No message content provided to format')
+        
+        # Format the message for Slack
+        formatted_message = format_markdown_to_slack_mrkdwn(message_content)
+        
+        logger.info(f"Message formatting completed successfully")
+        
+        # Return proper Bedrock agent response format
+        return {
+            "messageVersion": "1.0",
+            "response": {
+                "actionGroup": "communication-orchestration",
+                "function": "format_message_for_slack",
+                "functionResponse": {
+                    "responseBody": {
+                        "TEXT": {
+                            "body": formatted_message
+                        }
+                    }
+                }
+            }
+        }
+        
+    except Exception as e:
+        logger.error(f"Error in handle_format_message: {e}", exc_info=True)
+        return create_format_error_response(f'Error formatting message: {str(e)}')
+
+def format_markdown_to_slack_mrkdwn(message: str) -> str:
+    """
+    Convert standard Markdown to Slack's mrkdwn format.
+    
+    Args:
+        message: Message content in standard Markdown format
+        
+    Returns:
+        Message formatted for Slack's mrkdwn syntax
+    """
+    try:
+        # Start with the original message
+        formatted = message
+        
+        # Convert headings (# Heading) to bold text (*Heading*)
+        # Handle multiple levels of headings
+        formatted = re.sub(r'^#{1,6}\s+(.+)$', r'*\1*', formatted, flags=re.MULTILINE)
+        
+        # Convert bold text (**text** or __text__) to Slack format (*text*)
+        formatted = re.sub(r'\*\*(.+?)\*\*', r'*\1*', formatted)
+        formatted = re.sub(r'__(.+?)__', r'*\1*', formatted)
+        
+        # Convert italic text (*text* or _text_) to Slack format (_text_)
+        # Be careful not to affect already converted bold text
+        formatted = re.sub(r'(?<!\*)\*([^*]+?)\*(?!\*)', r'_\1_', formatted)
+        formatted = re.sub(r'(?<!_)_([^_]+?)_(?!_)', r'_\1_', formatted)
+        
+        # Convert links [text](url) to Slack format <url|text>
+        formatted = re.sub(r'\[([^\]]+)\]\(([^)]+)\)', r'<\2|\1>', formatted)
+        
+        # Convert strikethrough (~text~) - this stays the same in Slack
+        # No changes needed for strikethrough
+        
+        # Convert inline code (`code`) - this stays the same in Slack
+        # No changes needed for inline code
+        
+        # Convert code blocks (```code```) - this stays the same in Slack
+        # No changes needed for code blocks
+        
+        # Convert blockquotes (> text) - this stays the same in Slack
+        # No changes needed for blockquotes
+        
+        # Convert bullet points (* item or - item) to consistent format
+        formatted = re.sub(r'^[\*\-]\s+', r'• ', formatted, flags=re.MULTILINE)
+        
+        # Convert numbered lists (1. item) - keep as is since Slack supports this
+        # No changes needed for numbered lists
+        
+        # Convert @username mentions to Slack format <@username>
+        # Only convert if not already in Slack format
+        formatted = re.sub(r'(?<!<)@([a-zA-Z0-9_-]+)(?!>)', r'<@\1>', formatted)
+        
+        # Convert #channel mentions to Slack format <#channel>
+        # Only convert if not already in Slack format
+        formatted = re.sub(r'(?<!<)#([a-zA-Z0-9_-]+)(?!>)', r'<#\1>', formatted)
+        
+        # Clean up any double formatting that might have occurred
+        formatted = re.sub(r'\*\*([^*]+)\*\*', r'*\1*', formatted)  # Fix double bold
+        formatted = re.sub(r'__([^_]+)__', r'_\1_', formatted)      # Fix double italic
+        
+        logger.info(f"Successfully formatted message from {len(message)} to {len(formatted)} characters")
+        return formatted
+        
+    except Exception as e:
+        logger.error(f"Error formatting message to Slack mrkdwn: {e}")
+        return message  # Return original message if formatting fails
+
+def create_format_error_response(error_message: str) -> Dict[str, Any]:
+    """
+    Create a standardized error response for format message function.
+    
+    Args:
+        error_message: Error message to return
+        
+    Returns:
+        Error response dictionary
+    """
+    return {
+        "messageVersion": "1.0",
+        "response": {
+            "actionGroup": "communication-orchestration",
+            "function": "format_message_for_slack",
+            "functionResponse": {
+                "responseBody": {
+                    "TEXT": {
+                        "body": f'❌ {error_message}'
+                    }
+                }
+            }
+        }
+    }
 
 def create_error_response(error_message: str) -> Dict[str, Any]:
     """

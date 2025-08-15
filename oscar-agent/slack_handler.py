@@ -560,6 +560,7 @@ class SlackHandler:
             if not skip_context_storage:
                 self._update_context(thread_key, query, response, session_id, new_session_id)
             
+            
             # Send response
             say(text=response, thread_ts=thread_ts)
             logger.info(f"Successfully sent response to thread {thread_ts}")
