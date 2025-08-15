@@ -60,6 +60,16 @@ else
     exit 1
 fi
 
+# Copy the entire oscar_agent package directory (refactored modular components)
+if [ -d "oscar-agent/oscar_agent" ]; then
+    echo "📁 Copying oscar_agent package..."
+    cp -r oscar-agent/oscar_agent $TEMP_DIR/
+    echo "✅ Copied oscar_agent package structure"
+else
+    echo "❌ oscar_agent directory not found!"
+    exit 1
+fi
+
 # Create requirements.txt for the Lambda function
 cat > $TEMP_DIR/requirements.txt << EOF
 boto3>=1.26.0

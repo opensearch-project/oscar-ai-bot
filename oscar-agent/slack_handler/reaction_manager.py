@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 class ReactionManager:
     """Manages Slack message reactions."""
     
-    def __init__(self, client):
+    def __init__(self, client) -> None:
         """Initialize with Slack client.
         
         Args:

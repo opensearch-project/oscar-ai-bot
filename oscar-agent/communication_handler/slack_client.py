@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 class SlackClientManager:
     """Manages Slack client interactions."""
     
-    def __init__(self):
+    def __init__(self) -> None:
         """Initialize Slack client."""
         slack_token = os.environ.get('SLACK_BOT_TOKEN')
         self.client = WebClient(token=slack_token) if slack_token else None

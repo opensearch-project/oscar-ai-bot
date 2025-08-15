@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 class SlashCommandHandlers:
     """Handles Slack slash commands."""
     
-    def __init__(self, message_processor, context_manager):
+    def __init__(self, message_processor, context_manager) -> None:
         """Initialize with message processor and context manager.
         
         Args:
@@ -30,35 +30,35 @@ class SlashCommandHandlers:
         self.context_manager = context_manager
         self.auth_manager = AuthorizationManager()
     
-    def handle_announce_command(self, ack, command, say):
+    def handle_announce_command(self, ack, command, say) -> None:
         """Handle /announce slash command."""
         self._handle_slash_command(ack, command, say, "announce")
     
-    def handle_assign_owner_command(self, ack, command, say):
+    def handle_assign_owner_command(self, ack, command, say) -> None:
         """Handle /assign-owner slash command."""
         self._handle_slash_command(ack, command, say, "assign_owner")
     
-    def handle_request_owner_command(self, ack, command, say):
+    def handle_request_owner_command(self, ack, command, say) -> None:
         """Handle /request-owner slash command."""
         self._handle_slash_command(ack, command, say, "request_owner")
     
-    def handle_rc_details_command(self, ack, command, say):
+    def handle_rc_details_command(self, ack, command, say) -> None:
         """Handle /rc-details slash command."""
         self._handle_slash_command(ack, command, say, "rc_details")
     
-    def handle_missing_notes_command(self, ack, command, say):
+    def handle_missing_notes_command(self, ack, command, say) -> None:
         """Handle /missing-notes slash command."""
         self._handle_slash_command(ack, command, say, "missing_notes")
     
-    def handle_integration_test_command(self, ack, command, say):
+    def handle_integration_test_command(self, ack, command, say) -> None:
         """Handle /integration-test slash command."""
         self._handle_slash_command(ack, command, say, "integration_test")
     
-    def handle_broadcast_command(self, ack, command, say):
+    def handle_broadcast_command(self, ack, command, say) -> None:
         """Handle /broadcast slash command."""
         self._handle_broadcast_command(ack, command, say)
     
-    def _handle_slash_command(self, ack, command, say, slash_command_type: str):
+    def _handle_slash_command(self, ack, command, say, slash_command_type: str) -> None:
         """Handle slash commands by delegating to message processor."""
         ack()
         
@@ -103,7 +103,7 @@ class SlashCommandHandlers:
         # Process directly with context storage skipped (handled by say_with_context_storage)
         self.message_processor.process_message(channel_id, thread_ts, user_id, query, say_with_context_storage, thread_ts, skip_context_storage=True)
     
-    def _handle_broadcast_command(self, ack, command, say):
+    def _handle_broadcast_command(self, ack, command, say) -> None:
         """Handle broadcast slash command for general queries."""
         ack()
         

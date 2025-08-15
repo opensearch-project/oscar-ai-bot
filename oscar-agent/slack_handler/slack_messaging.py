@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 class SlackMessaging:
     """Handles Slack message sending functionality."""
     
-    def __init__(self, client, context_manager):
+    def __init__(self, client, context_manager) -> None:
         """Initialize with Slack client and context manager.
         
         Args:

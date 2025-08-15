@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 class EventHandlers:
     """Handles different types of Slack events."""
     
-    def __init__(self, message_processor):
+    def __init__(self, message_processor) -> None:
         """Initialize with message processor.
         
         Args:

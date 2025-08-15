@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 class ContextStorage:
     """Manages context storage for cross-channel messages."""
     
-    def __init__(self):
+    def __init__(self) -> None:
         """Initialize DynamoDB connection."""
         self.dynamodb = boto3.resource('dynamodb', region_name='us-east-1')
         self.context_table_name = os.environ.get('CONTEXT_TABLE_NAME', 'oscar-agent-context')

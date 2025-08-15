@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 class MessageProcessor:
     """Processes Slack messages and generates agent responses."""
     
-    def __init__(self, storage, oscar_agent, reaction_manager, context_manager, timeout_handler):
+    def __init__(self, storage, oscar_agent, reaction_manager, context_manager, timeout_handler) -> None:
         """Initialize with required dependencies.
         
         Args:

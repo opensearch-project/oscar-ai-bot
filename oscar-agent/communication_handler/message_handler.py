@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 class MessageHandler:
     """Handles message sending and formatting operations."""
     
-    def __init__(self):
+    def __init__(self) -> None:
         """Initialize message handler components."""
         self.slack_client = SlackClientManager()
         self.context_storage = ContextStorage()

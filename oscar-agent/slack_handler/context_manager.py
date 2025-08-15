@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 class ContextManager:
     """Manages conversation context for Slack threads."""
     
-    def __init__(self, storage):
+    def __init__(self, storage) -> None:
         """Initialize with storage interface.
         
         Args:
