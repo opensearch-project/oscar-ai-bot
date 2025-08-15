@@ -60,13 +60,13 @@ else
     exit 1
 fi
 
-# Copy the entire oscar_agent package directory (refactored modular components)
-if [ -d "oscar-agent/oscar_agent" ]; then
-    echo "📁 Copying oscar_agent package..."
-    cp -r oscar-agent/oscar_agent $TEMP_DIR/
-    echo "✅ Copied oscar_agent package structure"
+# Copy the entire bedrock package directory (refactored modular components)
+if [ -d "oscar-agent/bedrock" ]; then
+    echo "📁 Copying bedrock package..."
+    cp -r oscar-agent/bedrock $TEMP_DIR/
+    echo "✅ Copied bedrock package structure"
 else
-    echo "❌ oscar_agent directory not found!"
+    echo "❌ bedrock directory not found!"
     exit 1
 fi
 

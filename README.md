@@ -25,7 +25,7 @@ OSCAR/
 ├── oscar-agent/           # Main bot application
 │   ├── communication_handler/  # Message processing and formatting
 │   ├── slack_handler/          # Slack-specific event handling
-│   └── oscar_agent/           # Core AI agent logic
+│   └── bedrock/               # Core AI agent logic
 ├── metrics/              # Analytics and monitoring
 ├── cdk/                  # AWS infrastructure code
 └── deployment_scripts/   # Deployment automation

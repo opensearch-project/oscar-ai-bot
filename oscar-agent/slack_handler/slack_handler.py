@@ -19,7 +19,7 @@ from typing import Any, Dict
 from slack_bolt import App
 
 from config import config
-from oscar_agent import OSCARAgentInterface
+from bedrock import OSCARAgentInterface
 from storage import StorageInterface
 
 from config import config

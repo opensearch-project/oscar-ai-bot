@@ -13,8 +13,8 @@ import logging
 from typing import Optional, Tuple
 
 from config import config
-from oscar_agent.bedrock_agent import BedrockAgentCore
-from oscar_agent.error_handler import AgentErrorHandler
+from bedrock.bedrock_agent import BedrockAgentCore
+from bedrock.error_handler import AgentErrorHandler
 
 logger = logging.getLogger(__name__)
 

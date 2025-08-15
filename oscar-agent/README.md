@@ -29,7 +29,7 @@ Manages Slack-specific functionality and event processing.
 - `authorization.py` - Slack app authentication
 - `timeout_handler.py` - Request timeout management
 
-### oscar_agent/
+### bedrock/
 Core AI agent functionality and decision-making logic.
 
 **Key Components:**

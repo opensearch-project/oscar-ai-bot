@@ -30,7 +30,7 @@ from slack_bolt.adapter.aws_lambda import SlackRequestHandler
 import slack_bolt
 
 from config import config
-from oscar_agent import get_oscar_agent
+from bedrock import get_oscar_agent
 from slack_handler import SlackHandler
 from storage import get_storage
 

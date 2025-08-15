@@ -17,10 +17,10 @@ import logging
 from abc import ABC, abstractmethod
 from typing import Optional, Tuple
 
-from oscar_agent.bedrock_agent import BedrockAgentCore
-from oscar_agent.error_handler import AgentErrorHandler
-from oscar_agent.metrics_coordinator import MetricsCoordinator
-from oscar_agent.query_processor import QueryProcessor
+from bedrock.bedrock_agent import BedrockAgentCore
+from bedrock.error_handler import AgentErrorHandler
+from bedrock.metrics_coordinator import MetricsCoordinator
+from bedrock.query_processor import QueryProcessor
 
 logger = logging.getLogger(__name__)
 
