@@ -50,6 +50,16 @@ echo "Using temporary directory: $TEMP_DIR"
 cp oscar-agent/*.py $TEMP_DIR/
 cp oscar-agent/app.py $TEMP_DIR/lambda_function.py
 
+# Copy the entire slack_handler package directory
+if [ -d "oscar-agent/slack_handler" ]; then
+    echo "📁 Copying slack_handler package..."
+    cp -r oscar-agent/slack_handler $TEMP_DIR/
+    echo "✅ Copied slack_handler package structure"
+else
+    echo "❌ slack_handler directory not found!"
+    exit 1
+fi
+
 # Create requirements.txt for the Lambda function
 cat > $TEMP_DIR/requirements.txt << EOF
 boto3>=1.26.0

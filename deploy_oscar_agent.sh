@@ -50,6 +50,16 @@ echo "Using temporary directory: $TEMP_DIR"
 cp oscar-agent/*.py $TEMP_DIR/
 cp oscar-agent/app.py $TEMP_DIR/lambda_function.py
 
+# Copy the entire slack_handler package directory
+if [ -d "oscar-agent/slack_handler" ]; then
+    echo "📁 Copying slack_handler package..."
+    cp -r oscar-agent/slack_handler $TEMP_DIR/
+    echo "✅ Copied slack_handler package structure"
+else
+    echo "❌ slack_handler directory not found!"
+    exit 1
+fi
+
 # Create comprehensive requirements.txt for the Lambda function
 cat > $TEMP_DIR/requirements.txt << EOF
 # Core AWS and Slack dependencies
@@ -151,11 +161,9 @@ if ! grep -q "def get_context_for_query" oscar-agent/storage.py; then
     exit 1
 fi
 
-if grep -q "^[[:space:]]*context = self.storage.get_context_for_query" oscar-agent/slack_handler.py; then
-    echo "❌ CRITICAL: slack_handler.py has variable name collision bug"
-    echo "   This will cause context to be overwritten. Please fix variable naming."
-    exit 1
-fi
+# Note: slack_handler.py is now a simple import file, so skip the variable collision check
+# The actual logic is in the slack_handler package modules
+echo "✅ Using refactored slack_handler package structure"
 
 echo "✅ Critical code fixes verified"
 

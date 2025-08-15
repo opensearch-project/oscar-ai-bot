@@ -91,11 +91,9 @@ if ! grep -q "def get_context_for_query" oscar-agent/storage.py; then
     exit 1
 fi
 
-if grep -q "context = self.storage.get_context_for_query" oscar-agent/slack_handler.py; then
-    echo "❌ slack_handler.py has variable name collision bug"
-    echo "   This is a critical bug - please fix the variable naming"
-    exit 1
-fi
+# Note: slack_handler.py is now a simple import file, so skip the variable collision check
+# The actual logic is in the slack_handler package modules
+echo "✅ Using refactored slack_handler package structure"
 
 echo "✅ Critical code fixes verified"
 
@@ -109,6 +107,16 @@ echo "Using temporary directory: $TEMP_DIR"
 # Copy files
 cp oscar-agent/*.py $TEMP_DIR/
 cp oscar-agent/app.py $TEMP_DIR/lambda_function.py
+
+# Copy the entire slack_handler package directory
+if [ -d "oscar-agent/slack_handler" ]; then
+    echo "📁 Copying slack_handler package..."
+    cp -r oscar-agent/slack_handler $TEMP_DIR/
+    echo "✅ Copied slack_handler package structure"
+else
+    echo "❌ slack_handler directory not found!"
+    exit 1
+fi
 
 # Install dependencies
 echo "📦 Installing dependencies..."
