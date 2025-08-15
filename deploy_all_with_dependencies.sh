@@ -12,7 +12,9 @@ echo "======================================================"
 
 # Load environment variables
 if [ -f .env ]; then
-    export $(cat .env | grep -v '^#' | xargs)
+    set -a  # automatically export all variables
+    source .env
+    set +a  # turn off automatic export
     echo "✅ Loaded environment variables from .env"
 else
     echo "❌ .env file not found. Please create it with required variables."
