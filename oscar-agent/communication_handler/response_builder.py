@@ -7,6 +7,7 @@ Response builder for Communication Handler.
 """
 
 from typing import Any, Dict
+from config import config
 
 
 class ResponseBuilder:
@@ -24,9 +25,9 @@ class ResponseBuilder:
             Success response dictionary
         """
         return {
-            "messageVersion": "1.0",
+            "messageVersion": config.bedrock_message_version,
             "response": {
-                "actionGroup": "communication-orchestration",
+                "actionGroup": config.bedrock_action_group,
                 "function": function_name,
                 "functionResponse": {
                     "responseBody": {
@@ -50,9 +51,9 @@ class ResponseBuilder:
             Error response dictionary
         """
         return {
-            "messageVersion": "1.0",
+            "messageVersion": config.bedrock_message_version,
             "response": {
-                "actionGroup": "communication-orchestration",
+                "actionGroup": config.bedrock_action_group,
                 "function": function_name,
                 "functionResponse": {
                     "responseBody": {

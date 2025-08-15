@@ -10,7 +10,7 @@ import logging
 from typing import Any, Dict
 from slack_sdk.errors import SlackApiError
 
-from .constants import CHANNEL_ALLOW_LIST
+from slack_handler.constants import CHANNEL_ALLOW_LIST
 
 logger = logging.getLogger(__name__)
 

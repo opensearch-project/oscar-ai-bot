@@ -17,7 +17,7 @@ Classes:
 """
 
 # Import the refactored SlackHandler from the new modular structure
-from .slack_handler.slack_handler import SlackHandler
+from slack_handler.slack_handler import SlackHandler
 
 # Re-export for backward compatibility
 __all__ = ['SlackHandler']

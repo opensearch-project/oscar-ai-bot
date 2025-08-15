@@ -8,6 +8,6 @@ Slack Handler package for OSCAR Agent.
 This package provides modular Slack event handling with agent integration.
 """
 
-from .slack_handler import SlackHandler
+from slack_handler.slack_handler import SlackHandler
 
 __all__ = ['SlackHandler']

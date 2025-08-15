@@ -59,6 +59,9 @@ else
     exit 1
 fi
 
+# Copy config.py and other necessary files
+cp oscar-agent/config.py $TEMP_DIR/
+
 # Create comprehensive requirements.txt for the Lambda function
 cat > $TEMP_DIR/requirements.txt << EOF
 # Core AWS and Slack dependencies

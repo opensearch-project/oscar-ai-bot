@@ -10,8 +10,8 @@ import logging
 import time
 from typing import Any, Callable, Dict
 
-from .constants import AGENT_QUERIES
-from .authorization import AuthorizationManager
+from config import config
+from slack_handler.authorization import AuthorizationManager
 
 logger = logging.getLogger(__name__)
 
@@ -84,7 +84,7 @@ class SlashCommandHandlers:
         thread_ts = str(int(time.time()))
         
         # Generate query with RC parameter
-        query_template = AGENT_QUERIES.get(slash_command_type)
+        query_template = config.agent_queries.get(slash_command_type)
         if not query_template:
             say(text="❌ Unknown slash command type", response_type="ephemeral")
             return
@@ -129,7 +129,7 @@ class SlashCommandHandlers:
         thread_ts = str(int(time.time()))
         
         # Generate query for processing
-        query_template = AGENT_QUERIES.get("broadcast")
+        query_template = config.agent_queries.get("broadcast")
         query = query_template.format(channel=channel_param, user_query=user_query)
         
         # Create a wrapper for say that captures the response and stores context efficiently

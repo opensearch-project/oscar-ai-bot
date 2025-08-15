@@ -10,8 +10,7 @@ import logging
 import re
 import string
 from typing import Any, Dict
-
-from communication_handler.constants import MESSAGE_TEMPLATES
+from config import config
 
 logger = logging.getLogger(__name__)
 
@@ -57,7 +56,7 @@ class TemplateProcessor:
         """
         try:
             # Get template
-            template_info = MESSAGE_TEMPLATES.get(message_type)
+            template_info = config.message_templates.get(message_type)
             if not template_info:
                 return f"Automated notification: {query}"
             
@@ -104,7 +103,7 @@ class TemplateProcessor:
             Processed message content
         """
         try:
-            template_info = MESSAGE_TEMPLATES.get(message_type)
+            template_info = config.message_templates.get(message_type)
             if not template_info:
                 return content
             
@@ -114,7 +113,7 @@ class TemplateProcessor:
             variables = {}
             
             # Extract version/branch from query
-            version_match = re.search(r'version\s+(\d+\.\d+\.\d+)', content.lower())
+            version_match = re.search(config.patterns['version'], content.lower())
             if version_match:
                 version = version_match.group(1)
                 variables['branch'] = f'{version}'
@@ -158,8 +157,8 @@ class TemplateProcessor:
         """
         try:
             # Extract version from query
-            version_match = re.search(r'version\s+(\d+\.\d+\.\d+)', query.lower())
-            version = version_match.group(1) if version_match else '3.2.0'
+            version_match = re.search(config.patterns['version'], query.lower())
+            version = version_match.group(1) if version_match else config.default_version
             
             # Query the ReleaseReadinessSpecialist for release notes metrics
             metrics_query = f"What are the current release notes metrics for OpenSearch version {version}? Which components are missing release notes?"
@@ -178,4 +177,4 @@ class TemplateProcessor:
             
         except Exception as e:
             logger.error(f"Error collecting release notes metrics: {e}")
-            return {'branch': '3.2.0', 'version': '3.2.0'}
+            return {'branch': config.default_version, 'version': config.default_version}

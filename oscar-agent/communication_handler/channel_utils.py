@@ -9,8 +9,7 @@ Channel utilities for Communication Handler.
 import logging
 import re
 from typing import Optional
-
-from communication_handler.constants import CHANNEL_ALLOW_LIST
+from config import config
 
 logger = logging.getLogger(__name__)
 
@@ -28,37 +27,31 @@ class ChannelUtils:
         Returns:
             Channel ID if found, None otherwise
         """
-        # Channel ID pattern (C followed by 10+ alphanumeric characters)
-        channel_id_match = re.search(r'\b(C[A-Z0-9]{10,})\b', query)
+        # Channel ID pattern
+        channel_id_match = re.search(config.patterns['channel_id'], query)
         if channel_id_match:
             channel_id = channel_id_match.group(1)
-            return channel_id if channel_id in CHANNEL_ALLOW_LIST else None
+            return channel_id if channel_id in config.channel_allow_list else None
         
         # Channel reference patterns (#channel-name)
-        channel_ref_match = re.search(r'#([a-z0-9-]+)', query.lower())
+        channel_ref_match = re.search(config.patterns['channel_ref'], query.lower())
         if channel_ref_match:
             channel_name = channel_ref_match.group(1)
-            # Map common channel names to IDs
-            channel_mapping = {
-                'opensearch-release-manager': 'C096MV7JZ0T',
-                'private-oscar-test': 'C09827S7CEB', 
-                'opensearch-3-2-0-release': 'C088XMSH4DA',
-                'riley-needs-to-lock-in': 'C091EH1JKCL'
-            }
-            return channel_mapping.get(channel_name)
+            # Use configured channel mappings
+            return config.channel_mappings.get(channel_name)
         
-        # Text-based channel mentions
+        # Text-based channel mentions using configured mappings
         query_lower = query.lower()
         if 'riley-needs-to-lock-in' in query_lower:
-            return 'C096MV7JZ0T'
+            return config.channel_mappings.get('riley-needs-to-lock-in')
         elif '3-2-0' in query_lower or '3.2.0' in query_lower or 'release channel' in query_lower:
-            return 'C096MV7JZ0T'
+            return config.channel_mappings.get('opensearch-release-manager')
         elif 'build channel' in query_lower:
-            return 'C09827S7CEB'
+            return config.channel_mappings.get('private-oscar-test')
         elif 'test channel' in query_lower:
-            return 'C091EH1JKCL'
+            return config.channel_mappings.get('riley-needs-to-lock-in')
         elif 'dev channel' in query_lower:
-            return 'C088XMSH4DA'
+            return config.channel_mappings.get('opensearch-3-2-0-release')
         
         return None
     
@@ -72,4 +65,4 @@ class ChannelUtils:
         Returns:
             True if channel is allowed, False otherwise
         """
-        return channel in CHANNEL_ALLOW_LIST
+        return channel in config.channel_allow_list

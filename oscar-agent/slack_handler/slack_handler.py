@@ -18,14 +18,14 @@ from config import config
 from oscar_agent import OSCARAgentInterface
 from storage import StorageInterface
 
-from .constants import MAX_WORKERS
-from .reaction_manager import ReactionManager
-from .context_manager import ContextManager
-from .timeout_handler import TimeoutHandler
-from .message_processor import MessageProcessor
-from .event_handlers import EventHandlers
-from .slash_commands import SlashCommandHandlers
-from .slack_messaging import SlackMessaging
+from config import config
+from slack_handler.reaction_manager import ReactionManager
+from slack_handler.context_manager import ContextManager
+from slack_handler.timeout_handler import TimeoutHandler
+from slack_handler.message_processor import MessageProcessor
+from slack_handler.event_handlers import EventHandlers
+from slack_handler.slash_commands import SlashCommandHandlers
+from slack_handler.slack_messaging import SlackMessaging
 
 logger = logging.getLogger(__name__)
 
@@ -59,8 +59,11 @@ class SlackHandler:
         self.oscar_agent = oscar_agent
         self.client = app.client
         
-        # Thread pool for better scaling (50-100 concurrent users)
-        self.executor = ThreadPoolExecutor(max_workers=MAX_WORKERS, thread_name_prefix="oscar-agent")
+        # Thread pool for better scaling
+        self.executor = ThreadPoolExecutor(
+            max_workers=config.max_workers, 
+            thread_name_prefix=config.slack_handler_thread_prefix
+        )
         
         # Initialize components
         self.reaction_manager = ReactionManager(self.client)

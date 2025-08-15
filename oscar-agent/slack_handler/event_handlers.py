@@ -9,8 +9,8 @@ Event handlers for Slack Handler.
 import logging
 from typing import Any, Callable, Dict
 
-from .constants import CHANNEL_ALLOW_LIST
-from .authorization import AuthorizationManager
+from slack_handler.constants import CHANNEL_ALLOW_LIST
+from slack_handler.authorization import AuthorizationManager
 
 logger = logging.getLogger(__name__)
 

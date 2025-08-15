@@ -8,10 +8,11 @@ Message processing for Slack Handler.
 
 import logging
 import re
+from config import config
 import time
 from typing import Any, Callable, Optional
 
-from .authorization import AuthorizationManager
+from slack_handler.authorization import AuthorizationManager
 
 logger = logging.getLogger(__name__)
 
@@ -45,8 +46,8 @@ class MessageProcessor:
         Returns:
             The cleaned query text
         """
-        # Remove mentions (e.g., <@U12345>)
-        query = re.sub(r'<@[A-Z0-9]+>', '', text).strip()
+        # Remove mentions using configured pattern
+        query = re.sub(config.patterns['mention'], '', text).strip()
         return query
     
     def process_message(self, channel: str, thread_ts: str, user_id: str, 

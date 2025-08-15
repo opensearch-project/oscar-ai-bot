@@ -12,7 +12,7 @@ import threading
 import queue
 from typing import Any, Callable, Optional, Tuple
 
-from .constants import HOURGLASS_THRESHOLD, TIMEOUT_THRESHOLD, MAX_ACTIVE_QUERIES
+from config import config
 
 logger = logging.getLogger(__name__)
 
@@ -54,7 +54,7 @@ class TimeoutHandler:
         query_id = f"{channel}_{thread_ts}_{int(start_time)}"
         
         with self.monitor_lock:
-            if len(self.active_queries) >= MAX_ACTIVE_QUERIES:
+            if len(self.active_queries) >= config.max_active_queries:
                 self.reaction_manager.manage_reactions(channel, reaction_ts, add_reaction="x", remove_reaction="thinking_face")
                 say(text="🚫 System is currently overloaded. Please try again in a few minutes.", thread_ts=thread_ts)
                 return None, None
@@ -90,11 +90,11 @@ class TimeoutHandler:
         thread = threading.Thread(target=agent_worker, daemon=True)
         thread.start()
         
-        # Monitor every 15 seconds for better timing accuracy
+        # Monitor every configured interval for better timing accuracy
         while thread.is_alive():
             try:
-                # Wait 15 seconds for result
-                status, response, new_session_id = result_queue.get(timeout=15)
+                # Wait for configured interval for result
+                status, response, new_session_id = result_queue.get(timeout=config.monitor_interval)
                 
                 # Clean up on success
                 with self.monitor_lock:
@@ -114,7 +114,7 @@ class TimeoutHandler:
                 logger.info(f"TIMEOUT CHECK: Query {query_id} still running after {elapsed:.2f}s (hourglass_added={hourglass_added})")
                 
                 # Add hourglass at threshold
-                if elapsed >= HOURGLASS_THRESHOLD and not hourglass_added:
+                if elapsed >= config.hourglass_threshold and not hourglass_added:
                     logger.warning(f"ADDING HOURGLASS: After {elapsed:.2f}s for query {query_id}")
                     try:
                         self.reaction_manager.manage_reactions(channel, reaction_ts, add_reaction="hourglass_flowing_sand")
@@ -124,7 +124,7 @@ class TimeoutHandler:
                         logger.error(f"FAILED TO ADD HOURGLASS: {e}")
                 
                 # Timeout at threshold
-                if elapsed >= TIMEOUT_THRESHOLD:
+                if elapsed >= config.timeout_threshold:
                     logger.error(f"TIMEOUT TRIGGERED: Query {query_id} timed out after {elapsed:.2f}s")
                     
                     # Force thread termination attempt (though this won't stop Bedrock)

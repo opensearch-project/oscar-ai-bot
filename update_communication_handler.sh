@@ -42,6 +42,9 @@ else
     exit 1
 fi
 
+# Copy config.py and other necessary files
+cp oscar-agent/config.py $TEMP_DIR/
+
 # Create comprehensive requirements.txt for the Lambda function
 cat > $TEMP_DIR/requirements.txt << EOF
 # Core AWS and Slack dependencies
@@ -103,14 +106,55 @@ DEPLOYMENT_PACKAGE="$TEMP_DIR/../communication-handler-update.zip"
 echo "✅ Created deployment package: $DEPLOYMENT_PACKAGE"
 
 # Check if Lambda function exists
+# Create environment variables for communication handler
+cat > $TEMP_DIR/env-vars.json << EOF
+{
+    "Variables": {
+        "SLACK_BOT_TOKEN": "$SLACK_BOT_TOKEN",
+        "DISABLE_CONFIG_VALIDATION": "true",
+        "CHANNEL_ALLOW_LIST": "$CHANNEL_ALLOW_LIST",
+        "CONTEXT_TTL": "${CONTEXT_TTL:-604800}",
+        "CONTEXT_TABLE_NAME": "${CONTEXT_TABLE_NAME:-oscar-agent-context}",
+        "MESSAGE_PREVIEW_LENGTH": "${MESSAGE_PREVIEW_LENGTH:-100}",
+        "BEDROCK_RESPONSE_MESSAGE_VERSION": "${BEDROCK_RESPONSE_MESSAGE_VERSION:-1.0}",
+        "BEDROCK_ACTION_GROUP_NAME": "${BEDROCK_ACTION_GROUP_NAME:-communication-orchestration}",
+        "DEFAULT_VERSION": "${DEFAULT_VERSION:-3.2.0}",
+        "TEMPLATE_MISSING_RELEASE_NOTES": "$TEMPLATE_MISSING_RELEASE_NOTES",
+        "TEMPLATE_CRITERIA_NOT_MET": "$TEMPLATE_CRITERIA_NOT_MET",
+        "TEMPLATE_DOCUMENTATION_ISSUES": "$TEMPLATE_DOCUMENTATION_ISSUES",
+        "TEMPLATE_MISSING_CODE_COVERAGE": "$TEMPLATE_MISSING_CODE_COVERAGE",
+        "TEMPLATE_RELEASE_ANNOUNCEMENT": "$TEMPLATE_RELEASE_ANNOUNCEMENT",
+        "DEFAULT_CHANNEL_MISSING_RELEASE_NOTES": "${DEFAULT_CHANNEL_MISSING_RELEASE_NOTES:-C096MV7JZ0T}",
+        "DEFAULT_CHANNEL_CRITERIA_NOT_MET": "${DEFAULT_CHANNEL_CRITERIA_NOT_MET:-C096MV7JZ0T}",
+        "DEFAULT_CHANNEL_DOCUMENTATION_ISSUES": "${DEFAULT_CHANNEL_DOCUMENTATION_ISSUES:-C096MV7JZ0T}",
+        "DEFAULT_CHANNEL_MISSING_CODE_COVERAGE": "${DEFAULT_CHANNEL_MISSING_CODE_COVERAGE:-C09827S7CEB}",
+        "DEFAULT_CHANNEL_RELEASE_ANNOUNCEMENT": "${DEFAULT_CHANNEL_RELEASE_ANNOUNCEMENT:-C096MV7JZ0T}",
+        "CHANNEL_MAPPING_RELEASE_MANAGER": "${CHANNEL_MAPPING_RELEASE_MANAGER:-C096MV7JZ0T}",
+        "CHANNEL_MAPPING_TEST": "${CHANNEL_MAPPING_TEST:-C09827S7CEB}",
+        "CHANNEL_MAPPING_3_2_0_RELEASE": "${CHANNEL_MAPPING_3_2_0_RELEASE:-C088XMSH4DA}",
+        "CHANNEL_MAPPING_RILEY": "${CHANNEL_MAPPING_RILEY:-C091EH1JKCL}"
+    }
+}
+EOF
+
 echo "🔍 Checking if Lambda function exists..."
 if aws lambda get-function --function-name $FUNCTION_NAME --region $AWS_REGION > /dev/null 2>&1; then
-    echo "🔄 Updating Lambda function code (preserving all configurations)..."
+    echo "🔄 Updating Lambda function code and environment variables..."
     
-    # Update ONLY function code - preserves all permissions, environment variables, and configurations
+    # Update function code
     aws lambda update-function-code \
         --function-name $FUNCTION_NAME \
         --zip-file fileb://$DEPLOYMENT_PACKAGE \
+        --region $AWS_REGION >/dev/null
+    
+    # Wait for code update to complete
+    echo "⏳ Waiting for code update to complete..."
+    aws lambda wait function-updated --function-name $FUNCTION_NAME --region $AWS_REGION
+    
+    # Update environment variables
+    aws lambda update-function-configuration \
+        --function-name $FUNCTION_NAME \
+        --environment file://$TEMP_DIR/env-vars.json \
         --region $AWS_REGION >/dev/null
 
     echo "✅ Updated Lambda function code: $FUNCTION_NAME"

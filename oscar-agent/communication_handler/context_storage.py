@@ -12,8 +12,7 @@ import time
 from typing import Any, Dict
 
 import boto3
-
-from communication_handler.constants import CONTEXT_TTL
+from config import config
 
 logger = logging.getLogger(__name__)
 
@@ -61,7 +60,7 @@ class ContextStorage:
             
             # Store with TTL
             current_time = int(time.time())
-            expiration = current_time + CONTEXT_TTL
+            expiration = current_time + config.context_ttl
             item = {
                 'thread_key': thread_key,
                 'context': context,

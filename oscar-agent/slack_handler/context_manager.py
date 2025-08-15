@@ -8,6 +8,7 @@ Context management for Slack Handler.
 
 import logging
 import time
+from config import config
 from typing import Any, Dict, Optional
 
 logger = logging.getLogger(__name__)
@@ -82,7 +83,7 @@ class ContextManager:
             context["history"].append(new_entry)
             new_history_count = len(context['history'])
             logger.info(f"✅ UPDATE_CONTEXT: Added new entry to history. Total entries: {new_history_count}")
-            logger.info(f"📝 UPDATE_CONTEXT: New entry - query_preview='{query[:50]}...', response_preview='{response[:50]}...', timestamp={new_entry['timestamp']}")
+            logger.info(f"📝 UPDATE_CONTEXT: New entry - query_preview='{query[:config.query_preview_length]}...', response_preview='{response[:config.response_preview_length]}...', timestamp={new_entry['timestamp']}")
             
             # Store updated context
             logger.info(f"💾 UPDATE_CONTEXT: About to store updated context for thread {thread_key}")

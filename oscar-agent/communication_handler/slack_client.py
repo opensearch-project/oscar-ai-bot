@@ -8,6 +8,7 @@ Slack client management for Communication Handler.
 
 import logging
 import os
+from config import config
 from typing import Any, Dict
 
 from slack_sdk import WebClient
@@ -38,7 +39,7 @@ class SlackClientManager:
             return {'success': False, 'error': 'Slack client not initialized - missing SLACK_BOT_TOKEN'}
         
         try:
-            logger.info(f"Sending message to channel {channel}: {message[:100]}...")
+            logger.info(f"Sending message to channel {channel}: {message[:config.message_preview_length]}...")
             response = self.client.chat_postMessage(
                 channel=channel,
                 text=message,

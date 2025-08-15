@@ -7,7 +7,7 @@ Authorization utilities for Slack Handler.
 """
 
 import logging
-from .constants import AUTHORIZED_MESSAGE_SENDERS
+from slack_handler.constants import AUTHORIZED_MESSAGE_SENDERS
 
 logger = logging.getLogger(__name__)
 
