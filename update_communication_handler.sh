@@ -32,6 +32,16 @@ echo "Using temporary directory: $TEMP_DIR"
 # Copy the communication handler
 cp oscar-agent/communication_handler.py $TEMP_DIR/lambda_function.py
 
+# Copy the entire communication_handler package directory
+if [ -d "oscar-agent/communication_handler" ]; then
+    echo "📁 Copying communication_handler package..."
+    cp -r oscar-agent/communication_handler $TEMP_DIR/
+    echo "✅ Copied communication_handler package structure"
+else
+    echo "❌ communication_handler directory not found!"
+    exit 1
+fi
+
 # Create comprehensive requirements.txt for the Lambda function
 cat > $TEMP_DIR/requirements.txt << EOF
 # Core AWS and Slack dependencies
