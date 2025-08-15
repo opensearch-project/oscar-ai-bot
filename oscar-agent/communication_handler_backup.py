@@ -584,14 +584,14 @@ def format_markdown_to_slack_mrkdwn(message: str) -> str:
         # Handle multiple levels of headings
         formatted = re.sub(r'^#{1,6}\s+(.+)$', r'*\1*', formatted, flags=re.MULTILINE)
         
-        # Convert italic text (*text* or _text_) to Slack format (_text_) FIRST
-        # This must be done before bold conversion to avoid conflicts
-        formatted = re.sub(r'(?<!\*)\*([^*]+?)\*(?!\*)', r'_\1_', formatted)
-        formatted = re.sub(r'(?<!_)_([^_]+?)_(?!_)', r'_\1_', formatted)
-        
         # Convert bold text (**text** or __text__) to Slack format (*text*)
         formatted = re.sub(r'\*\*(.+?)\*\*', r'*\1*', formatted)
         formatted = re.sub(r'__(.+?)__', r'*\1*', formatted)
+        
+        # Convert italic text (*text* or _text_) to Slack format (_text_)
+        # Be careful not to affect already converted bold text
+        formatted = re.sub(r'(?<!\*)\*([^*]+?)\*(?!\*)', r'_\1_', formatted)
+        formatted = re.sub(r'(?<!_)_([^_]+?)_(?!_)', r'_\1_', formatted)
         
         # Convert links [text](url) to Slack format <url|text>
         formatted = re.sub(r'\[([^\]]+)\]\(([^)]+)\)', r'<\2|\1>', formatted)
@@ -614,8 +614,9 @@ def format_markdown_to_slack_mrkdwn(message: str) -> str:
         # Convert numbered lists (1. item) - keep as is since Slack supports this
         # No changes needed for numbered lists
         
-        # Note: @username mentions are handled by convert_at_symbols_to_slack_pings() in handle_send_message
-        # to avoid double conversion, we don't convert them here
+        # Convert @username mentions to Slack format <@username>
+        # Only convert if not already in Slack format
+        formatted = re.sub(r'(?<!<)@([a-zA-Z0-9_-]+)(?!>)', r'<@\1>', formatted)
         
         # Convert #channel mentions to Slack format <#channel>
         # Only convert if not already in Slack format
