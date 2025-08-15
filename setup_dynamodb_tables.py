@@ -158,48 +158,7 @@ def verify_table_configuration(dynamodb, table_name, expected_key):
         print(f"   ❌ Error verifying table: {e}")
         return False
 
-def test_table_access(dynamodb, table_name):
-    """Test basic read/write access to the table."""
-    try:
-        table = dynamodb.Table(table_name)
-        
-        # Test write
-        test_key = f"test_key_{int(time.time())}"
-        test_item = {
-            'thread_key' if 'context' in table_name else 'event_id': test_key,
-            'test_data': 'test_value',
-            'ttl': int(time.time()) + 300  # 5 minutes
-        }
-        
-        table.put_item(Item=test_item)
-        print(f"   ✅ Write test successful")
-        
-        # Test read
-        response = table.get_item(
-            Key={
-                'thread_key' if 'context' in table_name else 'event_id': test_key
-            }
-        )
-        
-        if 'Item' in response:
-            print(f"   ✅ Read test successful")
-        else:
-            print(f"   ❌ Read test failed: item not found")
-            return False
-        
-        # Clean up test item
-        table.delete_item(
-            Key={
-                'thread_key' if 'context' in table_name else 'event_id': test_key
-            }
-        )
-        print(f"   ✅ Cleanup successful")
-        
-        return True
-        
-    except Exception as e:
-        print(f"   ❌ Table access test failed: {e}")
-        return False
+# Test functionality moved to tests/test_dynamodb_setup.py
 
 def main():
     """Setup and verify DynamoDB tables."""
@@ -224,8 +183,8 @@ def main():
         if create_context_table(dynamodb, context_table_name):
             print("🔍 Verifying context table configuration...")
             if verify_table_configuration(dynamodb, context_table_name, 'thread_key'):
-                print("🧪 Testing context table access...")
-                context_ok = test_table_access(dynamodb, context_table_name)
+                print("🧪 Context table configuration verified")
+                context_ok = True
             else:
                 context_ok = False
         else:
@@ -238,8 +197,8 @@ def main():
         if create_sessions_table(dynamodb, sessions_table_name):
             print("🔍 Verifying sessions table configuration...")
             if verify_table_configuration(dynamodb, sessions_table_name, 'event_id'):
-                print("🧪 Testing sessions table access...")
-                sessions_ok = test_table_access(dynamodb, sessions_table_name)
+                print("🧪 Sessions table configuration verified")
+                sessions_ok = True
             else:
                 sessions_ok = False
         else:
