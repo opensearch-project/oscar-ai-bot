@@ -198,8 +198,8 @@ def extract_test_results(opensearch_result: Dict[str, Any]) -> List[Dict[str, An
         component_build_result = source.get('component_build_result', '')
         
         if component_build_result != 'failed' and with_security == 'pass' and without_security == 'pass':
-            overall_stats = 'passed'
-        else: overall_stats = 'failed'
+            overall_status = 'passed'
+        else: overall_status = 'failed'
         
         results.append({
             'component': source.get('component'),
