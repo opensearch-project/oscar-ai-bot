@@ -238,8 +238,40 @@ cd cdk
 cdk destroy
 ```
 
+## DynamoDB Management
+
+This directory now also contains DynamoDB table management scripts:
+
+### `setup_dynamodb_tables.py`
+Python script to create and configure DynamoDB tables for OSCAR:
+- Creates `oscar-agent-context` table for conversation context
+- Creates `oscar-agent-sessions` table for session management
+- Configures TTL (Time To Live) settings
+- Verifies table configuration
+
+```bash
+# Run from project root
+python cdk/setup_dynamodb_tables.py
+```
+
+### `recreate_dynamodb_tables.sh`
+Shell script to completely recreate DynamoDB tables:
+- Deletes existing tables (if they exist)
+- Creates new tables with proper configuration
+- Enables TTL settings
+- Verifies table status
+
+```bash
+# Run from project root
+./cdk/recreate_dynamodb_tables.sh
+```
+
+**Note**: These scripts are automatically called by `deployment_scripts/deploy_all.sh` but can be run independently if needed.
+
 ## Configuration Files
 
 - **cdk.json**: Contains CDK app configuration and context values
 - **cdk.context.json**: Contains environment-specific context values like region
 - **requirements.txt**: Python dependencies for the CDK application
+- **setup_dynamodb_tables.py**: DynamoDB table creation and management
+- **recreate_dynamodb_tables.sh**: DynamoDB table recreation script
