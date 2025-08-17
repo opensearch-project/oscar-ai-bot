@@ -127,29 +127,6 @@ class Config:
             'broadcast': os.environ.get('AGENT_QUERY_BROADCAST', '')
         }
         
-        # Message templates
-        self.message_templates = {
-            'missing_release_notes': {
-                'template': os.environ.get('TEMPLATE_MISSING_RELEASE_NOTES', ''),
-                'default_channel': os.environ.get('DEFAULT_CHANNEL_MISSING_RELEASE_NOTES', 'C096MV7JZ0T')
-            },
-            'criteria_not_met': {
-                'template': os.environ.get('TEMPLATE_CRITERIA_NOT_MET', ''),
-                'default_channel': os.environ.get('DEFAULT_CHANNEL_CRITERIA_NOT_MET', 'C096MV7JZ0T')
-            },
-            'documentation_issues': {
-                'template': os.environ.get('TEMPLATE_DOCUMENTATION_ISSUES', ''),
-                'default_channel': os.environ.get('DEFAULT_CHANNEL_DOCUMENTATION_ISSUES', 'C096MV7JZ0T')
-            },
-            'missing_code_coverage': {
-                'template': os.environ.get('TEMPLATE_MISSING_CODE_COVERAGE', ''),
-                'default_channel': os.environ.get('DEFAULT_CHANNEL_MISSING_CODE_COVERAGE', 'C09827S7CEB')
-            },
-            'release_announcement': {
-                'template': os.environ.get('TEMPLATE_RELEASE_ANNOUNCEMENT', ''),
-                'default_channel': os.environ.get('DEFAULT_CHANNEL_RELEASE_ANNOUNCEMENT', 'C096MV7JZ0T')
-            }
-        }
         
         # Channel mappings
         self.channel_mappings = {
@@ -173,10 +150,7 @@ class Config:
             'channel_mention': os.environ.get('CHANNEL_MENTION_PATTERN', r'(?<!<)#([a-zA-Z0-9_-]+)(?!>)'),
             'version': os.environ.get('VERSION_PATTERN', r'version\s+(\d+\.\d+\.\d+)')
         }
-        
-        # Default values
-        self.default_version = os.environ.get('DEFAULT_VERSION', '3.2.0')
-        
+                
         # Logging and preview settings
         self.log_query_preview_length = int(os.environ.get('LOG_QUERY_PREVIEW_LENGTH', 100))
         self.log_context_preview_length = int(os.environ.get('LOG_CONTEXT_PREVIEW_LENGTH', 200))
