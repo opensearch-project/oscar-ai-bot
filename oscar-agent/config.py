@@ -95,7 +95,7 @@ class Config:
         
         # Thread pool settings
         self.max_workers = int(os.environ.get('MAX_WORKERS', 50))
-        self.max_active_queries = int(os.environ.get('MAX_ACTIVE_QUERIES', 50))
+        self.max_active_queries = int(os.environ.get('MAX_ACTIVE_QUERIES',  100))
         self.monitor_interval = int(os.environ.get('MONITOR_INTERVAL_SECONDS', 15))
         
         # Thread naming
