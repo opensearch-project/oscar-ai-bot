@@ -1,0 +1,55 @@
+[
+  {
+    "name": "docker_scan",
+    "description": "Trigger Docker security scan job on Jenkins for the specified Docker image. Use when users ask to scan Docker images for security vulnerabilities. Requires image_name parameter (e.g., 'alpine:3.19', 'opensearch:2.11.0'). Examples: 'scan alpine:3.19', 'run security scan on nginx:latest'",
+    "parameters": {
+      "image_name": {
+        "description": "Full Docker image name including tag (e.g., alpine:3.19, opensearchproject/opensearch:2.11.0)",
+        "type": "string",
+        "required": true
+      }
+    },
+    "requireConfirmation": "DISABLED"
+  },
+  {
+    "name": "trigger_job",
+    "description": "Trigger any supported Jenkins job with specified parameters. Use for generic job triggering when users specify a job name and parameters. Supports all registered Jenkins jobs with parameter validation.",
+    "parameters": {
+      "job_name": {
+        "description": "Name of the Jenkins job to trigger (e.g., docker-scan, build)",
+        "type": "string",
+        "required": true
+      },
+      "job_parameters": {
+        "description": "JSON object containing job-specific parameters. Each job has different required and optional parameters.",
+        "type": "string",
+        "required": false
+      }
+    },
+    "requireConfirmation": "DISABLED"
+  },
+  {
+    "name": "test_connection",
+    "description": "Test connection to Jenkins server and validate credentials. Use for troubleshooting or verification. Returns Jenkins version and server information. No parameters required.",
+    "parameters": {},
+    "requireConfirmation": "DISABLED"
+  },
+  {
+    "name": "get_job_info",
+    "description": "Retrieve detailed information about a Jenkins job including parameters and requirements. Use when users need to understand job requirements or available parameters. Defaults to docker-scan job if no job specified.",
+    "parameters": {
+      "job_name": {
+        "description": "Name of the Jenkins job to get information about (defaults to docker-scan)",
+        "type": "string",
+        "required": false
+      }
+    },
+    "requireConfirmation": "DISABLED"
+  },
+  {
+    "name": "list_jobs",
+    "description": "List all Jenkins jobs supported by this agent with their parameters and descriptions. Use when users ask 'what jobs are available?' or need to see all supported Jenkins operations.",
+    "parameters": {},
+    "requireConfirmation": "DISABLED"
+  }
+]
