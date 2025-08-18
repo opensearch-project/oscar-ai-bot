@@ -79,14 +79,14 @@ class Config:
         self.context_ttl = int(os.environ.get('CONTEXT_TTL', 604800))  # 7 days
         
         # Context settings
-        self.max_context_length = int(os.environ.get('MAX_CONTEXT_LENGTH', 8000))  # Increased from 3000
-        self.context_summary_length = int(os.environ.get('CONTEXT_SUMMARY_LENGTH', 1000))  # Increased from 500
+        self.max_context_length = int(os.environ.get('MAX_CONTEXT_LENGTH', 8000))  
+        self.context_summary_length = int(os.environ.get('CONTEXT_SUMMARY_LENGTH', 1000)) 
         
         # Feature flags
         self.enable_dm = os.environ.get('ENABLE_DM', 'false').lower() == 'true'
         
         # Agent timeout and retry settings
-        self.agent_timeout = int(os.environ.get('AGENT_TIMEOUT', 60))  # 60 seconds
+        self.agent_timeout = int(os.environ.get('AGENT_TIMEOUT', 90)) 
         self.agent_max_retries = int(os.environ.get('AGENT_MAX_RETRIES', 2))
         
         # Timeout thresholds
@@ -94,7 +94,7 @@ class Config:
         self.timeout_threshold = int(os.environ.get('TIMEOUT_THRESHOLD_SECONDS', 120))
         
         # Thread pool settings
-        self.max_workers = int(os.environ.get('MAX_WORKERS', 50))
+        self.max_workers = int(os.environ.get('MAX_WORKERS', 100))
         self.max_active_queries = int(os.environ.get('MAX_ACTIVE_QUERIES',  100))
         self.monitor_interval = int(os.environ.get('MONITOR_INTERVAL_SECONDS', 15))
         
@@ -159,7 +159,7 @@ class Config:
         self.log_history_preview_length = int(os.environ.get('LOG_HISTORY_PREVIEW_LENGTH', 50))
         self.log_max_history_entries = int(os.environ.get('LOG_MAX_HISTORY_ENTRIES', 2))
         
-        # Phase 2: Multi-agent configuration (for future use)
+        # Phase 2: Multi-agent configuration (for individual use or testing)
         self.oscar_knowledge_agent_id = os.environ.get('OSCAR_KNOWLEDGE_AGENT_ID')
         self.oscar_knowledge_agent_alias_id = os.environ.get('OSCAR_KNOWLEDGE_AGENT_ALIAS_ID')
         self.oscar_metrics_agent_id = os.environ.get('OSCAR_METRICS_AGENT_ID')
@@ -168,10 +168,6 @@ class Config:
         self.oscar_build_agent_alias_id = os.environ.get('OSCAR_BUILD_AGENT_ALIAS_ID')
         self.oscar_test_agent_id = os.environ.get('OSCAR_TEST_AGENT_ID')
         self.oscar_test_agent_alias_id = os.environ.get('OSCAR_TEST_AGENT_ALIAS_ID')
-        
-        # Agent routing configuration (Phase 2)
-        self.enable_multi_agent = os.environ.get('ENABLE_MULTI_AGENT', 'false').lower() == 'true'
-        self.default_agent = os.environ.get('DEFAULT_AGENT', 'knowledge')
     
     def get_slack_credentials(self) -> Tuple[Optional[str], Optional[str]]:
         """
@@ -184,6 +180,5 @@ class Config:
 
 # Create a singleton instance with validation based on context
 # Allow disabling validation via environment variable for communication handler
-import os
 _disable_validation = os.environ.get('DISABLE_CONFIG_VALIDATION', 'false').lower() == 'true'
 config = Config(validate_required=not _disable_validation)
