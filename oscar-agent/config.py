@@ -19,6 +19,7 @@ Classes:
 import logging
 import os
 from typing import Optional, Tuple
+import json
 
 logger = logging.getLogger(__name__)
 
@@ -128,13 +129,14 @@ class Config:
         }
         
         
-        # Channel mappings
-        self.channel_mappings = {
-            'opensearch-release-manager': os.environ.get('CHANNEL_MAPPING_RELEASE_MANAGER', 'C096MV7JZ0T'),
-            'private-oscar-test': os.environ.get('CHANNEL_MAPPING_TEST', 'C09827S7CEB'),
-            'opensearch-3-2-0-release': os.environ.get('CHANNEL_MAPPING_3_2_0_RELEASE', 'C088XMSH4DA'),
-            'riley-needs-to-lock-in': os.environ.get('CHANNEL_MAPPING_RILEY', 'C091EH1JKCL')
-        }
+        # Channel mappings - load from JSON string in environment
+        channel_mappings_str = os.environ.get('CHANNEL_MAPPINGS', '{}')
+        try:
+            self.channel_mappings = json.loads(channel_mappings_str)
+        except json.JSONDecodeError as e:
+            logger.error(f"Failed to parse CHANNEL_MAPPINGS JSON: {e}")
+            # Fallback to empty dict
+            self.channel_mappings = {}
         
         # Regex patterns
         self.patterns = {

@@ -107,6 +107,9 @@ echo "✅ Created deployment package: $DEPLOYMENT_PACKAGE"
 
 # Check if Lambda function exists
 # Create environment variables for communication handler
+# Escape the CHANNEL_MAPPINGS JSON for proper embedding
+ESCAPED_CHANNEL_MAPPINGS=$(echo "$CHANNEL_MAPPINGS" | sed 's/"/\\"/g')
+
 cat > $TEMP_DIR/env-vars.json << EOF
 {
     "Variables": {
@@ -118,10 +121,7 @@ cat > $TEMP_DIR/env-vars.json << EOF
         "MESSAGE_PREVIEW_LENGTH": "${MESSAGE_PREVIEW_LENGTH:-100}",
         "BEDROCK_RESPONSE_MESSAGE_VERSION": "${BEDROCK_RESPONSE_MESSAGE_VERSION:-1.0}",
         "BEDROCK_ACTION_GROUP_NAME": "${BEDROCK_ACTION_GROUP_NAME:-communication-orchestration}",
-        "CHANNEL_MAPPING_RELEASE_MANAGER": "${CHANNEL_MAPPING_RELEASE_MANAGER:-C096MV7JZ0T}",
-        "CHANNEL_MAPPING_TEST": "${CHANNEL_MAPPING_TEST:-C09827S7CEB}",
-        "CHANNEL_MAPPING_3_2_0_RELEASE": "${CHANNEL_MAPPING_3_2_0_RELEASE:-C088XMSH4DA}",
-        "CHANNEL_MAPPING_RILEY": "${CHANNEL_MAPPING_RILEY:-C091EH1JKCL}"
+        "CHANNEL_MAPPINGS": "$ESCAPED_CHANNEL_MAPPINGS"
     }
 }
 EOF
@@ -140,10 +140,12 @@ if aws lambda get-function --function-name $FUNCTION_NAME --region $AWS_REGION >
     echo "⏳ Waiting for code update to complete..."
     aws lambda wait function-updated --function-name $FUNCTION_NAME --region $AWS_REGION
     
-    # Update environment variables
+    # Update environment variables, timeout, and memory
     aws lambda update-function-configuration \
         --function-name $FUNCTION_NAME \
         --environment file://$TEMP_DIR/env-vars.json \
+        --timeout ${LAMBDA_TIMEOUT:-150} \
+        --memory-size ${LAMBDA_MEMORY_SIZE:-512} \
         --region $AWS_REGION >/dev/null
 
     echo "✅ Updated Lambda function code: $FUNCTION_NAME"
