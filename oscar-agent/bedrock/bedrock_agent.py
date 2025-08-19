@@ -48,13 +48,14 @@ class BedrockAgentCore:
             f"Alias: {self.agent_alias_id}, Region: {self.region}"
         )
     
-    def create_agent_request(self, query: str, session_id: Optional[str] = None) -> Dict[str, Any]:
+    def create_agent_request(self, query: str, session_id: Optional[str] = None, user_id: Optional[str] = None) -> Dict[str, Any]:
         """
         Create a request for the Bedrock agent.
         
         Args:
             query: The user's query
             session_id: Optional session ID for maintaining conversation context
+            user_id: Optional user ID for authorization and context
             
         Returns:
             A dictionary containing the request parameters
@@ -66,15 +67,23 @@ class BedrockAgentCore:
             'sessionId': session_id or f"session-{int(time.time())}"  # Generate session ID if None
         }
         
+        # Add session attributes if user_id is provided
+        if user_id:
+            request['sessionAttributes'] = {
+                'user_id': user_id
+            }
+            logger.info(f"Added user_id to session attributes: {user_id}")
+        
         return request
     
-    def invoke_agent(self, query: str, session_id: Optional[str] = None) -> Tuple[str, Optional[str]]:
+    def invoke_agent(self, query: str, session_id: Optional[str] = None, user_id: Optional[str] = None) -> Tuple[str, Optional[str]]:
         """
         Invoke the Bedrock agent with the given query.
         
         Args:
             query: The user's query
             session_id: Optional session ID for maintaining conversation context
+            user_id: Optional user ID for authorization and context
             
         Returns:
             A tuple containing (response_text, session_id)
@@ -82,7 +91,7 @@ class BedrockAgentCore:
         Raises:
             Exception: If the agent invocation fails after all retries
         """
-        request = self.create_agent_request(query, session_id)
+        request = self.create_agent_request(query, session_id, user_id)
         logger.info(f"Invoking agent with request: {json.dumps({k: v for k, v in request.items() if k != 'inputText'}, indent=2)}")
         logger.info(f"Query: {query[:config.log_query_preview_length]}...")
         

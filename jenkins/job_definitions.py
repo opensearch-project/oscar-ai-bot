@@ -178,7 +178,7 @@ class CentralReleasePromotionJob(BaseJobDefinition):
     """Central release promotion pipeline job definition."""
     
     def get_job_name(self) -> str:
-        return "Pipeline central-release-promotion"
+        return "central-release-promotion"
     
     def get_description(self) -> str:
         return "Promotes OpenSearch and OpenSearch Dashboards release candidates to final release. Requires release version and RC build numbers for both OpenSearch and OpenSearch Dashboards."

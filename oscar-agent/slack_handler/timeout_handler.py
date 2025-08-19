@@ -80,7 +80,7 @@ class TimeoutHandler:
                 
                 # Query the agent
                 response, new_session_id = oscar_agent.query(
-                    query, session_id=session_id, context_summary=context_summary
+                    query, session_id=session_id, context_summary=context_summary, user_id=user_id
                 )
                 result_queue.put(("success", response, new_session_id))
             except Exception as e:

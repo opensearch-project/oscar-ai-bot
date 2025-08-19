@@ -29,32 +29,39 @@ class JenkinsCredentials:
     def _load_credentials(self) -> None:
         """Load credentials from configuration (already loaded from secrets manager)."""
         if self._credentials_loaded:
+            logger.info(f"🔐 JENKINS CREDENTIALS: Already loaded, skipping")
             return
         
         try:
+            logger.info(f"🔐 JENKINS CREDENTIALS: Loading credentials from config")
             # Get the Jenkins API token from config (already loaded from secrets manager)
             jenkins_api_token = config.jenkins_api_token
             
             if not jenkins_api_token:
+                logger.error(f"❌ JENKINS CREDENTIALS: JENKINS_API_TOKEN not found in configuration")
                 raise ValueError("JENKINS_API_TOKEN not found in configuration")
             
+            logger.info(f"🔐 JENKINS CREDENTIALS: Found API token, parsing username:token format")
             # Parse the token in format "username:token"
             if ':' in jenkins_api_token:
                 self._username, self._token = jenkins_api_token.split(':', 1)
                 self._username = self._username.strip()
                 self._token = self._token.strip()
                 self._credentials_loaded = True
-                logger.info(f"Successfully loaded Jenkins credentials for user: {self._username}")
+                logger.info(f"✅ JENKINS CREDENTIALS: Successfully loaded credentials for user: {self._username}")
             else:
+                logger.error(f"❌ JENKINS CREDENTIALS: Invalid token format, should be 'username:token'")
                 raise ValueError("Jenkins API token format should be 'username:token'")
                 
         except Exception as e:
-            logger.error(f"Error loading Jenkins credentials: {e}")
+            logger.error(f"❌ JENKINS CREDENTIALS: Error loading credentials: {e}")
             raise Exception(f"Failed to load Jenkins credentials: {str(e)}")
     
     def get_auth(self) -> HTTPBasicAuth:
         """Get HTTP Basic Auth object for requests."""
+        logger.info(f"🔐 JENKINS CREDENTIALS: get_auth() called - this triggers credential loading")
         self._load_credentials()
+        logger.info(f"🔐 JENKINS CREDENTIALS: Returning HTTPBasicAuth object for user: {self._username}")
         return HTTPBasicAuth(self._username, self._token)
     
     def get_username(self) -> str:
@@ -87,19 +94,27 @@ class JenkinsClient:
             Dictionary containing the result of the job trigger
         """
         try:
+            logger.info(f"🚀 JENKINS CLIENT: trigger_job called for job_name='{job_name}' with parameters={parameters}")
+            logger.info(f"🚀 JENKINS CLIENT: This method WILL make HTTP requests to Jenkins")
+            
             # Validate job exists and parameters
             job_def = job_registry.get_job(job_name)
             if not job_def:
+                logger.error(f"❌ JENKINS CLIENT: Unknown job '{job_name}'")
                 return {
                     'status': 'error',
                     'message': f'Unknown job: {job_name}',
                     'available_jobs': job_registry.list_jobs()
                 }
             
+            logger.info(f"✅ JENKINS CLIENT: Job '{job_name}' found, validating parameters")
+            
             # Validate and normalize parameters
             try:
                 validated_params = job_registry.validate_job_parameters(job_name, parameters)
+                logger.info(f"✅ JENKINS CLIENT: Parameters validated: {validated_params}")
             except ValueError as e:
+                logger.error(f"❌ JENKINS CLIENT: Parameter validation failed: {e}")
                 return {
                     'status': 'error',
                     'message': f'Parameter validation failed: {str(e)}',
@@ -108,22 +123,26 @@ class JenkinsClient:
             
             # Build the request
             url = config.get_build_with_parameters_url(job_name)
+            logger.info(f"🌐 JENKINS CLIENT: About to load credentials for HTTP request")
             auth = self.credentials.get_auth()
             
-            logger.info(f"Triggering Jenkins job: {job_name}")
-            logger.info(f"URL: {url}")
-            logger.info(f"Parameters: {validated_params}")
-            logger.info(f"Equivalent curl command: curl -XPOST {url} " + 
+            logger.info(f"🌐 JENKINS CLIENT: Making HTTP POST request to Jenkins")
+            logger.info(f"🌐 JENKINS CLIENT: URL: {url}")
+            logger.info(f"🌐 JENKINS CLIENT: Parameters: {validated_params}")
+            logger.info(f"🌐 JENKINS CLIENT: Equivalent curl: curl -XPOST {url} " + 
                        " ".join([f"--data {k}={v}" for k, v in validated_params.items()]) + 
                        f" --user {self.credentials.get_curl_auth_string()}")
             
             # Make the request
+            logger.info(f"🌐 JENKINS CLIENT: Executing HTTP POST request NOW")
             response = self.session.post(
                 url,
                 data=validated_params,
                 auth=auth,
                 allow_redirects=False  # Jenkins returns 201 with Location header
             )
+            
+            logger.info(f"🌐 JENKINS CLIENT: HTTP request completed with status: {response.status_code}")
             
             logger.info(f"Response status: {response.status_code}")
             logger.info(f"Response headers: {dict(response.headers)}")
@@ -258,17 +277,25 @@ class JenkinsClient:
             Dictionary containing job information
         """
         try:
+            logger.info(f"📋 JENKINS CLIENT: get_job_info called for job_name='{job_name}'")
+            logger.info(f"📋 JENKINS CLIENT: This method should NOT make HTTP requests")
+            
             # Check if we know about this job
             job_def = job_registry.get_job(job_name)
             if not job_def:
+                logger.warning(f"⚠️ JENKINS CLIENT: Unknown job '{job_name}'")
                 return {
                     'status': 'error',
                     'message': f'Unknown job: {job_name}',
                     'available_jobs': job_registry.list_jobs()
                 }
             
+            logger.info(f"✅ JENKINS CLIENT: Found job definition for '{job_name}'")
+            logger.info(f"📋 JENKINS CLIENT: Job description: {job_def.description}")
+            logger.info(f"📋 JENKINS CLIENT: Job parameters: {list(job_def.get_parameter_info().keys())}")
+            
             # Return job definition info (don't need to call Jenkins API for this)
-            return {
+            result = {
                 'status': 'success',
                 'job_name': job_name,
                 'description': job_def.description,
@@ -276,6 +303,9 @@ class JenkinsClient:
                 'parameter_definitions': job_def.get_parameter_info(),
                 'jenkins_url': config.jenkins_url
             }
+            
+            logger.info(f"✅ JENKINS CLIENT: get_job_info completed successfully for '{job_name}' - NO HTTP REQUESTS MADE")
+            return result
                 
         except Exception as e:
             logger.error(f"Error getting job info for {job_name}: {e}", exc_info=True)
