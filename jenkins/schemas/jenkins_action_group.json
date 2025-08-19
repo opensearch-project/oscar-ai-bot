@@ -1,37 +1,7 @@
 [
   {
-    "name": "docker_scan",
-    "description": "Trigger Docker security scan job on Jenkins for the specified Docker image. Use when users ask to scan Docker images for security vulnerabilities. Requires image_name parameter (e.g., 'alpine:3.19', 'opensearch:2.11.0'). Examples: 'scan alpine:3.19', 'run security scan on nginx:latest'",
-    "parameters": {
-      "image_name": {
-        "description": "Full Docker image name including tag (e.g., alpine:3.19, opensearchproject/opensearch:2.11.0)",
-        "type": "string",
-        "required": true
-      }
-    },
-    "requireConfirmation": "DISABLED"
-  },
-  {
-    "name": "trigger_job",
-    "description": "Trigger any supported Jenkins job with specified parameters. Use for generic job triggering when users specify a job name and parameters. First use get_job_info to understand the required parameters for the job, then call this function with the job_name and all required parameters as individual parameters (not as JSON). Supports all registered Jenkins jobs with parameter validation.",
-    "parameters": {
-      "job_name": {
-        "description": "Name of the Jenkins job to trigger (e.g., 'docker-scan', 'Pipeline central-release-promotion')",
-        "type": "string",
-        "required": true
-      }
-    },
-    "requireConfirmation": "DISABLED"
-  },
-  {
-    "name": "test_connection",
-    "description": "Test connection to Jenkins server and validate credentials. Use for troubleshooting or verification. Returns Jenkins version and server information. No parameters required.",
-    "parameters": {},
-    "requireConfirmation": "DISABLED"
-  },
-  {
     "name": "get_job_info",
-    "description": "Retrieve detailed information about a Jenkins job including parameters and requirements. Use when users need to understand job requirements or available parameters. Defaults to docker-scan job if no job specified.",
+    "description": "Get detailed information about a Jenkins job including parameters and requirements. Use this to understand what parameters a job needs before executing it. Does not execute the job.",
     "parameters": {
       "job_name": {
         "description": "Name of the Jenkins job to get information about (defaults to docker-scan)",
@@ -46,5 +16,34 @@
     "description": "List all Jenkins jobs supported by this agent with their parameters and descriptions. Use when users ask 'what jobs are available?' or need to see all supported Jenkins operations.",
     "parameters": {},
     "requireConfirmation": "DISABLED"
+  },
+  {
+    "name": "trigger_job",
+    "description": "Execute any supported Jenkins job with specified parameters. Use for job execution when users specify/confirm a job name and parameters. Supports all registered Jenkins jobs with parameter validation.",
+    "parameters": {
+      "job_parameters": {
+        "description": "JSON object containing job-specific parameters. Each job has different required and optional parameters.",
+        "required": "False",
+        "type": "string"
+      },
+      "job_name": {
+        "description": "Name of the Jenkins job to trigger (e.g., 'docker-scan', 'Pipeline central-release-promotion, etc.')",
+        "required": "False",
+        "type": "string"
+      }
+    },
+    "requireConfirmation": "DISABLED"
   }
 ]
+
+{
+  "name": "test_connection",
+  "description": "Test connection to Jenkins server. ONLY use when explicitly asked to test connectivity by the user or to troubleshoot connection issues. Do not use this function as part of normal job execution workflow unless explicitly invoked.\n",
+  "parameters": {},
+  "requireConfirmation": "DISABLED"
+}
+
+### `test_connection`
+- Tests connection to Jenkins server
+- No parameters required
+- Use for troubleshooting connectivity issues, ONLY WHEN EXPLICITLY DEMANDED BY THE USER, NOT THROUGH THE REGULAR JENKINS CALLING WORKFLOW

@@ -53,8 +53,6 @@ def lambda_handler(event: Dict[str, Any], context) -> Dict[str, Any]:
         # Route to appropriate handler
         if function_name == 'trigger_job':
             result = handle_trigger_job(jenkins_client, params)
-        elif function_name == 'docker_scan':
-            result = handle_docker_scan(jenkins_client, params)
         elif function_name == 'test_connection':
             result = handle_test_connection(jenkins_client)
         elif function_name == 'get_job_info':
@@ -66,7 +64,7 @@ def lambda_handler(event: Dict[str, Any], context) -> Dict[str, Any]:
                 'status': 'error',
                 'message': f'Unknown function: {function_name}',
                 'available_functions': [
-                    'trigger_job', 'docker_scan', 'test_connection', 
+                    'trigger_job', 'test_connection', 
                     'get_job_info', 'list_jobs'
                 ]
             }
@@ -195,28 +193,41 @@ def handle_list_jobs(jenkins_client: JenkinsClient) -> Dict[str, Any]:
 
 def create_response(event: Dict[str, Any], result: Dict[str, Any]) -> Dict[str, Any]:
     """
-    Create a standardized Lambda response.
+    Create a standardized Lambda response for Bedrock action groups.
     
     Args:
         event: Original Lambda event
         result: Result dictionary to return
         
     Returns:
-        Standardized Lambda response
+        Properly formatted Bedrock action group response
     """
-    response = {
-        'statusCode': 200,
-        'body': json.dumps(result, indent=2),
-        'headers': {
-            'Content-Type': 'application/json'
+    action_group = event.get('actionGroup', 'jenkins-operations')
+    function = event.get('function', 'unknown')
+    
+    logger.info(f"Creating Bedrock response for action_group={action_group}, function={function}")
+    
+    # Serialize result to JSON string as required by Bedrock
+    response_body_string = json.dumps(result, default=str)
+    
+    # Create the proper Bedrock action group response format
+    bedrock_response = {
+        "messageVersion": "1.0",
+        "response": {
+            "actionGroup": action_group,
+            "function": function,
+            "functionResponse": {
+                "responseBody": {
+                    "TEXT": {
+                        "body": response_body_string
+                    }
+                }
+            }
         }
     }
     
-    # Preserve session information if available
-    if 'sessionId' in event:
-        response['sessionId'] = event['sessionId']
-    
-    return response
+    logger.info(f"Created Bedrock response with body length: {len(response_body_string)}")
+    return bedrock_response
 
 # For local testing
 if __name__ == "__main__":
