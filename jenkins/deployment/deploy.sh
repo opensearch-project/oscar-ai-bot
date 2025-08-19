@@ -29,7 +29,7 @@ TEMP_DIR=$(mktemp -d)
 echo "📁 Using temporary directory: $TEMP_DIR"
 
 # Copy all Python files for modular deployment
-cp *.py "$TEMP_DIR/"
+cp -rp ../jenkins/* "$TEMP_DIR/"
 cp requirements.txt "$TEMP_DIR/"
 
 # Install dependencies
@@ -92,7 +92,7 @@ EOF
                 "secretsmanager:GetSecretValue"
             ],
             "Resource": [
-                "$SECRET_ARN"
+                "arn:aws:secretsmanager:us-east-1:395380602281:secret:oscar-central-env-*"
             ]
         }
     ]
@@ -139,7 +139,7 @@ aws lambda create-function \
     --zip-file fileb://deployment/jenkins-agent-deployment.zip \
     --timeout 180 \
     --memory-size 512 \
-    --environment Variables="{JENKINS_URL=https://ci-staging.opensearch.org,JENKINS_SECRET_NAME=jenkins-api-token,LOG_LEVEL=INFO}" \
+    --environment Variables="{JENKINS_URL=https://build.ci.opensearch.org,JENKINS_SECRET_NAME=jenkins-api-token,LOG_LEVEL=INFO}" \
     --region "$AWS_REGION" > /dev/null
 
 echo "✅ Lambda function created successfully"

@@ -9,3 +9,5 @@ requests>=2.31.0
 
 # Additional utilities (if needed)
 urllib3>=2.0.0
+
+python-dotenv

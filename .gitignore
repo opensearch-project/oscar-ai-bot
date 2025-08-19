@@ -8,6 +8,10 @@ build_docs/
 metrics/docs/
 .kiro/
 instructions.md
+instructions.txt
+deployment_scripts/
+lambda_update_scripts/
+bedrock/README.md
 
 # Build outputs
 build_docs/

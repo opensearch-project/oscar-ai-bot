@@ -8,7 +8,6 @@ checking status, and managing Jenkins operations through the REST API.
 
 import json
 import logging
-import boto3
 import requests
 from requests.auth import HTTPBasicAuth
 from typing import Dict, Any, Optional, Tuple
@@ -20,7 +19,7 @@ from job_definitions import job_registry
 logger = logging.getLogger(__name__)
 
 class JenkinsCredentials:
-    """Manages Jenkins credentials from AWS Secrets Manager."""
+    """Manages Jenkins credentials from configuration."""
     
     def __init__(self):
         self._username: Optional[str] = None
@@ -28,33 +27,30 @@ class JenkinsCredentials:
         self._credentials_loaded = False
     
     def _load_credentials(self) -> None:
-        """Load credentials from AWS Secrets Manager."""
+        """Load credentials from configuration (already loaded from secrets manager)."""
         if self._credentials_loaded:
             return
         
         try:
-            session = boto3.session.Session()
-            client = session.client(
-                service_name='secretsmanager',
-                region_name=config.aws_region
-            )
+            # Get the Jenkins API token from config (already loaded from secrets manager)
+            jenkins_api_token = config.jenkins_api_token
             
-            response = client.get_secret_value(SecretId=config.jenkins_secret_name)
-            secret_value = response['SecretString']
+            if not jenkins_api_token:
+                raise ValueError("JENKINS_API_TOKEN not found in configuration")
             
-            # Parse the secret in format "username:token"
-            if ':' in secret_value:
-                self._username, self._token = secret_value.split(':', 1)
+            # Parse the token in format "username:token"
+            if ':' in jenkins_api_token:
+                self._username, self._token = jenkins_api_token.split(':', 1)
                 self._username = self._username.strip()
                 self._token = self._token.strip()
                 self._credentials_loaded = True
                 logger.info(f"Successfully loaded Jenkins credentials for user: {self._username}")
             else:
-                raise ValueError("Secret format should be 'username:token'")
+                raise ValueError("Jenkins API token format should be 'username:token'")
                 
         except Exception as e:
-            logger.error(f"Error retrieving Jenkins credentials: {e}")
-            raise Exception(f"Failed to retrieve Jenkins credentials: {str(e)}")
+            logger.error(f"Error loading Jenkins credentials: {e}")
+            raise Exception(f"Failed to load Jenkins credentials: {str(e)}")
     
     def get_auth(self) -> HTTPBasicAuth:
         """Get HTTP Basic Auth object for requests."""

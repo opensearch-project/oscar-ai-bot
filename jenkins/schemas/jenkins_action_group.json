@@ -13,17 +13,12 @@
   },
   {
     "name": "trigger_job",
-    "description": "Trigger any supported Jenkins job with specified parameters. Use for generic job triggering when users specify a job name and parameters. Supports all registered Jenkins jobs with parameter validation.",
+    "description": "Trigger any supported Jenkins job with specified parameters. Use for generic job triggering when users specify a job name and parameters. First use get_job_info to understand the required parameters for the job, then call this function with the job_name and all required parameters as individual parameters (not as JSON). Supports all registered Jenkins jobs with parameter validation.",
     "parameters": {
       "job_name": {
-        "description": "Name of the Jenkins job to trigger (e.g., docker-scan, build)",
+        "description": "Name of the Jenkins job to trigger (e.g., 'docker-scan', 'Pipeline central-release-promotion')",
         "type": "string",
         "required": true
-      },
-      "job_parameters": {
-        "description": "JSON object containing job-specific parameters. Each job has different required and optional parameters.",
-        "type": "string",
-        "required": false
       }
     },
     "requireConfirmation": "DISABLED"

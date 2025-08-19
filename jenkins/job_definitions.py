@@ -91,22 +91,34 @@ class BaseJobDefinition(ABC):
             elif param_def.parameter_type == "string":
                 param_value = str(param_value)
             
+            # Validate pattern if specified
+            if param_def.validation_pattern and param_def.parameter_type == "string":
+                import re
+                if not re.match(param_def.validation_pattern, param_value):
+                    raise ValueError(
+                        f"Parameter '{param_name}' does not match required pattern. "
+                        f"Expected format for {param_def.description.lower()}"
+                    )
+            
             validated[param_name] = param_value
         
         return validated
     
     def get_parameter_info(self) -> Dict[str, Dict[str, Any]]:
         """Get information about all parameters for this job."""
-        return {
-            param.name: {
+        param_info = {}
+        for param in self.parameters:
+            info = {
                 'description': param.description,
                 'required': param.required,
                 'type': param.parameter_type,
                 'default': param.default_value,
                 'choices': param.choices
             }
-            for param in self.parameters
-        }
+            if param.validation_pattern:
+                info['validation_pattern'] = param.validation_pattern
+            param_info[param.name] = info
+        return param_info
 
 class DockerScanJob(BaseJobDefinition):
     """Docker security scan job definition."""
@@ -162,6 +174,38 @@ class BuildJob(BaseJobDefinition):
             )
         ]
 
+class CentralReleasePromotionJob(BaseJobDefinition):
+    """Central release promotion pipeline job definition."""
+    
+    def get_job_name(self) -> str:
+        return "Pipeline central-release-promotion"
+    
+    def get_description(self) -> str:
+        return "Promotes OpenSearch and OpenSearch Dashboards release candidates to final release. Requires release version and RC build numbers for both OpenSearch and OpenSearch Dashboards."
+    
+    def get_parameters(self) -> List[JobParameter]:
+        return [
+            JobParameter(
+                name="RELEASE_VERSION",
+                description="Release version (e.g., 2.11.0, 3.0.0)",
+                required=True,
+                parameter_type="string",
+                validation_pattern=r"^\d+\.\d+\.\d+$"
+            ),
+            JobParameter(
+                name="OPENSEARCH_RC_BUILD_NUMBER",
+                description="OpenSearch Release Candidate Build Number",
+                required=True,
+                parameter_type="string"
+            ),
+            JobParameter(
+                name="OPENSEARCH_DASHBOARDS_RC_BUILD_NUMBER",
+                description="OpenSearch Dashboards Release Candidate Build Number",
+                required=True,
+                parameter_type="string"
+            )
+        ]
+
 class JobRegistry:
     """Registry for managing available Jenkins jobs."""
     
@@ -173,6 +217,7 @@ class JobRegistry:
         """Register the default set of Jenkins jobs."""
         self.register_job(DockerScanJob())
         self.register_job(BuildJob())
+        self.register_job(CentralReleasePromotionJob())
     
     def register_job(self, job_definition: BaseJobDefinition):
         """Register a new job definition."""
