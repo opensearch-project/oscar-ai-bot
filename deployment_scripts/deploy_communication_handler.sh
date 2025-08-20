@@ -285,7 +285,7 @@ if aws lambda get-function --function-name $FUNCTION_NAME --region $AWS_REGION >
         --handler lambda_function.lambda_handler \
         --timeout ${LAMBDA_TIMEOUT:-150} \
         --memory-size ${LAMBDA_MEMORY_SIZE:-512} \
-        --environment Variables="{SLACK_BOT_TOKEN=$SLACK_BOT_TOKEN,CONTEXT_TABLE_NAME=oscar-agent-context}" \
+        --environment Variables="{DISABLE_CONFIG_VALIDATION=true}" \
         --region $AWS_REGION
 
     echo "✅ Updated Lambda function: $FUNCTION_NAME"
@@ -300,7 +300,7 @@ else
         --zip-file fileb://$DEPLOYMENT_PACKAGE \
         --timeout ${LAMBDA_TIMEOUT:-150} \
         --memory-size ${LAMBDA_MEMORY_SIZE:-512} \
-        --environment Variables="{SLACK_BOT_TOKEN=$SLACK_BOT_TOKEN,CONTEXT_TABLE_NAME=oscar-agent-context}" \
+        --environment Variables="{DISABLE_CONFIG_VALIDATION=true}" \
         --region $AWS_REGION
 
     echo "✅ Created Lambda function: $FUNCTION_NAME"

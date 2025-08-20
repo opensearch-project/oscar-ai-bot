@@ -139,7 +139,7 @@ aws lambda create-function \
     --zip-file fileb://deployment/jenkins-agent-deployment.zip \
     --timeout 180 \
     --memory-size 512 \
-    --environment Variables="{JENKINS_URL=https://build.ci.opensearch.org,JENKINS_SECRET_NAME=jenkins-api-token,LOG_LEVEL=INFO}" \
+
     --region "$AWS_REGION" > /dev/null
 
 echo "✅ Lambda function created successfully"

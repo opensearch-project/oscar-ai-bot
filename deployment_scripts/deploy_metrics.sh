@@ -127,23 +127,11 @@ for func_config in "${AGENT_FUNCTIONS[@]}"; do
     
     echo "🚀 Deploying $FUNCTION_NAME ($AGENT_TYPE)..."
     
-    # Create environment variables for this agent type
+    # Create minimal environment variables (config now comes from Secrets Manager)
     cat > env-vars.json << EOF
 {
     "Variables": {
-        "OPENSEARCH_HOST": "$OPENSEARCH_HOST",
-        "OPENSEARCH_REGION": "$OPENSEARCH_REGION",
-        "OPENSEARCH_SERVICE": "$OPENSEARCH_SERVICE",
-        "OPENSEARCH_DOMAIN_ARN": "$OPENSEARCH_DOMAIN_ARN",
-        "VPC_ID": "$VPC_ID",
-        "SUBNET_IDS": "$SUBNET_IDS",
-        "SECURITY_GROUP_ID": "$SECURITY_GROUP_ID",
-        "LOG_LEVEL": "${LOG_LEVEL:-INFO}",
-        "REQUEST_TIMEOUT": "${REQUEST_TIMEOUT:-30}",
-        "MAX_RESULTS": "${MAX_RESULTS:-50}",
-        "MOCK_MODE": "${MOCK_MODE:-false}",
-        "AGENT_TYPE": "$AGENT_TYPE",
-        "METRICS_ROLE_ARN": "${METRICS_ROLE_ARN:-arn:aws:iam::979020455945:role/OpenSearchOscarAccessRole}"
+        "AGENT_TYPE": "$AGENT_TYPE"
     }
 }
 EOF

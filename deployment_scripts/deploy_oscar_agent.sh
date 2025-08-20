@@ -340,48 +340,7 @@ fi
 ROLE_ARN=$(aws iam get-role --role-name $LAMBDA_ROLE_NAME --region $AWS_REGION --query 'Role.Arn' --output text)
 echo "📋 Using IAM role: $ROLE_ARN"
 
-# Create environment variables JSON file
-cat > $TEMP_DIR/env-vars.json << EOF
-{
-    "Variables": {
-        "SLACK_BOT_TOKEN": "$SLACK_BOT_TOKEN",
-        "SLACK_SIGNING_SECRET": "$SLACK_SIGNING_SECRET",
-        "OSCAR_BEDROCK_AGENT_ID": "$OSCAR_BEDROCK_AGENT_ID",
-        "OSCAR_BEDROCK_AGENT_ALIAS_ID": "${OSCAR_BEDROCK_AGENT_ALIAS_ID:-TSTALIASID}",
-        "SESSIONS_TABLE_NAME": "${SESSIONS_TABLE_NAME:-oscar-agent-sessions}",
-        "CONTEXT_TABLE_NAME": "${CONTEXT_TABLE_NAME:-oscar-agent-context}",
-        "ENABLE_DM": "$ENABLE_DM",
-        "DEDUP_TTL": "${DEDUP_TTL:-300}",
-        "SESSION_TTL": "${SESSION_TTL:-3600}",
-        "CONTEXT_TTL": "${CONTEXT_TTL:-604800}",
-        "MAX_CONTEXT_LENGTH": "${MAX_CONTEXT_LENGTH:-3000}",
-        "CONTEXT_SUMMARY_LENGTH": "${CONTEXT_SUMMARY_LENGTH:-500}",
-        "AGENT_TIMEOUT": "${AGENT_TIMEOUT:-60}",
-        "AGENT_MAX_RETRIES": "${AGENT_MAX_RETRIES:-2}",
-        "CHANNEL_ALLOW_LIST": "$CHANNEL_ALLOW_LIST",
-        "AUTHORIZED_MESSAGE_SENDERS": "$AUTHORIZED_MESSAGE_SENDERS",
-        "METRICS_CROSS_ACCOUNT_ROLE_ARN": "$METRICS_CROSS_ACCOUNT_ROLE_ARN",
-        "HOURGLASS_THRESHOLD_SECONDS": "${HOURGLASS_THRESHOLD_SECONDS:-45}",
-        "TIMEOUT_THRESHOLD_SECONDS": "${TIMEOUT_THRESHOLD_SECONDS:-120}",
-        "MAX_WORKERS": "${MAX_WORKERS:-50}",
-        "MAX_ACTIVE_QUERIES": "${MAX_ACTIVE_QUERIES:-50}",
-        "MONITOR_INTERVAL_SECONDS": "${MONITOR_INTERVAL_SECONDS:-15}",
-        "MESSAGE_PREVIEW_LENGTH": "${MESSAGE_PREVIEW_LENGTH:-100}",
-        "QUERY_PREVIEW_LENGTH": "${QUERY_PREVIEW_LENGTH:-50}",
-        "RESPONSE_PREVIEW_LENGTH": "${RESPONSE_PREVIEW_LENGTH:-50}",
-        "SLACK_HANDLER_THREAD_NAME_PREFIX": "${SLACK_HANDLER_THREAD_NAME_PREFIX:-oscar-agent}",
-        "BEDROCK_RESPONSE_MESSAGE_VERSION": "${BEDROCK_RESPONSE_MESSAGE_VERSION:-1.0}",
-        "BEDROCK_ACTION_GROUP_NAME": "${BEDROCK_ACTION_GROUP_NAME:-communication-orchestration}",
-        "AGENT_QUERY_ANNOUNCE": "$AGENT_QUERY_ANNOUNCE",
-        "AGENT_QUERY_ASSIGN_OWNER": "$AGENT_QUERY_ASSIGN_OWNER",
-        "AGENT_QUERY_REQUEST_OWNER": "$AGENT_QUERY_REQUEST_OWNER",
-        "AGENT_QUERY_RC_DETAILS": "$AGENT_QUERY_RC_DETAILS",
-        "AGENT_QUERY_MISSING_NOTES": "$AGENT_QUERY_MISSING_NOTES",
-        "AGENT_QUERY_INTEGRATION_TEST": "$AGENT_QUERY_INTEGRATION_TEST",
-        "AGENT_QUERY_BROADCAST": "$AGENT_QUERY_BROADCAST"
-    }
-}
-EOF
+# Environment variables now come from Secrets Manager - no need to set them here
 
 # Check if Lambda function exists
 echo "🔍 Checking if Lambda function exists..."
@@ -398,14 +357,13 @@ if aws lambda get-function --function-name $FUNCTION_NAME --region $AWS_REGION >
     echo "⏳ Waiting for code update to complete..."
     aws lambda wait function-updated --function-name $FUNCTION_NAME --region $AWS_REGION
 
-    # Update function configuration
+    # Update function configuration (environment variables come from Secrets Manager)
     aws lambda update-function-configuration \
         --function-name $FUNCTION_NAME \
         --runtime python3.12 \
         --handler lambda_function.lambda_handler \
         --timeout 150 \
         --memory-size 512 \
-        --environment file://$TEMP_DIR/env-vars.json \
         --region $AWS_REGION >/dev/null
 
     echo "✅ Updated Lambda function: $FUNCTION_NAME"
@@ -420,7 +378,6 @@ else
         --zip-file fileb://$DEPLOYMENT_PACKAGE \
         --timeout 150 \
         --memory-size 512 \
-        --environment file://$TEMP_DIR/env-vars.json \
         --region $AWS_REGION >/dev/null
 
     echo "✅ Created Lambda function: $FUNCTION_NAME"

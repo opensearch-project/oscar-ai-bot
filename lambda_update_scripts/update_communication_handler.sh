@@ -107,22 +107,11 @@ DEPLOYMENT_PACKAGE="$TEMP_DIR/../communication-handler-update.zip"
 echo "✅ Created deployment package: $DEPLOYMENT_PACKAGE"
 
 # Check if Lambda function exists
-# Create environment variables for communication handler
-# Escape the CHANNEL_MAPPINGS JSON for proper embedding
-ESCAPED_CHANNEL_MAPPINGS=$(echo "$CHANNEL_MAPPINGS" | sed 's/"/\\"/g')
-
+# Set minimal environment variables (most config now comes from Secrets Manager)
 cat > $TEMP_DIR/env-vars.json << EOF
 {
     "Variables": {
-        "SLACK_BOT_TOKEN": "$SLACK_BOT_TOKEN",
-        "DISABLE_CONFIG_VALIDATION": "true",
-        "CHANNEL_ALLOW_LIST": "$CHANNEL_ALLOW_LIST",
-        "CONTEXT_TTL": "${CONTEXT_TTL:-604800}",
-        "CONTEXT_TABLE_NAME": "${CONTEXT_TABLE_NAME:-oscar-agent-context}",
-        "MESSAGE_PREVIEW_LENGTH": "${MESSAGE_PREVIEW_LENGTH:-100}",
-        "BEDROCK_RESPONSE_MESSAGE_VERSION": "${BEDROCK_RESPONSE_MESSAGE_VERSION:-1.0}",
-        "BEDROCK_ACTION_GROUP_NAME": "${BEDROCK_ACTION_GROUP_NAME:-communication-orchestration}",
-        "CHANNEL_MAPPINGS": "$ESCAPED_CHANNEL_MAPPINGS"
+        "DISABLE_CONFIG_VALIDATION": "true"
     }
 }
 EOF
