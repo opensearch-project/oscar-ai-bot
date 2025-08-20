@@ -19,31 +19,30 @@
   },
   {
     "name": "trigger_job",
-    "description": "Execute any supported Jenkins job with specified parameters. Use for job execution when users specify/confirm a job name and parameters. Supports all registered Jenkins jobs with parameter validation.",
+    "description": "Execute any supported Jenkins job with specified parameters. CRITICAL: Only executes when confirmed=true. Use for job execution ONLY after user confirmation.",
     "parameters": {
+      "job_name": {
+        "description": "Name of the Jenkins job to trigger (e.g., 'docker-scan', 'Pipeline central-release-promotion')",
+        "type": "string",
+        "required": true
+      },
       "job_parameters": {
         "description": "JSON object containing job-specific parameters. Each job has different required and optional parameters.",
-        "required": "False",
-        "type": "string"
+        "type": "string",
+        "required": false
       },
-      "job_name": {
-        "description": "Name of the Jenkins job to trigger (e.g., 'docker-scan', 'Pipeline central-release-promotion, etc.')",
-        "required": "False",
-        "type": "string"
+      "confirmed": {
+        "description": "REQUIRED: Must be 'true' to execute the job. Set to 'true' ONLY after user explicitly confirms job execution. Never set to 'true' without user confirmation. Accepts: 'true', 'false', true, false.",
+        "type": "string",
+        "required": true
       }
     },
     "requireConfirmation": "DISABLED"
+  },
+  {
+    "name": "test_connection",
+    "description": "Test connection to Jenkins server. Use only when explicitly asked to test connectivity or troubleshoot connection issues.",
+    "parameters": {},
+    "requireConfirmation": "DISABLED"
   }
 ]
-
-{
-  "name": "test_connection",
-  "description": "Test connection to Jenkins server. ONLY use when explicitly asked to test connectivity by the user or to troubleshoot connection issues. Do not use this function as part of normal job execution workflow unless explicitly invoked.\n",
-  "parameters": {},
-  "requireConfirmation": "DISABLED"
-}
-
-### `test_connection`
-- Tests connection to Jenkins server
-- No parameters required
-- Use for troubleshooting connectivity issues, ONLY WHEN EXPLICITLY DEMANDED BY THE USER, NOT THROUGH THE REGULAR JENKINS CALLING WORKFLOW

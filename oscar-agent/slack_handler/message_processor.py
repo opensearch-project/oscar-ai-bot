@@ -50,6 +50,10 @@ class MessageProcessor:
         query = re.sub(config.patterns['mention'], '', text).strip()
         return query
     
+    def add_user_context_to_query(self, query: str, user_id: str) -> str:
+        """Add user context to query for sensitive operations."""
+        return f"[USER_ID: {user_id}] {query}"
+    
     def process_message(self, channel: str, thread_ts: str, user_id: str, 
                        text: str, say: Callable, message_ts: str = None, 
                        slash_command: str = None, skip_context_storage: bool = False) -> None:
@@ -89,6 +93,9 @@ class MessageProcessor:
                 query = self.extract_query(text)
                 logger.info(f"Extracted query: {query}")
             
+            # ALWAYS add user context to query for agent to use as needed
+            query = self.add_user_context_to_query(query, user_id)
+            logger.info(f"Added user context to query: {query}")
             # Check for automated message sending requests (skip for slash commands as they're pre-authorized)
             if not slash_command and self.auth_manager.is_message_sending_request(query):
                 if not self.auth_manager.is_user_authorized_for_messaging(user_id):

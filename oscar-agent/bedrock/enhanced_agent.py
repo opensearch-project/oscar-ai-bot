@@ -36,8 +36,7 @@ class OSCARAgentInterface(ABC):
         self, 
         query: str, 
         session_id: Optional[str] = None, 
-        context_summary: Optional[str] = None,
-        user_id: Optional[str] = None
+        context_summary: Optional[str] = None
     ) -> Tuple[str, Optional[str]]:
         """Query the OSCAR agent with automatic routing.
         
@@ -80,8 +79,7 @@ class EnhancedBedrockOSCARAgent(OSCARAgentInterface):
         self, 
         query: str, 
         session_id: Optional[str] = None, 
-        context_summary: Optional[str] = None,
-        user_id: Optional[str] = None
+        context_summary: Optional[str] = None
     ) -> Tuple[str, Optional[str]]:
         """
         Query the enhanced OSCAR agent with automatic routing and coordination.
@@ -93,12 +91,11 @@ class EnhancedBedrockOSCARAgent(OSCARAgentInterface):
             query: The user's query to the agent
             session_id: Optional session ID for maintaining conversation context
             context_summary: Optional summary of previous conversation context
-            user_id: Optional user ID for authorization and context
             
         Returns:
             A tuple containing (response_text, session_id)
         """
-        return self.query_processor.process_query(query, session_id, context_summary, user_id)
+        return self.query_processor.process_query(query, session_id, context_summary)
 
 
 def get_oscar_agent(region: Optional[str] = None) -> OSCARAgentInterface:

@@ -20,55 +20,7 @@ from jenkins_client import JenkinsClient
 from job_definitions import job_registry
 from config import config
 
-def extract_user_id(event: Dict[str, Any]) -> Optional[str]:
-    """
-    Extract user ID from the Lambda event.
-    
-    Args:
-        event: Lambda event from Bedrock agent
-        
-    Returns:
-        User ID string or None if not found
-    """
-    try:
-        # Try to extract user ID from various possible locations in the event
-        
-        # Method 1: Check if user_id is in parameters
-        parameters = event.get('parameters', [])
-        for param in parameters:
-            if isinstance(param, dict) and param.get('name') == 'user_id':
-                return param.get('value')
-        
-        # Method 2: Check sessionAttributes (common in Bedrock events)
-        session_attrs = event.get('sessionAttributes', {})
-        if 'user_id' in session_attrs:
-            return session_attrs['user_id']
-        
-        # Method 3: Check requestContext (API Gateway style)
-        request_context = event.get('requestContext', {})
-        if 'user_id' in request_context:
-            return request_context['user_id']
-        
-        # Method 4: Check identity in requestContext
-        identity = request_context.get('identity', {})
-        if 'user' in identity:
-            return identity['user']
-        
-        # Method 5: Check for Slack user ID in event metadata
-        if 'slack_user_id' in event:
-            return event['slack_user_id']
-        
-        # Method 6: Check agent context for user information
-        agent_context = event.get('agentContext', {})
-        if 'userId' in agent_context:
-            return agent_context['userId']
-        
-        logger.warning("Could not extract user_id from event")
-        return None
-        
-    except Exception as e:
-        logger.error(f"Error extracting user_id from event: {e}")
-        return None
+
 
 def lambda_handler(event: Dict[str, Any], context) -> Dict[str, Any]:
     """
@@ -100,23 +52,7 @@ def lambda_handler(event: Dict[str, Any], context) -> Dict[str, Any]:
         
         logger.info(f"🚀 JENKINS LAMBDA: Converted parameters: {params}")
         
-        # Extract user information for access control
-        user_id = extract_user_id(event)
-        logger.info(f"🔐 JENKINS LAMBDA: Extracted user_id: {user_id}")
-        
-        # Check user authorization - ALWAYS required for security
-        if not config.is_user_authorized(user_id):
-            logger.warning(f"❌ JENKINS LAMBDA: Access denied for user: {user_id}")
-            return create_response(event, {
-                'status': 'error',
-                'message': 'Access denied. You are not authorized to use Jenkins functions.',
-                'error_type': 'authorization_error',
-                'user_id': user_id
-            })
-        
-        logger.info(f"✅ JENKINS LAMBDA: Access granted for user: {user_id}")
-        
-        
+        logger.info(f"🚀 JENKINS LAMBDA: Authorization handled by supervisor agent")
         logger.info(f"🚀 JENKINS LAMBDA: About to initialize JenkinsClient")
         
         # Initialize Jenkins client
@@ -168,18 +104,66 @@ def lambda_handler(event: Dict[str, Any], context) -> Dict[str, Any]:
 
 def handle_trigger_job(jenkins_client: JenkinsClient, params: Dict[str, Any]) -> Dict[str, Any]:
     """
-    Handle generic job triggering.
+    Handle generic job triggering with mandatory confirmation check.
     
     Args:
         jenkins_client: Jenkins client instance
-        params: Parameters including job_name and individual job parameters
+        params: Parameters including job_name, confirmed, and individual job parameters
         
     Returns:
         Job trigger result
     """
     job_name = params.get('job_name')
-    logger.info(f"🚀 JENKINS LAMBDA: handle_trigger_job called with job_name='{job_name}'")
+    confirmed = params.get('confirmed')
+    
+    logger.info(f"🚀 JENKINS LAMBDA: handle_trigger_job called with job_name='{job_name}', confirmed={confirmed}")
     logger.info(f"🚀 JENKINS LAMBDA: This function WILL make HTTP requests to Jenkins")
+    
+    # CRITICAL: Check confirmation parameter first
+    if confirmed is None:
+        logger.error("❌ JENKINS LAMBDA: Missing required 'confirmed' parameter")
+        return {
+            'status': 'error',
+            'message': 'SECURITY ERROR: The "confirmed" parameter is required for job execution. Use get_job_info first to get job details, then call trigger_job with confirmed=true after user confirmation.',
+            'job_name': job_name,
+            'required_parameters': ['job_name', 'confirmed']
+        }
+    
+    # Convert string values to boolean (Bedrock passes booleans as strings)
+    if isinstance(confirmed, str):
+        if confirmed.strip().lower() in ['true', '1', 'yes']:
+            confirmed = True
+            logger.info(f"✅ JENKINS LAMBDA: Converted string '{params.get('confirmed')}' to boolean True")
+        elif confirmed.strip().lower() in ['false', '0', 'no']:
+            confirmed = False
+            logger.info(f"🚫 JENKINS LAMBDA: Converted string '{params.get('confirmed')}' to boolean False")
+        else:
+            logger.error(f"❌ JENKINS LAMBDA: Invalid 'confirmed' parameter value: '{confirmed}'")
+            return {
+                'status': 'error',
+                'message': f'SECURITY ERROR: The "confirmed" parameter must be "true" or "false", got: "{confirmed}"',
+                'job_name': job_name,
+                'confirmed_value': confirmed
+            }
+    elif not isinstance(confirmed, bool):
+        logger.error(f"❌ JENKINS LAMBDA: Invalid 'confirmed' parameter type: {type(confirmed)}")
+        return {
+            'status': 'error',
+            'message': f'SECURITY ERROR: The "confirmed" parameter must be a boolean or string, got: {type(confirmed).__name__}',
+            'job_name': job_name,
+            'confirmed_value': confirmed
+        }
+    
+    if confirmed is False:
+        logger.warning(f"🚫 JENKINS LAMBDA: Job execution blocked - confirmed=false for job '{job_name}'")
+        return {
+            'status': 'error',
+            'message': 'Job execution cancelled. The "confirmed" parameter is false. Set confirmed=true only after user explicitly confirms job execution.',
+            'job_name': job_name,
+            'confirmed': False
+        }
+    
+    logger.info(f"✅ JENKINS LAMBDA: Confirmation check passed - proceeding with job execution")
     
     if not job_name:
         logger.error("❌ JENKINS LAMBDA: Missing job_name parameter")
@@ -189,8 +173,8 @@ def handle_trigger_job(jenkins_client: JenkinsClient, params: Dict[str, Any]) ->
             'available_jobs': job_registry.list_jobs()
         }
     
-    # Extract job parameters (all params except job_name)
-    job_params = {k: v for k, v in params.items() if k != 'job_name'}
+    # Extract job parameters (all params except job_name and confirmed)
+    job_params = {k: v for k, v in params.items() if k not in ['job_name', 'confirmed']}
     logger.info(f"🚀 JENKINS LAMBDA: Extracted job parameters: {job_params}")
     
     # Handle legacy job_parameters JSON string if provided
