@@ -49,6 +49,7 @@ python-dateutil>=2.8.0
 jmespath>=1.0.0
 s3transfer>=0.6.0
 six>=1.16.0
+python-dotenv>=1.0.0
 EOF
 
 # Install dependencies with upgrade flag
@@ -97,7 +98,6 @@ AGENT_FUNCTIONS=(
     "oscar-test-metrics-agent-new"
     "oscar-build-metrics-agent-new"
     "oscar-release-metrics-agent-new"
-    "oscar-deployment-metrics-agent-new"
 )
 
 for FUNCTION_NAME in "${AGENT_FUNCTIONS[@]}"; do

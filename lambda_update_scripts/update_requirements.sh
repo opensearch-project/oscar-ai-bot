@@ -33,6 +33,7 @@ python-dateutil>=2.8.0
 jmespath>=1.0.0
 s3transfer>=0.6.0
 six>=1.16.0
+python-dotenv>=1.0.0
 EOF
 
 # Update metrics requirements

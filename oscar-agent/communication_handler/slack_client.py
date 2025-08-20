@@ -22,7 +22,7 @@ class SlackClientManager:
     
     def __init__(self) -> None:
         """Initialize Slack client."""
-        slack_token = os.environ.get('SLACK_BOT_TOKEN')
+        slack_token = config.slack_bot_token
         self.client = WebClient(token=slack_token) if slack_token else None
     
     def send_message(self, channel: str, message: str) -> Dict[str, Any]:

@@ -75,6 +75,7 @@ slack_bolt>=1.18.0
 # HTTP and networking
 requests>=2.31.0
 urllib3>=2.0.0
+python-dotenv>=1.0.0
 
 # Additional dependencies for enhanced functionality
 opensearch-py==2.4.2
