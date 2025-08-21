@@ -139,41 +139,6 @@ class DockerScanJob(BaseJobDefinition):
             )
         ]
 
-class BuildJob(BaseJobDefinition):
-    """Generic build job definition (example for extensibility)."""
-    
-    def get_job_name(self) -> str:
-        return "build"
-    
-    def get_description(self) -> str:
-        return "Triggers a build job with configurable parameters"
-    
-    def get_parameters(self) -> List[JobParameter]:
-        return [
-            JobParameter(
-                name="BRANCH",
-                description="Git branch to build",
-                required=False,
-                default_value="main",
-                parameter_type="string"
-            ),
-            JobParameter(
-                name="BUILD_TYPE",
-                description="Type of build to perform",
-                required=False,
-                default_value="release",
-                parameter_type="string",
-                choices=["debug", "release", "test"]
-            ),
-            JobParameter(
-                name="CLEAN_BUILD",
-                description="Whether to perform a clean build",
-                required=False,
-                default_value="false",
-                parameter_type="boolean"
-            )
-        ]
-
 class CentralReleasePromotionJob(BaseJobDefinition):
     """Central release promotion pipeline job definition."""
     
@@ -216,7 +181,6 @@ class JobRegistry:
     def _register_default_jobs(self):
         """Register the default set of Jenkins jobs."""
         self.register_job(DockerScanJob())
-        self.register_job(BuildJob())
         self.register_job(CentralReleasePromotionJob())
     
     def register_job(self, job_definition: BaseJobDefinition):

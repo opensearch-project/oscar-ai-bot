@@ -247,41 +247,6 @@ def handle_trigger_job(jenkins_client: JenkinsClient, params: Dict[str, Any]) ->
     logger.info(f"🚀 JENKINS LAMBDA: trigger_job returned status: {result.get('status', 'unknown')}")
     return result
 
-def handle_docker_scan(jenkins_client: JenkinsClient, params: Dict[str, Any]) -> Dict[str, Any]:
-    """
-    Handle Docker scan job (convenience function).
-    
-    Args:
-        jenkins_client: Jenkins client instance
-        params: Parameters including image_name
-        
-    Returns:
-        Docker scan job result
-    """
-    image_name = params.get('image_name')
-    if not image_name:
-        return {
-            'status': 'error',
-            'message': 'image_name parameter is required for docker_scan function',
-            'example': 'image_name=alpine:3.19'
-        }
-    
-    # Map to the correct parameter name for the Jenkins job
-    job_params = {'IMAGE_FULL_NAME': image_name}
-    
-    result = jenkins_client.trigger_job('docker-scan', job_params)
-    
-    # Add convenience information for Docker scan
-    if result.get('status') == 'success':
-        result['scan_info'] = {
-            'image_scanned': image_name,
-            'scan_type': 'security_scan',
-            'note': 'Scan results will be available in Jenkins once the job completes'
-        }
-    
-    return result
-
-
 def handle_test_connection(jenkins_client: JenkinsClient) -> Dict[str, Any]:
     """
     Handle Jenkins connection test.
