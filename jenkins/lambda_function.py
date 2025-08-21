@@ -246,27 +246,30 @@ def handle_trigger_job(jenkins_client: JenkinsClient, params: Dict[str, Any]) ->
     result = jenkins_client.trigger_job(job_name, job_params)
     logger.info(f"🚀 JENKINS LAMBDA: trigger_job returned status: {result.get('status', 'unknown')}")
     
-    # Enhance the success message to include workflow URL if available
+    # Enhance the success message to include only workflow URL if available
     if result.get('status') == 'success':
         job_url = result.get('job_url', '')
         queue_location = result.get('queue_location', '')
         workflow_url = result.get('workflow_url')
         
+        # Remove queue_location from the result to prevent agent from displaying it
+        if 'queue_location' in result:
+            del result['queue_location']
+        
         if workflow_url:
-            # Enhanced message with workflow URL
+            # Only show workflow URL in the response message and remove from result to avoid duplication
             result['message'] = (
-                f"Success! I've triggered the {job_name} job.\n"
-                f"You can monitor the job progress at: {job_url}\n"
-                f"The job has been queued with location: {queue_location}\n"
-                f"Workflow URL: {workflow_url}"
+                f"Success! I've triggered the {job_name} job for {job_params}.\n"
+                f"You can monitor the job progress at: {workflow_url}"
             )
+            # Remove workflow_url from result to prevent agent from displaying it separately
+            if 'workflow_url' in result:
+                del result['workflow_url']
         else:
-            # Fallback message without workflow URL but with better formatting
-            queue_item_id = queue_location.split('/')[-2] if queue_location else 'unknown'
+            # Fallback message when workflow URL is not yet available
             result['message'] = (
-                f"Success! I've triggered the {job_name} job.\n"
-                f"You can monitor the job progress at: {job_url}\n"
-                f"The job has been queued (queue item: {queue_item_id}).\n"
+                f"Success! I've triggered the {job_name} job for {job_params}.\n"
+                f"The job has been queued and will start executing shortly.\n"
                 f"Note: Workflow URL will be available once the job starts executing."
             )
     
