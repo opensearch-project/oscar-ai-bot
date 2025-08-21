@@ -9,6 +9,7 @@ checking status, and managing Jenkins operations through the REST API.
 import json
 import logging
 import requests
+import time
 from requests.auth import HTTPBasicAuth
 from typing import Dict, Any, Optional, Tuple
 from urllib.parse import urljoin
@@ -81,6 +82,63 @@ class JenkinsClient:
         self.credentials = JenkinsCredentials()
         self.session = requests.Session()
         self.session.timeout = config.request_timeout
+    
+    def _get_build_number_from_queue(self, queue_location: str, auth: HTTPBasicAuth, max_attempts: int = 15) -> Optional[int]:
+        """
+        Poll the Jenkins queue to get the build number once the job starts executing.
+        
+        Args:
+            queue_location: The queue location URL returned by Jenkins
+            auth: Authentication object
+            max_attempts: Maximum number of polling attempts
+            
+        Returns:
+            Build number if found, None otherwise
+        """
+        try:
+            # Convert queue location to API URL
+            if not queue_location.endswith('/api/json'):
+                api_url = queue_location.rstrip('/') + '/api/json'
+            else:
+                api_url = queue_location
+            
+            logger.info(f"🔍 JENKINS CLIENT: Polling queue for build number: {api_url}")
+            
+            for attempt in range(max_attempts):
+                try:
+                    response = self.session.get(api_url, auth=auth, timeout=5)
+                    
+                    if response.status_code == 200:
+                        queue_data = response.json()
+                        
+                        # Check if the job has started executing (has executable field)
+                        executable = queue_data.get('executable')
+                        if executable and 'number' in executable:
+                            build_number = executable['number']
+                            logger.info(f"✅ JENKINS CLIENT: Found build number {build_number} after {attempt + 1} attempts")
+                            return build_number
+                        
+                        # If not yet executing, wait a bit before next attempt
+                        if attempt < max_attempts - 1:
+                            time.sleep(2)
+                            logger.info(f"⏳ JENKINS CLIENT: Build not started yet, attempt {attempt + 1}/{max_attempts}")
+                    
+                    elif response.status_code == 404:
+                        # Queue item might have been processed and removed
+                        logger.info(f"⚠️ JENKINS CLIENT: Queue item not found (404), job may have started")
+                        break
+                    
+                except requests.exceptions.RequestException as e:
+                    logger.warning(f"⚠️ JENKINS CLIENT: Error polling queue (attempt {attempt + 1}): {e}")
+                    if attempt < max_attempts - 1:
+                        time.sleep(2)
+            
+            logger.info(f"⏰ JENKINS CLIENT: Could not get build number after {max_attempts} attempts")
+            return None
+            
+        except Exception as e:
+            logger.error(f"❌ JENKINS CLIENT: Error getting build number from queue: {e}")
+            return None
     
     def trigger_job(self, job_name: str, parameters: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -162,6 +220,13 @@ class JenkinsClient:
                 
                 if queue_location:
                     result['queue_location'] = queue_location
+                    
+                    # Try to get the build number from the queue
+                    build_number = self._get_build_number_from_queue(queue_location, auth)
+                    if build_number:
+                        result['build_number'] = build_number
+                        result['workflow_url'] = config.get_workflow_url(job_name, build_number)
+                        logger.info(f"✅ JENKINS CLIENT: Got build number {build_number}, workflow URL: {result['workflow_url']}")
                 
                 return result
             

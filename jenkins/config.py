@@ -121,6 +121,10 @@ class JenkinsConfig:
         """Get the API URL for a specific build."""
         return f"{self.jenkins_url}/job/{job_name}/{build_number}/api/json"
     
+    def get_workflow_url(self, job_name: str, build_number: int) -> str:
+        """Get the workflow URL for a specific build."""
+        return f"{self.jenkins_url}/job/{job_name}/{build_number}/"
+    
     def _load_authorized_senders(self) -> set:
         """Load the list of authorized message senders (same as main OSCAR authorization)."""
         authorized_senders_str = os.getenv('AUTHORIZED_MESSAGE_SENDERS', '')

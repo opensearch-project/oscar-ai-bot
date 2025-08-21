@@ -245,6 +245,31 @@ def handle_trigger_job(jenkins_client: JenkinsClient, params: Dict[str, Any]) ->
     logger.info(f"🚀 JENKINS LAMBDA: About to call jenkins_client.trigger_job with job_name='{job_name}', params={job_params}")
     result = jenkins_client.trigger_job(job_name, job_params)
     logger.info(f"🚀 JENKINS LAMBDA: trigger_job returned status: {result.get('status', 'unknown')}")
+    
+    # Enhance the success message to include workflow URL if available
+    if result.get('status') == 'success':
+        job_url = result.get('job_url', '')
+        queue_location = result.get('queue_location', '')
+        workflow_url = result.get('workflow_url')
+        
+        if workflow_url:
+            # Enhanced message with workflow URL
+            result['message'] = (
+                f"Success! I've triggered the {job_name} job.\n"
+                f"You can monitor the job progress at: {job_url}\n"
+                f"The job has been queued with location: {queue_location}\n"
+                f"Workflow URL: {workflow_url}"
+            )
+        else:
+            # Fallback message without workflow URL but with better formatting
+            queue_item_id = queue_location.split('/')[-2] if queue_location else 'unknown'
+            result['message'] = (
+                f"Success! I've triggered the {job_name} job.\n"
+                f"You can monitor the job progress at: {job_url}\n"
+                f"The job has been queued (queue item: {queue_item_id}).\n"
+                f"Note: Workflow URL will be available once the job starts executing."
+            )
+    
     return result
 
 def handle_test_connection(jenkins_client: JenkinsClient) -> Dict[str, Any]:
