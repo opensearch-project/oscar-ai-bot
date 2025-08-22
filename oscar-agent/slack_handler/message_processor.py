@@ -139,8 +139,14 @@ class MessageProcessor:
             if not skip_context_storage:
                 self.context_manager.update_context(thread_key, query, response, session_id, new_session_id)
             
+            # Format response for Slack before sending
+            from .message_formatter import MessageFormatter
+            formatter = MessageFormatter()
+            formatted_response = formatter.format_markdown_to_slack_mrkdwn(response)
+            formatted_response = formatter.convert_at_symbols_to_slack_pings(formatted_response)
+            
             # Send response
-            say(text=response, thread_ts=thread_ts)
+            say(text=formatted_response, thread_ts=thread_ts)
             logger.info(f"Successfully sent response to thread {thread_ts}")
             
             # Log performance
@@ -183,7 +189,13 @@ class MessageProcessor:
                 if error_message is None or error_message.strip() == "":
                     error_message = "An unexpected error occurred. Please try again."
                     
-                say(text=error_message, thread_ts=thread_ts)
+                # Format error message for Slack before sending
+                from .message_formatter import MessageFormatter
+                formatter = MessageFormatter()
+                formatted_error = formatter.format_markdown_to_slack_mrkdwn(error_message)
+                formatted_error = formatter.convert_at_symbols_to_slack_pings(formatted_error)
+                
+                say(text=formatted_error, thread_ts=thread_ts)
             except Exception as say_error:
                 logger.error(f"Error sending error message: {say_error}", exc_info=True)
                 # Last resort - try to send a basic message

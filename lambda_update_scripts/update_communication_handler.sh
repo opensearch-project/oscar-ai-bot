@@ -29,20 +29,22 @@ echo "📦 Creating deployment package..."
 TEMP_DIR=$(mktemp -d)
 echo "Using temporary directory: $TEMP_DIR"
 
-# Copy the communication handler
-cp oscar-agent/communication_handler.py $TEMP_DIR/lambda_function.py
+# Copy the lambda entry point to root
+cp oscar-agent/communication_handler/lambda_handler.py $TEMP_DIR/lambda_function.py
 
-# Copy the entire communication_handler package directory
-if [ -d "oscar-agent/communication_handler" ]; then
-    echo "📁 Copying communication_handler package..."
-    cp -r oscar-agent/communication_handler $TEMP_DIR/
-    echo "✅ Copied communication_handler package structure"
-else
-    echo "❌ communication_handler directory not found!"
-    exit 1
-fi
+# Copy ONLY essential communication handler files directly to root (flatten structure)
+echo "📁 Flattening essential communication_handler files to root directory..."
 
-# Copy config.py and other necessary files
+cp oscar-agent/communication_handler/message_handler.py $TEMP_DIR/
+cp oscar-agent/communication_handler/message_formatter.py $TEMP_DIR/
+cp oscar-agent/communication_handler/slack_client.py $TEMP_DIR/
+cp oscar-agent/communication_handler/response_builder.py $TEMP_DIR/
+cp oscar-agent/communication_handler/channel_utils.py $TEMP_DIR/
+cp oscar-agent/communication_handler/context_storage.py $TEMP_DIR/
+
+echo "✅ Flattened essential files to root (excluded: __init__.py, constants.py)"
+
+# Copy config.py (required dependency)
 cp oscar-agent/config.py $TEMP_DIR/
 
 # Create comprehensive requirements.txt for the Lambda function
@@ -98,6 +100,53 @@ done
 
 echo "✅ Dependencies verified"
 
+# Verify the deployment structure is clean
+echo "🔍 Verifying deployment structure..."
+echo "📋 Files to be deployed:"
+find $TEMP_DIR -name "*.py" | sort
+echo ""
+echo "📋 Directory structure:"
+find $TEMP_DIR -type d | sort
+echo ""
+echo "📋 Total files:"
+find $TEMP_DIR -type f | wc -l
+
+# Verify critical files exist in flattened structure
+CRITICAL_FILES=("lambda_function.py" "config.py" "message_handler.py" "message_formatter.py" "slack_client.py" "response_builder.py" "channel_utils.py" "context_storage.py")
+for file in "${CRITICAL_FILES[@]}"; do
+    if [ ! -f "$TEMP_DIR/$file" ]; then
+        echo "❌ Missing critical file: $file"
+        exit 1
+    fi
+done
+echo "✅ All critical files present in flattened structure"
+
+# Verify no subdirectories exist (clean deployment)
+if [ -d "$TEMP_DIR/communication_handler" ] || [ -d "$TEMP_DIR/communication" ]; then
+    echo "❌ Found subdirectories - deployment should be flattened"
+    exit 1
+fi
+echo "✅ Deployment structure is properly flattened"
+
+# Verify no unwanted directories or files exist
+echo "🔍 Final verification of deployment package..."
+if find $TEMP_DIR -name "communication_handler" -type d | grep -q .; then
+    echo "❌ Found communication_handler directory - should be flattened"
+    exit 1
+fi
+
+if find $TEMP_DIR -name "communication" -type d | grep -q .; then
+    echo "❌ Found communication directory - should be flattened"  
+    exit 1
+fi
+
+if find $TEMP_DIR -maxdepth 1 -name "__init__.py" | grep -q .; then
+    echo "❌ Found __init__.py files in root - not needed in flattened structure"
+    exit 1
+fi
+
+echo "✅ Deployment package structure verified - clean and flattened"
+
 # Create deployment package
 cd $TEMP_DIR
 zip -r ../communication-handler-update.zip . -x "*.pyc" "*/__pycache__/*" -q
@@ -118,9 +167,10 @@ EOF
 
 echo "🔍 Checking if Lambda function exists..."
 if aws lambda get-function --function-name $FUNCTION_NAME --region $AWS_REGION > /dev/null 2>&1; then
-    echo "🔄 Updating Lambda function code and environment variables..."
+    echo "🔄 Updating Lambda function code (this will replace ALL existing code)..."
+    echo "⚠️  This deployment will clean up duplicate directories and flatten the structure"
     
-    # Update function code
+    # Update function code (this replaces ALL code in the lambda)
     aws lambda update-function-code \
         --function-name $FUNCTION_NAME \
         --zip-file fileb://$DEPLOYMENT_PACKAGE \
@@ -172,8 +222,20 @@ echo "   ✅ Environment variables"
 echo "   ✅ Bedrock agent permissions"
 echo "   ✅ All existing configurations"
 echo ""
-echo "📝 Updated Files:"
-echo "   ✅ communication_handler.py"
+echo "📝 Updated Files (Flattened Structure):"
+echo "   ✅ lambda_function.py (entry point)"
+echo "   ✅ message_handler.py"
+echo "   ✅ message_formatter.py"
+echo "   ✅ slack_client.py"
+echo "   ✅ response_builder.py"
+echo "   ✅ channel_utils.py"
+echo "   ✅ context_storage.py"
+echo "   ✅ config.py"
+echo ""
+echo "🧹 Cleaned Up:"
+echo "   ✅ Removed duplicate communication/ directory"
+echo "   ✅ Removed duplicate communication_handler/ directory"
+echo "   ✅ Flattened all code to root level"
 echo ""
 echo "🧪 Test command:"
 echo "aws lambda invoke --function-name $FUNCTION_NAME --payload '{\"actionGroup\": \"communication-orchestration\", \"apiPath\": \"/send_automated_message\"}' --cli-binary-format raw-in-base64-out --region $AWS_REGION test.json && cat test.json"

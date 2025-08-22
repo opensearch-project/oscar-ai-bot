@@ -102,6 +102,45 @@ def lambda_handler(event: Dict[str, Any], context) -> Dict[str, Any]:
             'type': 'lambda_error'
         })
 
+def format_parameters_as_bullets(parameter_definitions: Dict[str, Dict[str, Any]]) -> str:
+    """
+    Format job parameters as a bullet list for better readability.
+    
+    Args:
+        parameter_definitions: Dictionary of parameter definitions
+        
+    Returns:
+        Formatted string with bullet points
+    """
+    if not parameter_definitions:
+        return "• No parameters required"
+    
+    lines = []
+    for param_name, param_info in parameter_definitions.items():
+        description = param_info.get('description', 'No description')
+        required = param_info.get('required', False)
+        param_type = param_info.get('type', 'string')
+        default = param_info.get('default')
+        choices = param_info.get('choices')
+        
+        # Build a clean parameter line - just name and description for required params
+        if required:
+            line = f"• {param_name} - {description}"
+        else:
+            line = f"• {param_name} (Optional) - {description}"
+            
+            # Add default value for optional parameters
+            if default is not None:
+                line += f" (Default: {default})"
+        
+        # Add choices if present
+        if choices:
+            line += f" (Options: {', '.join(choices)})"
+        
+        lines.append(line)
+    
+    return "\n".join(lines)
+
 def handle_trigger_job(jenkins_client: JenkinsClient, params: Dict[str, Any]) -> Dict[str, Any]:
     """
     Handle generic job triggering with mandatory confirmation check.
@@ -304,6 +343,33 @@ def handle_get_job_info(jenkins_client: JenkinsClient, params: Dict[str, Any]) -
     
     result = jenkins_client.get_job_info(job_name)
     logger.info(f"📋 JENKINS LAMBDA: get_job_info returned status: {result.get('status', 'unknown')}")
+    
+    # Format parameters as bullet list for better readability
+    if result.get('status') == 'success' and 'parameter_definitions' in result:
+        formatted_params = format_parameters_as_bullets(result['parameter_definitions'])
+        
+        # Create a clean, structured message
+        description = result.get('description', 'No description available')
+        job_url = result.get('job_url', '')
+        
+        message_parts = [
+            f"I've found the {job_name} job information. Here are the details:",
+            f"",
+            f"Job: {job_name}",
+            f"Description: {description}",
+            f"",
+            f"Required parameters:",
+            formatted_params
+        ]
+        
+        if job_url:
+            message_parts.extend(["", f"Job URL: {job_url}"])
+        
+        result['message'] = "\n".join(message_parts)
+        
+        # Keep the formatted parameters for potential future use
+        result['formatted_parameters'] = formatted_params
+    
     return result
 
 def handle_list_jobs(jenkins_client: JenkinsClient) -> Dict[str, Any]:
@@ -316,7 +382,21 @@ def handle_list_jobs(jenkins_client: JenkinsClient) -> Dict[str, Any]:
     Returns:
         Available jobs list
     """
-    return jenkins_client.list_available_jobs()
+    result = jenkins_client.list_available_jobs()
+    
+    # Format the jobs list with bullet points for better readability
+    if result.get('status') == 'success' and 'jobs' in result:
+        jobs_info = result['jobs']
+        formatted_jobs = []
+        
+        for job_name, job_info in jobs_info.items():
+            description = job_info.get('description', 'No description')
+            param_count = len(job_info.get('parameters', {}))
+            formatted_jobs.append(f"• {job_name}: {description} ({param_count} parameters)")
+        
+        result['message'] = f"Available Jenkins jobs:\n\n" + "\n".join(formatted_jobs)
+    
+    return result
 
 def create_response(event: Dict[str, Any], result: Dict[str, Any]) -> Dict[str, Any]:
     """
