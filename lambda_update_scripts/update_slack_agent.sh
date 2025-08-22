@@ -84,6 +84,7 @@ python-dateutil>=2.8.0
 jmespath>=1.0.0
 s3transfer>=0.6.0
 six>=1.16.0
+python-dotenv>=1.0.0
 EOF
 
 # Install dependencies with upgrade flag to ensure latest compatible versions
@@ -218,57 +219,9 @@ if aws lambda get-function --function-name $FUNCTION_NAME --region $AWS_REGION >
     echo "⏳ Waiting for code update to complete..."
     aws lambda wait function-updated --function-name $FUNCTION_NAME --region $AWS_REGION
 
-    # Create environment variables JSON file
-    # Escape the CHANNEL_MAPPINGS JSON for proper embedding
-    ESCAPED_CHANNEL_MAPPINGS=$(echo "$CHANNEL_MAPPINGS" | sed 's/"/\\"/g')
-    
-    cat > $TEMP_DIR/env-vars.json << EOF
-{
-    "Variables": {
-        "SLACK_BOT_TOKEN": "$SLACK_BOT_TOKEN",
-        "SLACK_SIGNING_SECRET": "$SLACK_SIGNING_SECRET",
-        "OSCAR_BEDROCK_AGENT_ID": "$OSCAR_BEDROCK_AGENT_ID",
-        "OSCAR_BEDROCK_AGENT_ALIAS_ID": "${OSCAR_BEDROCK_AGENT_ALIAS_ID:-TSTALIASID}",
-        "SESSIONS_TABLE_NAME": "${SESSIONS_TABLE_NAME:-oscar-agent-sessions}",
-        "CONTEXT_TABLE_NAME": "${CONTEXT_TABLE_NAME:-oscar-agent-context}",
-        "ENABLE_DM": "$ENABLE_DM",
-        "DEDUP_TTL": "${DEDUP_TTL:-300}",
-        "SESSION_TTL": "${SESSION_TTL:-3600}",
-        "CONTEXT_TTL": "${CONTEXT_TTL:-604800}",
-        "MAX_CONTEXT_LENGTH": "${MAX_CONTEXT_LENGTH:-3000}",
-        "CONTEXT_SUMMARY_LENGTH": "${CONTEXT_SUMMARY_LENGTH:-500}",
-        "AGENT_TIMEOUT": "${AGENT_TIMEOUT:-180}",
-        "AGENT_MAX_RETRIES": "${AGENT_MAX_RETRIES:-2}",
-        "CHANNEL_ALLOW_LIST": "$CHANNEL_ALLOW_LIST",
-        "AUTHORIZED_MESSAGE_SENDERS": "$AUTHORIZED_MESSAGE_SENDERS",
-        "METRICS_CROSS_ACCOUNT_ROLE_ARN": "$METRICS_CROSS_ACCOUNT_ROLE_ARN",
-        "HOURGLASS_THRESHOLD_SECONDS": "${HOURGLASS_THRESHOLD_SECONDS:-45}",
-        "TIMEOUT_THRESHOLD_SECONDS": "${TIMEOUT_THRESHOLD_SECONDS:-120}",
-        "MAX_WORKERS": "${MAX_WORKERS:-50}",
-        "MAX_ACTIVE_QUERIES": "${MAX_ACTIVE_QUERIES:-50}",
-        "MONITOR_INTERVAL_SECONDS": "${MONITOR_INTERVAL_SECONDS:-15}",
-        "MESSAGE_PREVIEW_LENGTH": "${MESSAGE_PREVIEW_LENGTH:-100}",
-        "QUERY_PREVIEW_LENGTH": "${QUERY_PREVIEW_LENGTH:-50}",
-        "RESPONSE_PREVIEW_LENGTH": "${RESPONSE_PREVIEW_LENGTH:-50}",
-        "SLACK_HANDLER_THREAD_NAME_PREFIX": "${SLACK_HANDLER_THREAD_NAME_PREFIX:-oscar-agent}",
-        "BEDROCK_RESPONSE_MESSAGE_VERSION": "${BEDROCK_RESPONSE_MESSAGE_VERSION:-1.0}",
-        "BEDROCK_ACTION_GROUP_NAME": "${BEDROCK_ACTION_GROUP_NAME:-communication-orchestration}",
-        "CHANNEL_MAPPINGS": "$ESCAPED_CHANNEL_MAPPINGS",
-        "AGENT_QUERY_ANNOUNCE": "$AGENT_QUERY_ANNOUNCE",
-        "AGENT_QUERY_ASSIGN_OWNER": "$AGENT_QUERY_ASSIGN_OWNER",
-        "AGENT_QUERY_REQUEST_OWNER": "$AGENT_QUERY_REQUEST_OWNER",
-        "AGENT_QUERY_RC_DETAILS": "$AGENT_QUERY_RC_DETAILS",
-        "AGENT_QUERY_MISSING_NOTES": "$AGENT_QUERY_MISSING_NOTES",
-        "AGENT_QUERY_INTEGRATION_TEST": "$AGENT_QUERY_INTEGRATION_TEST",
-        "AGENT_QUERY_BROADCAST": "$AGENT_QUERY_BROADCAST"
-    }
-}
-EOF
-
-    # Update environment variables, timeout, and memory using JSON file
+    # Update timeout and memory only (environment variables now come from Secrets Manager)
     aws lambda update-function-configuration \
         --function-name $FUNCTION_NAME \
-        --environment file://$TEMP_DIR/env-vars.json \
         --timeout ${LAMBDA_TIMEOUT:-150} \
         --memory-size ${LAMBDA_MEMORY_SIZE:-512} \
         --region $AWS_REGION >/dev/null
