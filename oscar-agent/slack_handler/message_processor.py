@@ -54,6 +54,33 @@ class MessageProcessor:
         """Add user context to query for sensitive operations."""
         return f"[USER_ID: {user_id}] {query}"
     
+    def _handle_confirmation_detection(self, response: str, channel: str, thread_ts: str) -> str:
+        """Handle confirmation detection and warning reaction management.
+        
+        Args:
+            response: The agent's response text
+            channel: Slack channel ID
+            thread_ts: Thread timestamp (original user message)
+            
+        Returns:
+            Cleaned response with confirmation marker removed
+        """
+        if response and '[CONFIRMATION_REQUIRED]' in response:
+            # Remove the marker from the response
+            cleaned_response = response.replace('[CONFIRMATION_REQUIRED]', '').strip()
+            
+            # Add warning reaction to the original user message
+            self.reaction_manager.manage_reactions(
+                channel, 
+                thread_ts,  # This is the original user message timestamp
+                add_reaction="warning"
+            )
+            logger.info(f"Added warning reaction to original message {thread_ts} due to confirmation requirement")
+            
+            return cleaned_response
+        
+        return response
+    
     def process_message(self, channel: str, thread_ts: str, user_id: str, 
                        text: str, say: Callable, message_ts: str = None, 
                        slash_command: str = None, skip_context_storage: bool = False) -> None:
@@ -124,6 +151,9 @@ class MessageProcessor:
             if response is None:
                 return
             
+            # Handle confirmation detection and warning reaction
+            response = self._handle_confirmation_detection(response, channel, thread_ts)
+            
             # Validate response - handle None, empty, or whitespace-only responses
             if response is None:
                 logger.warning(f"OSCAR agent returned None response for query: {query}")
@@ -144,6 +174,8 @@ class MessageProcessor:
             formatter = MessageFormatter()
             formatted_response = formatter.format_markdown_to_slack_mrkdwn(response)
             formatted_response = formatter.convert_at_symbols_to_slack_pings(formatted_response)
+            
+
             
             # Send response
             say(text=formatted_response, thread_ts=thread_ts)
