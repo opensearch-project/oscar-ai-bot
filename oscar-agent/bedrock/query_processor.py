@@ -13,7 +13,7 @@ import logging
 from typing import Optional, Tuple
 
 from config import config
-from bedrock.bedrock_agent import BedrockAgentCore
+from bedrock.agent_invoker import BedrockAgentCore
 from bedrock.error_handler import AgentErrorHandler
 
 logger = logging.getLogger(__name__)

@@ -17,7 +17,7 @@ import logging
 from abc import ABC, abstractmethod
 from typing import Optional, Tuple
 
-from bedrock.bedrock_agent import BedrockAgentCore
+from bedrock.agent_invoker import BedrockAgentCore
 from bedrock.error_handler import AgentErrorHandler
 from bedrock.query_processor import QueryProcessor
 
