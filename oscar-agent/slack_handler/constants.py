@@ -17,7 +17,8 @@ from config import config
 
 # Load configuration from environment variables
 CHANNEL_ALLOW_LIST = config.channel_allow_list
-AUTHORIZED_MESSAGE_SENDERS = config.authorized_message_senders
+DM_AUTHORIZED_USERS = config.dm_authorized_users
+FULLY_AUTHORIZED_USERS = config.fully_authorized_users
 HOURGLASS_THRESHOLD = config.hourglass_threshold
 TIMEOUT_THRESHOLD = config.timeout_threshold
 MAX_WORKERS = config.max_workers

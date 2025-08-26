@@ -12,7 +12,7 @@ from config import config
 import time
 from typing import Any, Callable, Optional
 
-from slack_handler.authorization import AuthorizationManager
+
 
 logger = logging.getLogger(__name__)
 
@@ -33,7 +33,7 @@ class MessageProcessor:
         self.oscar_agent = oscar_agent
         self.reaction_manager = reaction_manager
         self.timeout_handler = timeout_handler
-        self.auth_manager = AuthorizationManager()
+
     
     def extract_query(self, text: str) -> str:
         """Extract the query from the message text by removing mentions.
@@ -78,6 +78,20 @@ class MessageProcessor:
             return cleaned_response
         
         return response
+
+    def is_fully_authorized_user(self, user_id: str) -> bool:
+        """
+        Check if a user is fully authorized to use privileged features.
+        
+        Args:
+            user_id: The user ID to check
+            
+        Returns:
+            True if the user is fully authorized, False otherwise
+        """
+        is_authorized = user_id in config.fully_authorized_users
+        logger.debug(f"User {user_id} authorization check: {is_authorized}")
+        return is_authorized
     
     def process_message(self, channel: str, thread_ts: str, user_id: str, 
                        text: str, say: Callable, message_ts: str = None, 
@@ -121,15 +135,7 @@ class MessageProcessor:
             # ALWAYS add user context to query for agent to use as needed
             query = self.add_user_context_to_query(query, user_id)
             logger.info(f"Added user context to query: {query}")
-            # Check for automated message sending requests (skip for slash commands as they're pre-authorized)
-            if not slash_command and self.auth_manager.is_message_sending_request(query):
-                if not self.auth_manager.is_user_authorized_for_messaging(user_id):
-                    logger.warning(f"Unauthorized message sending attempt by user {user_id}")
-                    self.reaction_manager.manage_reactions(channel, reaction_ts, add_reaction="x", remove_reaction="thinking_face")
-                    say(text="❌ You are not authorized to use automated message sending functionality. If this was erroneous, try a prompt without keywords like 'message', 'notification', or 'ping'.", thread_ts=thread_ts)
-                    return
-                
-                logger.info(f"Processing automated message sending request from authorized user {user_id}")
+            logger.info(f"Processing automated message sending request from authorized user {user_id}")
                 # Continue with normal agent processing - agent will handle message sending via action group
             
             # Get context from storage and format for query
@@ -140,8 +146,9 @@ class MessageProcessor:
             formatted_context = self.storage.get_context_for_query(thread_key)
             
             # Query OSCAR agent with timeout monitoring (using formatted context)
+            privilege = self.is_fully_authorized_user(user_id)
             response, new_session_id = self.timeout_handler.query_agent_with_timeout(
-                self.oscar_agent, query, session_id, formatted_context, channel, reaction_ts, 
+                self.oscar_agent, query, privilege, session_id, formatted_context, channel, reaction_ts, 
                 start_time, say, thread_ts, user_id
             )
             

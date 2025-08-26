@@ -35,11 +35,6 @@
         "description": "REQUIRED: Must be 'true' to execute the job. Set to 'true' ONLY after user explicitly confirms job execution. Never set to 'true' without user confirmation. Accepts: 'true', 'false', true, false.",
         "type": "string",
         "required": true
-      },
-      "authorized": {
-        "description": "REQUIRED: Must be 'true' to execute the job. Set to 'true' ONLY after verifying user is in AUTHORIZED_MESSAGE_SENDERS list. Never set to 'true' without authorization check.",
-        "type": "string",
-        "required": true
       }
     },
     "requireConfirmation": "DISABLED"

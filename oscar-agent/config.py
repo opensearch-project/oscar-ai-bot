@@ -49,18 +49,28 @@ class Config:
         # AWS region
         self.region = os.environ.get('AWS_REGION', 'us-east-1')
         
-        # Bedrock Agent configuration (Phase 1)
-        self.oscar_bedrock_agent_id = os.environ.get('OSCAR_BEDROCK_AGENT_ID')
-        self.oscar_bedrock_agent_alias_id = os.environ.get('OSCAR_BEDROCK_AGENT_ALIAS_ID')
+        # Dual-agent security configuration
+        self.oscar_privileged_bedrock_agent_id = os.environ.get('OSCAR_PRIVILEGED_BEDROCK_AGENT_ID', None)
+        self.oscar_privileged_bedrock_agent_alias_id = os.environ.get('OSCAR_PRIVILEGED_BEDROCK_AGENT_ALIAS_ID', None)
+        self.oscar_limited_bedrock_agent_id = os.environ.get('OSCAR_LIMITED_BEDROCK_AGENT_ID')
+        self.oscar_limited_bedrock_agent_alias_id = os.environ.get('OSCAR_LIMITED_BEDROCK_AGENT_ALIAS_ID')
         
         # Only validate Bedrock agent config if we're in the main agent (not communication handler)
-        if validate_required and not self.oscar_bedrock_agent_id:
-            logger.error("OSCAR_BEDROCK_AGENT_ID environment variable is required")
-            raise ValueError("OSCAR_BEDROCK_AGENT_ID environment variable is required")
+        if validate_required and not self.oscar_privileged_bedrock_agent_id:
+            logger.error("OSCAR_PRIVILEGED_BEDROCK_AGENT_ID environment variable is required")
+            raise ValueError("OSCAR_PRIVILEGED_BEDROCK_AGENT_ID environment variable is required")
             
-        if validate_required and not self.oscar_bedrock_agent_alias_id:
-            logger.error("OSCAR_BEDROCK_AGENT_ALIAS_ID environment variable is required")
-            raise ValueError("OSCAR_BEDROCK_AGENT_ALIAS_ID environment variable is required")
+        if validate_required and not self.oscar_privileged_bedrock_agent_alias_id:
+            logger.error("OSCAR_PRIVILEGED_BEDROCK_AGENT_ALIAS_ID environment variable is required")
+            raise ValueError("OSCAR_PRIVILEGED_BEDROCK_AGENT_ALIAS_ID environment variable is required")
+            
+        if validate_required and not self.oscar_limited_bedrock_agent_id:
+            logger.error("OSCAR_LIMITED_BEDROCK_AGENT_ID environment variable is required")
+            raise ValueError("OSCAR_LIMITED_BEDROCK_AGENT_ID environment variable is required")
+            
+        if validate_required and not self.oscar_limited_bedrock_agent_alias_id:
+            logger.error("OSCAR_LIMITED_BEDROCK_AGENT_ALIAS_ID environment variable is required")
+            raise ValueError("OSCAR_LIMITED_BEDROCK_AGENT_ALIAS_ID environment variable is required")
         
         # DynamoDB tables
         self.context_table_name = os.environ.get('CONTEXT_TABLE_NAME', 'oscar-agent-context')
@@ -105,12 +115,16 @@ class Config:
         # Thread naming
         self.slack_handler_thread_prefix = os.environ.get('SLACK_HANDLER_THREAD_NAME_PREFIX', 'oscar-agent')
         
-        # Authorization
-        authorized_senders = os.environ.get('AUTHORIZED_MESSAGE_SENDERS', '')
-        self.authorized_message_senders = [s.strip() for s in authorized_senders.split(',') if s.strip()]
+        # DM Authorization - users who can DM the bot
+        dm_authorized_users = os.environ.get('DM_AUTHORIZED_USERS', '')
+        self.dm_authorized_users = [u.strip() for u in dm_authorized_users.split(',') if u.strip()]
         
         channel_allow_list = os.environ.get('CHANNEL_ALLOW_LIST', '')
         self.channel_allow_list = [c.strip() for c in channel_allow_list.split(',') if c.strip()]
+        
+        # Fully authorized users for dual-agent security
+        fully_authorized_users = os.environ.get('FULLY_AUTHORIZED_USERS', '')
+        self.fully_authorized_users = [u.strip() for u in fully_authorized_users.split(',') if u.strip()]
         
         # Message formatting
         self.message_preview_length = int(os.environ.get('MESSAGE_PREVIEW_LENGTH', 100))

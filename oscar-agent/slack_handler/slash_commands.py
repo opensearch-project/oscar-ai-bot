@@ -11,7 +11,7 @@ import time
 from typing import Any, Callable, Dict
 
 from config import config
-from slack_handler.authorization import AuthorizationManager
+
 
 logger = logging.getLogger(__name__)
 
@@ -28,7 +28,6 @@ class SlashCommandHandlers:
         """
         self.message_processor = message_processor
         self.storage = storage
-        self.auth_manager = AuthorizationManager()
     
     def handle_announce_command(self, ack, command, say) -> None:
         """Handle /announce slash command."""
@@ -64,11 +63,6 @@ class SlashCommandHandlers:
         
         user_id = command.get('user_id')
         params = command.get('text', '').strip().split()
-        
-        # Check authorization
-        if not self.auth_manager.is_user_authorized_for_messaging(user_id):
-            say(text="❌ You are not authorized to use OSCAR slash commands.", response_type="ephemeral")
-            return
         
         # Require channel and version, RC is optional
         if len(params) < 2 or len(params) > 3:
@@ -109,11 +103,6 @@ class SlashCommandHandlers:
         
         user_id = command.get('user_id')
         text = command.get('text', '').strip()
-        
-        # Check authorization
-        if not self.auth_manager.is_user_authorized_for_messaging(user_id):
-            say(text="❌ You are not authorized to use OSCAR slash commands.", response_type="ephemeral")
-            return
         
         # Parse channel and query
         parts = text.split(' ', 1)

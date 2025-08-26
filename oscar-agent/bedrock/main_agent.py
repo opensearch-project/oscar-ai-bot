@@ -78,6 +78,7 @@ class EnhancedBedrockOSCARAgent(OSCARAgentInterface):
     def query(
         self, 
         query: str, 
+        privilege: bool,
         session_id: Optional[str] = None, 
         context_summary: Optional[str] = None
     ) -> Tuple[str, Optional[str]]:
@@ -95,7 +96,7 @@ class EnhancedBedrockOSCARAgent(OSCARAgentInterface):
         Returns:
             A tuple containing (response_text, session_id)
         """
-        return self.query_processor.process_query(query, session_id, context_summary)
+        return self.query_processor.process_query(query, privilege, session_id, context_summary)
 
 
 def get_oscar_agent(region: Optional[str] = None) -> OSCARAgentInterface:

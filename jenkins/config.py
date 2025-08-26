@@ -46,8 +46,8 @@ class JenkinsConfig:
         # Logging Configuration
         self.log_level = os.getenv('LOG_LEVEL', 'INFO')
         
-        # User Access Control - Use existing authorized message senders
-        self.authorized_message_senders = self._load_authorized_senders()
+        # Note: User authorization is now handled by dual-agent routing
+        # Jenkins Lambda is only accessible through the privileged agent
         
         # Validate required configuration
         self._validate_config()
@@ -125,29 +125,7 @@ class JenkinsConfig:
         """Get the workflow URL for a specific build."""
         return f"{self.jenkins_url}/job/{job_name}/{build_number}/"
     
-    def _load_authorized_senders(self) -> set:
-        """Load the list of authorized message senders (same as main OSCAR authorization)."""
-        authorized_senders_str = os.getenv('AUTHORIZED_MESSAGE_SENDERS', '')
-        if not authorized_senders_str:
-            logger.warning("AUTHORIZED_MESSAGE_SENDERS not configured - Jenkins access will be restricted")
-            return set()
-        
-        # Parse comma-separated list of authorized senders
-        authorized_senders = {user.strip() for user in authorized_senders_str.split(',') if user.strip()}
-        logger.info(f"Loaded {len(authorized_senders)} authorized Jenkins users")
-        return authorized_senders
-    
-    def is_user_authorized(self, user_id: str) -> bool:
-        """Check if a user is authorized to use Jenkins functions (same as main OSCAR authorization)."""
-        if not user_id:
-            return False
-        
-        # If no authorization list is configured, deny access for security
-        if not self.authorized_message_senders:
-            logger.warning("No authorized senders configured - denying access")
-            return False
-        
-        return user_id in self.authorized_message_senders
+
 
 # Global configuration instance
 config = JenkinsConfig()

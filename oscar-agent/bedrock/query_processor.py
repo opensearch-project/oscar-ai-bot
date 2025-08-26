@@ -38,6 +38,7 @@ class QueryProcessor:
     def process_query(
         self, 
         query: str, 
+        privilege: bool,
         session_id: Optional[str] = None, 
         context_summary: Optional[str] = None
     ) -> Tuple[str, Optional[str]]:
@@ -75,11 +76,11 @@ class QueryProcessor:
                     enhanced_query = f"Previous conversation context:\n{context_summary}\n\nCurrent question: {query}"
                     logger.info(f"AGENT_QUERY: Attempting enhanced query WITH session_id: {session_id}, context_len={len(context_summary)}")
                     logger.info(f"AGENT_QUERY: Enhanced query length: {len(enhanced_query)} characters")
-                    response, returned_session_id = self.bedrock_agent.invoke_agent(enhanced_query, session_id)
+                    response, returned_session_id = self.bedrock_agent.invoke_agent(enhanced_query, privilege, session_id)
                 else:
                     # No context available, use plain query with session_id
                     logger.info(f"AGENT_QUERY: Attempting plain query with session_id: {session_id} (no context available)")
-                    response, returned_session_id = self.bedrock_agent.invoke_agent(query, session_id)
+                    response, returned_session_id = self.bedrock_agent.invoke_agent(query, privilege, session_id)
                 
                 # Ensure we return the session ID (either returned or original)
                 final_session_id = returned_session_id or session_id
@@ -95,7 +96,7 @@ class QueryProcessor:
             enhanced_query = f"Previous conversation context:\n{context_summary}\n\nCurrent question: {query}"
             logger.info(f"AGENT_QUERY: Enhanced query length: {len(enhanced_query)} characters")
             try:
-                response, new_session_id = self.bedrock_agent.invoke_agent(enhanced_query, None)
+                response, new_session_id = self.bedrock_agent.invoke_agent(enhanced_query, privilege, None)
                 logger.info(f"AGENT_QUERY: Context-enhanced query succeeded with new session: {new_session_id}")
                 logger.info(f"AGENT_QUERY: Response length: {len(response)} characters")
                 return response, new_session_id
@@ -107,7 +108,7 @@ class QueryProcessor:
         # Third attempt: Just use the plain query as last resort
         logger.info("AGENT_QUERY: Using plain query without context or session")
         try:
-            response, new_session_id = self.bedrock_agent.invoke_agent(query, None)
+            response, new_session_id = self.bedrock_agent.invoke_agent(query, privilege, None)
             logger.info(f"AGENT_QUERY: Plain query succeeded with new session: {new_session_id}")
             logger.info(f"AGENT_QUERY: Response length: {len(response)} characters")
             return response, new_session_id

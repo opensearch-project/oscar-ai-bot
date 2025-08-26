@@ -52,7 +52,7 @@ def lambda_handler(event: Dict[str, Any], context) -> Dict[str, Any]:
         
         logger.info(f"JENKINS LAMBDA: Converted parameters: {params}")
         
-        logger.info(f"JENKINS LAMBDA: Authorization handled by supervisor agent")
+        logger.info(f"JENKINS LAMBDA: Authorization handled by dual-agent routing")
         logger.info(f"JENKINS LAMBDA: About to initialize JenkinsClient")
         
         # Initialize Jenkins client
@@ -154,9 +154,8 @@ def handle_trigger_job(jenkins_client: JenkinsClient, params: Dict[str, Any]) ->
     """
     job_name = params.get('job_name')
     confirmed = params.get('confirmed')
-    authorized = params.get('authorized')
     
-    logger.info(f"JENKINS LAMBDA: handle_trigger_job called with job_name='{job_name}', confirmed={confirmed}, authorized={authorized}")
+    logger.info(f"JENKINS LAMBDA: handle_trigger_job called with job_name='{job_name}', confirmed={confirmed}")
     logger.info(f"JENKINS LAMBDA: This function WILL make HTTP requests to Jenkins")
     
     # CRITICAL: Check confirmation parameter first
@@ -166,7 +165,7 @@ def handle_trigger_job(jenkins_client: JenkinsClient, params: Dict[str, Any]) ->
             'status': 'error',
             'message': 'SECURITY ERROR: The "confirmed" parameter is required for job execution. Use get_job_info first to get job details, then call trigger_job with confirmed=true after user confirmation.',
             'job_name': job_name,
-            'required_parameters': ['job_name', 'confirmed', 'authorized']
+            'required_parameters': ['job_name', 'confirmed']
         }
     
     # Convert string values to boolean (Bedrock passes booleans as strings)
@@ -203,54 +202,7 @@ def handle_trigger_job(jenkins_client: JenkinsClient, params: Dict[str, Any]) ->
             'confirmed': False
         }
     
-    logger.info(f"JENKINS LAMBDA: Confirmation check passed - proceeding with authorization check")
-    
-    # CRITICAL: Check authorization parameter
-    if authorized is None:
-        logger.error("JENKINS LAMBDA: Missing required 'authorized' parameter")
-        return {
-            'status': 'error',
-            'message': 'SECURITY ERROR: The "authorized" parameter is required for job execution. User must be verified as authorized before job execution.',
-            'job_name': job_name,
-            'required_parameters': ['job_name', 'confirmed', 'authorized']
-        }
-    
-    # Convert string values to boolean (Bedrock passes booleans as strings)
-    if isinstance(authorized, str):
-        if authorized.strip().lower() in ['true', '1', 'yes']:
-            authorized = True
-            logger.info(f"JENKINS LAMBDA: Converted string '{params.get('authorized')}' to boolean True")
-        elif authorized.strip().lower() in ['false', '0', 'no']:
-            authorized = False
-            logger.info(f"JENKINS LAMBDA: Converted string '{params.get('authorized')}' to boolean False")
-        else:
-            logger.error(f"JENKINS LAMBDA: Invalid 'authorized' parameter value: '{authorized}'")
-            return {
-                'status': 'error',
-                'message': f'SECURITY ERROR: The "authorized" parameter must be "true" or "false", got: "{authorized}"',
-                'job_name': job_name,
-                'authorized_value': authorized
-            }
-    elif not isinstance(authorized, bool):
-        logger.error(f"JENKINS LAMBDA: Invalid 'authorized' parameter type: {type(authorized)}")
-        return {
-            'status': 'error',
-            'message': f'SECURITY ERROR: The "authorized" parameter must be a boolean or string, got: {type(authorized).__name__}',
-            'job_name': job_name,
-            'authorized_value': authorized
-        }
-    
-    if authorized is False:
-        logger.warning(f"JENKINS LAMBDA: Job execution blocked - user not authorized for job '{job_name}'")
-        return {
-            'status': 'error',
-            'message': 'Access denied. You are not authorized to execute Jenkins jobs. Please contact your system administrator.',
-            'job_name': job_name,
-            'authorized': False,
-            'error_type': 'authorization_error'
-        }
-    
-    logger.info(f"JENKINS LAMBDA: Authorization check passed - proceeding with job execution")
+    logger.info(f"JENKINS LAMBDA: Confirmation check passed - proceeding with job execution")
     
     if not job_name:
         logger.error("JENKINS LAMBDA: Missing job_name parameter")
@@ -260,8 +212,8 @@ def handle_trigger_job(jenkins_client: JenkinsClient, params: Dict[str, Any]) ->
             'available_jobs': job_registry.list_jobs()
         }
     
-    # Extract job parameters (all params except job_name, confirmed, and authorized)
-    job_params = {k: v for k, v in params.items() if k not in ['job_name', 'confirmed', 'authorized']}
+    # Extract job parameters (all params except job_name and confirmed)
+    job_params = {k: v for k, v in params.items() if k not in ['job_name', 'confirmed']}
     logger.info(f"JENKINS LAMBDA: Extracted job parameters: {job_params}")
     
     # Handle legacy job_parameters JSON string if provided
