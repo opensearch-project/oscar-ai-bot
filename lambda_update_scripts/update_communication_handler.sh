@@ -40,7 +40,14 @@ cp oscar-agent/communication_handler/message_formatter.py $TEMP_DIR/
 cp oscar-agent/communication_handler/slack_client.py $TEMP_DIR/
 cp oscar-agent/communication_handler/response_builder.py $TEMP_DIR/
 cp oscar-agent/communication_handler/channel_utils.py $TEMP_DIR/
-cp oscar-agent/communication_handler/context_storage.py $TEMP_DIR/
+# Copy context_storage.py (unified storage)
+cp oscar-agent/context_storage.py $TEMP_DIR/
+echo "📋 After copying context_storage.py:"
+ls -la $TEMP_DIR/storage* 2>/dev/null || echo "No storage files found"
+
+# Ensure no conflicting storage directories exist
+rm -rf $TEMP_DIR/storage/ 2>/dev/null || true
+echo "✅ Cleaned up any conflicting storage directories"
 
 echo "✅ Flattened essential files to root (excluded: __init__.py, constants.py)"
 
@@ -100,6 +107,18 @@ done
 
 echo "✅ Dependencies verified"
 
+# Check if storage directory was created by dependencies
+echo "📋 After installing dependencies:"
+ls -la $TEMP_DIR/storage* 2>/dev/null || echo "No storage files found"
+if [ -d "$TEMP_DIR/storage" ]; then
+    echo "⚠️ Storage directory detected after dependency installation"
+    echo "📋 Contents of storage directory:"
+    ls -la $TEMP_DIR/storage/
+    echo "🗑️ Removing conflicting storage directory"
+    rm -rf $TEMP_DIR/storage/
+    echo "✅ Removed conflicting storage directory"
+fi
+
 # Verify the deployment structure is clean
 echo "🔍 Verifying deployment structure..."
 echo "📋 Files to be deployed:"
@@ -137,6 +156,11 @@ fi
 
 if find $TEMP_DIR -name "communication" -type d | grep -q .; then
     echo "❌ Found communication directory - should be flattened"  
+    exit 1
+fi
+
+if find $TEMP_DIR -name "storage" -type d | grep -q .; then
+    echo "❌ Found storage directory - should be single file"
     exit 1
 fi
 
@@ -229,7 +253,7 @@ echo "   ✅ message_formatter.py"
 echo "   ✅ slack_client.py"
 echo "   ✅ response_builder.py"
 echo "   ✅ channel_utils.py"
-echo "   ✅ context_storage.py"
+echo "   ✅ context_storage.py (unified storage)"
 echo "   ✅ config.py"
 echo ""
 echo "🧹 Cleaned Up:"

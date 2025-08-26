@@ -19,15 +19,15 @@ logger = logging.getLogger(__name__)
 class SlashCommandHandlers:
     """Handles Slack slash commands."""
     
-    def __init__(self, message_processor, context_manager) -> None:
-        """Initialize with message processor and context manager.
+    def __init__(self, message_processor, storage) -> None:
+        """Initialize with message processor and storage.
         
         Args:
             message_processor: MessageProcessor instance
-            context_manager: ContextManager instance
+            storage: Storage instance
         """
         self.message_processor = message_processor
-        self.context_manager = context_manager
+        self.storage = storage
         self.auth_manager = AuthorizationManager()
     
     def handle_announce_command(self, ack, command, say) -> None:
@@ -97,7 +97,7 @@ class SlashCommandHandlers:
             if response and 'ts' in response:
                 actual_thread_ts = response['ts']
                 original_query = f"/{slash_command_type.replace('_', '-')} {channel_param} {version_param} {params[2] if len(params) == 3 else ''}".strip()
-                self.context_manager.store_bot_message_context(channel_id, actual_thread_ts, text, None, original_query)
+                self.storage.store_bot_message_context(channel_id, actual_thread_ts, text, None, original_query)
             return response
         
         # Process directly with context storage skipped (handled by say_with_context_storage)
@@ -138,7 +138,7 @@ class SlashCommandHandlers:
             if response and 'ts' in response:
                 actual_thread_ts = response['ts']
                 original_query = f"/oscar-broadcast {channel_param} {user_query}"
-                self.context_manager.store_bot_message_context(channel_id, actual_thread_ts, text, None, original_query)
+                self.storage.store_bot_message_context(channel_id, actual_thread_ts, text, None, original_query)
             return response
         
         # Process directly with context storage skipped (handled by say_with_context_storage)

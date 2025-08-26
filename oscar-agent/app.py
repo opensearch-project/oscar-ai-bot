@@ -32,7 +32,7 @@ import slack_bolt
 from config import config
 from bedrock import get_oscar_agent
 from slack_handler import SlackHandler
-from storage import get_storage
+from context_storage import get_storage
 
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)

@@ -20,20 +20,18 @@ logger = logging.getLogger(__name__)
 class MessageProcessor:
     """Processes Slack messages and generates agent responses."""
     
-    def __init__(self, storage, oscar_agent, reaction_manager, context_manager, timeout_handler) -> None:
+    def __init__(self, storage, oscar_agent, reaction_manager, timeout_handler) -> None:
         """Initialize with required dependencies.
         
         Args:
             storage: Storage implementation for conversation context
             oscar_agent: OSCAR agent implementation for query processing
             reaction_manager: ReactionManager instance
-            context_manager: ContextManager instance
             timeout_handler: TimeoutHandler instance
         """
         self.storage = storage
         self.oscar_agent = oscar_agent
         self.reaction_manager = reaction_manager
-        self.context_manager = context_manager
         self.timeout_handler = timeout_handler
         self.auth_manager = AuthorizationManager()
     
@@ -167,7 +165,7 @@ class MessageProcessor:
             
             # Update context with new query and response (skip for slash commands to avoid duplication)
             if not skip_context_storage:
-                self.context_manager.update_context(thread_key, query, response, session_id, new_session_id)
+                self.storage.update_context(thread_key, query, response, session_id, new_session_id)
             
             # Format response for Slack before sending
             from .message_formatter import MessageFormatter

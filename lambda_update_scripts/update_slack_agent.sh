@@ -156,9 +156,9 @@ ls -la $TEMP_DIR/ | grep "^d" | awk '{print $9}' | grep -E "^(slack|boto|request
 
 # Verify critical code fixes are in place
 echo "🔍 Verifying critical code fixes..."
-if ! grep -q "def get_context_for_query" oscar-agent/storage.py; then
-    echo "❌ CRITICAL: storage.py is missing get_context_for_query method"
-    echo "   This will cause AttributeError. Please restore the correct storage.py file."
+if ! grep -q "def get_context_for_query" oscar-agent/context_storage.py; then
+    echo "❌ CRITICAL: context_storage.py is missing get_context_for_query method"
+    echo "   This will cause AttributeError. Please restore the correct context_storage.py file."
     exit 1
 fi
 
@@ -265,7 +265,7 @@ echo "📝 Updated Files:"
 echo "   ✅ slack_handler.py"
 echo "   ✅ communication_handler.py"
 echo "   ✅ bedrock.py"
-echo "   ✅ storage.py"
+echo "   ✅ context_storage.py"
 echo "   ✅ config.py"
 echo "   ✅ app.py (lambda handler)"
 echo ""
