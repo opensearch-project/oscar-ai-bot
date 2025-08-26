@@ -63,7 +63,6 @@ class Config:
             raise ValueError("OSCAR_BEDROCK_AGENT_ALIAS_ID environment variable is required")
         
         # DynamoDB tables
-        self.sessions_table_name = os.environ.get('SESSIONS_TABLE_NAME', 'oscar-agent-sessions')
         self.context_table_name = os.environ.get('CONTEXT_TABLE_NAME', 'oscar-agent-context')
         
         # Slack credentials
@@ -80,7 +79,6 @@ class Config:
             raise ValueError("SLACK_SIGNING_SECRET environment variable is required")
         
         # TTL settings
-        self.dedup_ttl = int(os.environ.get('DEDUP_TTL', 300))  # 5 minutes
         self.session_ttl = int(os.environ.get('SESSION_TTL', 3600))  # 1 hour
         self.context_ttl = int(os.environ.get('CONTEXT_TTL', 604800))  # 7 days
         

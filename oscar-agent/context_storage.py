@@ -53,16 +53,6 @@ class StorageInterface(ABC):
                                    original_query: str, sent_message: str) -> None:
         """Store context for a message sent to a different channel to enable follow-up conversations."""
         pass
-    
-    @abstractmethod
-    def has_seen_event(self, event_id: str) -> bool:
-        """Check if an event has been seen before."""
-        pass
-    
-    @abstractmethod
-    def mark_event_seen(self, event_id: str) -> bool:
-        """Mark an event as seen."""
-        pass
 
 class StorageManager(StorageInterface):
     """Consolidated DynamoDB storage manager."""
@@ -71,10 +61,8 @@ class StorageManager(StorageInterface):
         """Initialize DynamoDB storage with configuration."""
         self.region = region or config.region
         self.dynamodb = boto3.resource('dynamodb', region_name=self.region)
-        self.sessions_table = self.dynamodb.Table(config.sessions_table_name)
         self.context_table = self.dynamodb.Table(config.context_table_name)
         self.context_ttl = config.context_ttl
-        self.dedup_ttl = config.dedup_ttl
         self.context_table_name = config.context_table_name
 
     
@@ -272,51 +260,6 @@ class StorageManager(StorageInterface):
             
         except Exception as e:
             logger.error(f"Error storing cross-channel context for {channel}_{message_ts}: {e}")
-    
-    def has_seen_event(self, event_id: str) -> bool:
-        """Check if an event has been seen before in DynamoDB."""
-        try:
-            response = self.sessions_table.get_item(
-                Key={'event_id': event_id}
-            )
-            
-            if 'Item' in response:
-                # Check if the item has expired (TTL might not have been processed yet)
-                if 'ttl' in response['Item']:
-                    ttl = response['Item']['ttl']
-                    current_time = int(time.time())
-                    if ttl < current_time:
-                        logger.info(f"Event {event_id} found but TTL expired, treating as new")
-                        return False
-                
-                logger.info(f"Event {event_id} has been seen before")
-                return True
-            
-            logger.info(f"Event {event_id} has not been seen before")
-            return False
-        except Exception as e:
-            logger.error(f"Error checking event: {e}")
-            return False
-    
-    def mark_event_seen(self, event_id: str) -> bool:
-        """Mark an event as seen in DynamoDB."""
-        try:
-            # Store event with TTL
-            expiration = int(time.time()) + self.dedup_ttl
-            current_time = int(time.time())
-            
-            self.sessions_table.put_item(
-                Item={
-                    'event_id': event_id,
-                    'timestamp': current_time,
-                    'ttl': expiration
-                }
-            )
-            logger.info(f"Marked event {event_id} as seen")
-            return True
-        except Exception as e:
-            logger.error(f"Error marking event: {e}")
-            return False
 
 # Backward compatibility
 DynamoDBStorage = StorageManager
