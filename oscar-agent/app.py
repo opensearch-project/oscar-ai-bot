@@ -96,8 +96,8 @@ def handle_authentication_action_group(event: Dict[str, Any], context: Optional[
         Bedrock action group response
     """
     try:
-        logger.info("🔐 AUTH: Processing authentication action group event")
-        logger.info(f"🔐 AUTH: Event: {json.dumps(event, indent=2)}")
+        logger.info("AUTH: Processing authentication action group event")
+        logger.info(f"AUTH: Event: {json.dumps(event, indent=2)}")
         
         # Extract function and parameters from event
         function_name = event.get('function', '')
@@ -109,7 +109,7 @@ def handle_authentication_action_group(event: Dict[str, Any], context: Optional[
             if isinstance(param, dict) and 'name' in param and 'value' in param:
                 params[param['name']] = param['value']
         
-        logger.info(f"🔐 AUTH: Function: {function_name}, Params: {params}")
+        logger.info(f"AUTH: Function: {function_name}, Params: {params}")
         
         # Route to appropriate handler
         if function_name == 'check_user_authorization':
@@ -124,7 +124,7 @@ def handle_authentication_action_group(event: Dict[str, Any], context: Optional[
         return create_bedrock_response(event, result)
         
     except Exception as e:
-        logger.error(f"🔐 AUTH: Error in authentication handler: {e}", exc_info=True)
+        logger.error(f"AUTH: Error in authentication handler: {e}", exc_info=True)
         return create_bedrock_response(event, {
             'status': 'error',
             'message': 'Internal authentication error',
@@ -144,7 +144,7 @@ def handle_user_authorization_check(params: Dict[str, Any]) -> Dict[str, Any]:
     user_id = params.get('user_id')
     
     if not user_id:
-        logger.warning("🔐 AUTH: No user_id provided")
+        logger.warning("AUTH: No user_id provided")
         return {
             'status': 'error',
             'authorized': False,
@@ -155,7 +155,7 @@ def handle_user_authorization_check(params: Dict[str, Any]) -> Dict[str, Any]:
     # Load authorized users from environment
     authorized_senders_str = os.getenv('AUTHORIZED_MESSAGE_SENDERS', '')
     if not authorized_senders_str:
-        logger.warning("🔐 AUTH: No AUTHORIZED_MESSAGE_SENDERS configured")
+        logger.warning("AUTH: No AUTHORIZED_MESSAGE_SENDERS configured")
         return {
             'status': 'error',
             'authorized': False,
@@ -169,7 +169,7 @@ def handle_user_authorization_check(params: Dict[str, Any]) -> Dict[str, Any]:
     # Check authorization
     is_authorized = user_id in authorized_senders
     
-    logger.info(f"🔐 AUTH: User {user_id} authorization check: {is_authorized}")
+    logger.info(f"AUTH: User {user_id} authorization check: {is_authorized}")
     
     if is_authorized:
         return {
@@ -219,7 +219,7 @@ def create_bedrock_response(event: Dict[str, Any], result: Dict[str, Any]) -> Di
         }
     }
     
-    logger.info(f"🔐 AUTH: Created Bedrock response for {function}")
+    logger.info(f"AUTH: Created Bedrock response for {function}")
     return bedrock_response
 
 def lambda_handler(event: Dict[str, Any], context: Optional[object]) -> Dict[str, Any]:
