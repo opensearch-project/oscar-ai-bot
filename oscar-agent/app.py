@@ -37,6 +37,8 @@ from context_storage import get_storage
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 
+
+
 # Initialize Slack app with process_before_response=True for immediate ack
 app = App(
     token=config.slack_bot_token,
@@ -100,6 +102,8 @@ def lambda_handler(event: Dict[str, Any], context: Optional[object]) -> Dict[str
         API Gateway response object or processing result
     """
     logger.info("Received event for OSCAR agent processing")
+    
+
     
     # Check if this is an async processing event
     if event.get('detail_type') == 'process_slack_event':

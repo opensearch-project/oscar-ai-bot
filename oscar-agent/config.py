@@ -211,6 +211,7 @@ class Config:
             logger.warning("Falling back to local environment variables")
             # Continue with local environment variables if secrets manager fails
     
+
     def get_slack_credentials(self) -> Tuple[Optional[str], Optional[str]]:
         """
         Get Slack credentials from environment variables.
@@ -220,7 +221,11 @@ class Config:
         """
         return self.slack_bot_token, self.slack_signing_secret
 
-# Create a singleton instance with validation based on context
-# Allow disabling validation via environment variable for communication handler
-_disable_validation = os.environ.get('DISABLE_CONFIG_VALIDATION', 'false').lower() == 'true'
-config = Config(validate_required=not _disable_validation)
+class _ConfigProxy:
+    """Proxy that loads fresh config on every attribute access."""
+    def __getattr__(self, name):
+        fresh_config = Config(validate_required=False)
+        return getattr(fresh_config, name)
+
+# Global configuration proxy
+config = _ConfigProxy()

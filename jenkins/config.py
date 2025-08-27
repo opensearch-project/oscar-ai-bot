@@ -46,9 +46,6 @@ class JenkinsConfig:
         # Logging Configuration
         self.log_level = os.getenv('LOG_LEVEL', 'INFO')
         
-        # Note: User authorization is now handled by dual-agent routing
-        # Jenkins Lambda is only accessible through the privileged agent
-        
         # Validate required configuration
         self._validate_config()
     
@@ -76,6 +73,7 @@ class JenkinsConfig:
             logger.warning("Falling back to local environment variables")
             # Continue with local environment variables if secrets manager fails
     
+
     def _validate_config(self) -> None:
         """Validate that required configuration is present."""
         required_vars = {
@@ -127,5 +125,11 @@ class JenkinsConfig:
     
 
 
-# Global configuration instance
-config = JenkinsConfig()
+class _ConfigProxy:
+    """Proxy that loads fresh config on every attribute access."""
+    def __getattr__(self, name):
+        fresh_config = JenkinsConfig()
+        return getattr(fresh_config, name)
+
+# Global configuration proxy
+config = _ConfigProxy()

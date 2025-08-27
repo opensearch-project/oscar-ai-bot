@@ -63,6 +63,8 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         logger.info(f"LAMBDA_HANDLER [{request_id}]: Event keys: {list(event.keys())}")
         logger.info(f"LAMBDA_HANDLER [{request_id}]: Context: {context}")
         
+
+        
         function_name = event.get('function', '')
         parameters = event.get('parameters', [])
         logger.info(f"LAMBDA_HANDLER [{request_id}]: Function name: '{function_name}' (type: {type(function_name)})")

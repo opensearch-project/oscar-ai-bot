@@ -9,7 +9,7 @@ Event handlers for Slack Handler.
 import logging
 from typing import Any, Callable, Dict
 
-from slack_handler.constants import CHANNEL_ALLOW_LIST, DM_AUTHORIZED_USERS, FULLY_AUTHORIZED_USERS
+from config import config
 
 logger = logging.getLogger(__name__)
 
@@ -34,7 +34,7 @@ class EventHandlers:
         """
         # Extract message details
         channel = event.get("channel")
-        if channel not in CHANNEL_ALLOW_LIST:
+        if channel not in config.channel_allow_list:
             logger.info(f"Channel {channel} not in allow list, ignoring event")
             return
         thread_ts = event.get("thread_ts") or event.get("ts")
@@ -67,7 +67,7 @@ class EventHandlers:
         event_ts = message.get("ts")  # Use ts for the specific message
         
         # Check if user is authorized for DM access
-        if user_id not in FULLY_AUTHORIZED_USERS and user_id not in DM_AUTHORIZED_USERS:
+        if user_id not in config.fully_authorized_users and user_id not in config.dm_authorized_users:
             logger.warning(f"Unauthorized DM attempt by user {user_id}") #we do not send a message to the user if unauthorized to minimize overhead
             return
         

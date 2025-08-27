@@ -10,7 +10,7 @@ import logging
 from typing import Any, Dict
 from slack_sdk.errors import SlackApiError
 
-from slack_handler.constants import CHANNEL_ALLOW_LIST
+from config import config
 from .message_formatter import MessageFormatter
 
 logger = logging.getLogger(__name__)
@@ -44,7 +44,7 @@ class SlackMessaging:
         """
         try:
             # Validate channel is in allow list
-            if channel not in CHANNEL_ALLOW_LIST:
+            if channel not in config.channel_allow_list:
                 return {
                     "success": False,
                     "error": f"Channel {channel} not in allow list"

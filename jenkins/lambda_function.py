@@ -37,6 +37,8 @@ def lambda_handler(event: Dict[str, Any], context) -> Dict[str, Any]:
         logger.info("JENKINS LAMBDA: Handler started")
         logger.info(f"JENKINS LAMBDA: Full event received: {json.dumps(event, indent=2)}")
         
+
+        
         # Extract function and parameters from event
         function_name = event.get('function', '')
         parameters = event.get('parameters', [])
