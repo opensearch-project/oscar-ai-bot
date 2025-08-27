@@ -41,17 +41,9 @@ def lambda_handler(event: Dict[str, Any], context) -> Dict[str, Any]:
         Response dictionary with results
     """
     try:
-        logger.info("JENKINS LAMBDA: Handler started")
-        logger.info(f"JENKINS LAMBDA: Full event received: {json.dumps(event, indent=2)}")
-        
-
-        
         # Extract function and parameters from event
         function_name = event.get('function', '')
         parameters = event.get('parameters', [])
-        
-        logger.info(f"JENKINS LAMBDA: Extracted function_name='{function_name}'")
-        logger.info(f"JENKINS LAMBDA: Raw parameters: {parameters}")
         
         # Convert parameters list to dictionary
         params = {}
@@ -59,46 +51,30 @@ def lambda_handler(event: Dict[str, Any], context) -> Dict[str, Any]:
             if isinstance(param, dict) and 'name' in param and 'value' in param:
                 params[param['name']] = param['value']
         
-        logger.info(f"JENKINS LAMBDA: Converted parameters: {params}")
-        
-        logger.info(f"JENKINS LAMBDA: Authorization handled by dual-agent routing")
-        logger.info(f"JENKINS LAMBDA: About to initialize JenkinsClient")
-        
         # Initialize Jenkins client
         jenkins_client = JenkinsClient()
-        logger.info(f"JENKINS LAMBDA: JenkinsClient initialized successfully")
         
         # Route to appropriate handler
-        print(f"JENKINS LAMBDA: Routing to function '{function_name}'")
-        logger.info(f"JENKINS LAMBDA: Routing to function '{function_name}'")
+        match function_name:
+            case 'trigger_job':
+                result = handle_trigger_job(jenkins_client, params)
+            case 'test_connection':
+                result = handle_test_connection(jenkins_client)
+            case 'get_job_info':
+                result = handle_get_job_info(jenkins_client, params)
+            case 'list_jobs':
+                result = handle_list_jobs(jenkins_client)
+            case _:
+                result = {
+                    'status': 'error',
+                    'message': f'Unknown function: {function_name}',
+                    'available_functions': [
+                        'trigger_job', 'test_connection', 
+                        'get_job_info', 'list_jobs'
+                    ]
+                }
         
-        if function_name == 'trigger_job':
-            print("JENKINS LAMBDA: *** CALLING TRIGGER_JOB - THIS WILL EXECUTE THE JOB ***")
-            logger.info("JENKINS LAMBDA: Routing to handle_trigger_job")
-            result = handle_trigger_job(jenkins_client, params)
-        elif function_name == 'test_connection':
-            print("JENKINS LAMBDA: Routing to handle_test_connection")
-            logger.info("JENKINS LAMBDA: Routing to handle_test_connection")
-            result = handle_test_connection(jenkins_client)
-        elif function_name == 'get_job_info':
-            print("JENKINS LAMBDA: *** CALLING GET_JOB_INFO - INFORMATION ONLY ***")
-            logger.info("JENKINS LAMBDA: Routing to handle_get_job_info")
-            result = handle_get_job_info(jenkins_client, params)
-        elif function_name == 'list_jobs':
-            logger.info("JENKINS LAMBDA: Routing to handle_list_jobs")
-            result = handle_list_jobs(jenkins_client)
-        else:
-            logger.error(f"JENKINS LAMBDA: Unknown function '{function_name}'")
-            result = {
-                'status': 'error',
-                'message': f'Unknown function: {function_name}',
-                'available_functions': [
-                    'trigger_job', 'test_connection', 
-                    'get_job_info', 'list_jobs'
-                ]
-            }
-        
-        logger.info(f"JENKINS LAMBDA: Function '{function_name}' completed with status: {result.get('status', 'unknown')}")
+
         
         return create_response(event, result)
         
@@ -164,12 +140,8 @@ def handle_trigger_job(jenkins_client: JenkinsClient, params: Dict[str, Any]) ->
     job_name = params.get('job_name')
     confirmed = params.get('confirmed')
     
-    logger.info(f"JENKINS LAMBDA: handle_trigger_job called with job_name='{job_name}', confirmed={confirmed}")
-    logger.info(f"JENKINS LAMBDA: This function WILL make HTTP requests to Jenkins")
-    
     # CRITICAL: Check confirmation parameter first
     if confirmed is None:
-        logger.error("JENKINS LAMBDA: Missing required 'confirmed' parameter")
         return {
             'status': 'error',
             'message': 'SECURITY ERROR: The "confirmed" parameter is required for job execution. Use get_job_info first to get job details, then call trigger_job with confirmed=true after user confirmation.',
@@ -181,12 +153,9 @@ def handle_trigger_job(jenkins_client: JenkinsClient, params: Dict[str, Any]) ->
     if isinstance(confirmed, str):
         if confirmed.strip().lower() in ['true', '1', 'yes']:
             confirmed = True
-            logger.info(f"JENKINS LAMBDA: Converted string '{params.get('confirmed')}' to boolean True")
         elif confirmed.strip().lower() in ['false', '0', 'no']:
             confirmed = False
-            logger.info(f"JENKINS LAMBDA: Converted string '{params.get('confirmed')}' to boolean False")
         else:
-            logger.error(f"JENKINS LAMBDA: Invalid 'confirmed' parameter value: '{confirmed}'")
             return {
                 'status': 'error',
                 'message': f'SECURITY ERROR: The "confirmed" parameter must be "true" or "false", got: "{confirmed}"',
@@ -194,7 +163,6 @@ def handle_trigger_job(jenkins_client: JenkinsClient, params: Dict[str, Any]) ->
                 'confirmed_value': confirmed
             }
     elif not isinstance(confirmed, bool):
-        logger.error(f"JENKINS LAMBDA: Invalid 'confirmed' parameter type: {type(confirmed)}")
         return {
             'status': 'error',
             'message': f'SECURITY ERROR: The "confirmed" parameter must be a boolean or string, got: {type(confirmed).__name__}',
@@ -203,7 +171,6 @@ def handle_trigger_job(jenkins_client: JenkinsClient, params: Dict[str, Any]) ->
         }
     
     if confirmed is False:
-        logger.warning(f"JENKINS LAMBDA: Job execution blocked - confirmed=false for job '{job_name}'")
         return {
             'status': 'error',
             'message': 'Job execution cancelled. The "confirmed" parameter is false. Set confirmed=true only after user explicitly confirms job execution.',
@@ -211,10 +178,9 @@ def handle_trigger_job(jenkins_client: JenkinsClient, params: Dict[str, Any]) ->
             'confirmed': False
         }
     
-    logger.info(f"JENKINS LAMBDA: Confirmation check passed - proceeding with job execution")
+
     
     if not job_name:
-        logger.error("JENKINS LAMBDA: Missing job_name parameter")
         return {
             'status': 'error',
             'message': 'job_name parameter is required for trigger_job function',
@@ -223,28 +189,22 @@ def handle_trigger_job(jenkins_client: JenkinsClient, params: Dict[str, Any]) ->
     
     # Extract job parameters (all params except job_name and confirmed)
     job_params = {k: v for k, v in params.items() if k not in ['job_name', 'confirmed']}
-    logger.info(f"JENKINS LAMBDA: Extracted job parameters: {job_params}")
     
     # Handle legacy job_parameters JSON string if provided
     job_parameters_json = params.get('job_parameters')
     if job_parameters_json:
-        logger.info(f"JENKINS LAMBDA: Found legacy job_parameters JSON: {job_parameters_json}")
         try:
             import json
             parsed_params = json.loads(job_parameters_json)
             job_params.update(parsed_params)
-            logger.info(f"JENKINS LAMBDA: Updated job_params with JSON: {job_params}")
         except json.JSONDecodeError:
-            logger.error("JENKINS LAMBDA: Invalid JSON in job_parameters field")
             return {
                 'status': 'error',
                 'message': 'Invalid JSON in job_parameters field',
                 'job_name': job_name
             }
     
-    logger.info(f"JENKINS LAMBDA: About to call jenkins_client.trigger_job with job_name='{job_name}', params={job_params}")
     result = jenkins_client.trigger_job(job_name, job_params)
-    logger.info(f"JENKINS LAMBDA: trigger_job returned status: {result.get('status', 'unknown')}")
     
     # Enhance the success message to include only workflow URL if available
     if result.get('status') == 'success':
@@ -299,11 +259,7 @@ def handle_get_job_info(jenkins_client: JenkinsClient, params: Dict[str, Any]) -
         Job information result
     """
     job_name = params.get('job_name', 'docker-scan')  # Default to docker-scan
-    logger.info(f"JENKINS LAMBDA: handle_get_job_info called with job_name='{job_name}'")
-    logger.info(f"JENKINS LAMBDA: This function should NOT make HTTP requests to Jenkins")
-    
     result = jenkins_client.get_job_info(job_name)
-    logger.info(f"JENKINS LAMBDA: get_job_info returned status: {result.get('status', 'unknown')}")
     
     # Format parameters as bullet list for better readability
     if result.get('status') == 'success' and 'parameter_definitions' in result:
@@ -373,13 +329,11 @@ def create_response(event: Dict[str, Any], result: Dict[str, Any]) -> Dict[str, 
     action_group = event.get('actionGroup', 'jenkins-operations')
     function = event.get('function', 'unknown')
     
-    logger.info(f"Creating Bedrock response for action_group={action_group}, function={function}")
-    
     # Serialize result to JSON string as required by Bedrock
     response_body_string = json.dumps(result, default=str)
     
     # Create the proper Bedrock action group response format
-    bedrock_response = {
+    return {
         "messageVersion": "1.0",
         "response": {
             "actionGroup": action_group,
@@ -393,9 +347,6 @@ def create_response(event: Dict[str, Any], result: Dict[str, Any]) -> Dict[str, 
             }
         }
     }
-    
-    logger.info(f"Created Bedrock response with body length: {len(response_body_string)}")
-    return bedrock_response
 
 # For local testing
 if __name__ == "__main__":
@@ -414,4 +365,3 @@ if __name__ == "__main__":
         pass
     
     result = lambda_handler(test_event, MockContext())
-    print(json.dumps(result, indent=2))
