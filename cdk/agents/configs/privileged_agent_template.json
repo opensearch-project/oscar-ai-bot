@@ -1,0 +1,121 @@
+{
+  "agent_name": "oscar-privileged-agent",
+  "description": "OSCAR Privileged Agent with full access capabilities for release management and system operations",
+  "instructions": "You are OSCAR, the OpenSearch Conversational Automation for Releases assistant. You have full access to all systems and can perform any requested operations including Jenkins jobs, metrics analysis, and communication orchestration. Always provide accurate information and execute tasks efficiently.",
+  "foundation_model": "anthropic.claude-3-5-sonnet-20241022-v2:0",
+  "agent_id": "NFCKXG7OIN",
+  "primary_alias_id": "KNFTCYYHPT",
+  "idle_session_ttl_in_seconds": 1800,
+  "action_groups": [
+    {
+      "name": "communication-orchestration",
+      "description": "Handle Slack communication and message orchestration",
+      "lambda_function_arn": "arn:aws:lambda:us-east-1:395380602281:function:oscar-communication-handler",
+      "api_schema": {
+        "openAPIVersion": "3.0.0",
+        "info": {
+          "title": "Communication Orchestration API",
+          "version": "1.0.0"
+        },
+        "paths": {
+          "/send_message": {
+            "post": {
+              "description": "Send a message to a Slack channel",
+              "parameters": {
+                "channel": {
+                  "type": "string",
+                  "description": "Slack channel ID or name"
+                },
+                "message": {
+                  "type": "string",
+                  "description": "Message content to send"
+                }
+              }
+            }
+          }
+        }
+      },
+      "action_group_state": "ENABLED"
+    },
+    {
+      "name": "metrics-analysis",
+      "description": "Analyze test, build, release, and deployment metrics",
+      "lambda_function_arn": "arn:aws:lambda:us-east-1:395380602281:function:oscar-metrics-handler",
+      "api_schema": {
+        "openAPIVersion": "3.0.0",
+        "info": {
+          "title": "Metrics Analysis API",
+          "version": "1.0.0"
+        },
+        "paths": {
+          "/get_metrics": {
+            "post": {
+              "description": "Retrieve and analyze metrics data",
+              "parameters": {
+                "metric_type": {
+                  "type": "string",
+                  "description": "Type of metrics to retrieve (test, build, release, deployment)"
+                },
+                "time_range": {
+                  "type": "string",
+                  "description": "Time range for metrics analysis"
+                }
+              }
+            }
+          }
+        }
+      },
+      "action_group_state": "ENABLED"
+    },
+    {
+      "name": "jenkins-operations",
+      "description": "Execute and monitor Jenkins jobs",
+      "lambda_function_arn": "arn:aws:lambda:us-east-1:395380602281:function:oscar-jenkins-agent",
+      "api_schema": {
+        "openAPIVersion": "3.0.0",
+        "info": {
+          "title": "Jenkins Operations API",
+          "version": "1.0.0"
+        },
+        "paths": {
+          "/execute_job": {
+            "post": {
+              "description": "Execute a Jenkins job",
+              "parameters": {
+                "job_name": {
+                  "type": "string",
+                  "description": "Name of the Jenkins job to execute"
+                },
+                "parameters": {
+                  "type": "object",
+                  "description": "Job parameters"
+                }
+              }
+            }
+          }
+        }
+      },
+      "action_group_state": "ENABLED"
+    }
+  ],
+  "knowledge_bases": [
+    {
+      "knowledge_base_id": "NBRUVWHAYY",
+      "knowledge_base_state": "ENABLED",
+      "description": "OSCAR knowledge base with release management documentation",
+      "retrieval_configuration": {
+        "vectorSearchConfiguration": {
+          "numberOfResults": 10,
+          "overrideSearchType": "HYBRID"
+        }
+      }
+    }
+  ],
+  "collaborators": [],
+  "tags": {
+    "Environment": "Production",
+    "Project": "OSCAR",
+    "Agent": "Privileged",
+    "Access": "Full"
+  }
+}

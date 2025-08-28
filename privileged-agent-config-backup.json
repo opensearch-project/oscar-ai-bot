@@ -80,8 +80,7 @@
         "updatedAt": "2025-08-26T14:30:16.911800+00:00"
     }
 }
-AGENT
- ALIAS CONFIGURATION:
+AGENT ALIAS CONFIGURATION:
 {
     "agentAlias": {
         "agentAliasArn": "arn:aws:bedrock:us-east-1:395380602281:agent-alias/NFCKXG7OIN/KNFTCYYHPT",
