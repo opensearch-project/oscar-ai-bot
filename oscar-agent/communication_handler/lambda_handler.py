@@ -56,14 +56,10 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         # Handle the functions
         if function_name == 'send_automated_message':
             logger.info(f"Calling handle_send_message with params: {params}")
-            return message_handler.handle_send_message(params)
-        elif function_name == 'format_message_for_slack':
-            logger.info(f"Calling handle_format_message with params: {params}")
-            return message_handler.handle_format_message(params)
+            return message_handler.handle_send_message(params, action_group, function_name)
         else:
             logger.error(f"Unknown function: {function_name}")
-            return response_builder.create_error_response(
-                function_name or "unknown",
+            return response_builder.create_error_response(action_group, function_name,
                 f'Unknown function: {function_name}'
             )
             
@@ -72,7 +68,6 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         logger.error(f"Full event: {json.dumps(event, indent=2)}")
         
         response_builder = ResponseBuilder()
-        return response_builder.create_error_response(
-            "send_automated_message",
+        return response_builder.create_error_response(action_group, function_name,
             f'Internal server error: {str(e)}'
         )
