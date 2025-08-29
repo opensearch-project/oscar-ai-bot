@@ -271,8 +271,7 @@ class OscarPolicyDefinitions:
                 effect=iam.Effect.ALLOW,
                 actions=["secretsmanager:GetSecretValue"],
                 resources=[
-                    f"arn:aws:secretsmanager:{self.region}:{self.account_id}:secret:oscar-central-env-*",
-                    f"arn:aws:secretsmanager:{self.region}:{self.account_id}:secret:jenkins-api-token-*"
+                    f"arn:aws:secretsmanager:{self.region}:{self.account_id}:secret:oscar-central-env-*"
                 ]
             ),
             
@@ -349,19 +348,7 @@ class OscarPolicyDefinitions:
                 )
             ],
             
-            "jenkins_token": [
-                iam.PolicyStatement(
-                    sid="JenkinsTokenSecretAccess",
-                    effect=iam.Effect.ALLOW,
-                    actions=[
-                        "secretsmanager:GetSecretValue",
-                        "secretsmanager:DescribeSecret"
-                    ],
-                    resources=[
-                        f"arn:aws:secretsmanager:{self.region}:{self.account_id}:secret:jenkins-api-token-*"
-                    ]
-                )
-            ]
+
         }
     
     def get_dynamodb_resource_policies(self) -> Dict[str, List[iam.PolicyStatement]]:

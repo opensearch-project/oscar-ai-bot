@@ -14,6 +14,7 @@ This package contains the CDK stacks for deploying the OSCAR Slack Bot infrastru
 # Import only working stacks for now
 from .storage_stack import OscarStorageStack
 from .permissions_stack import OscarPermissionsStack
+from .secrets_stack import OscarSecretsStack
 
 # TODO: Fix existing stacks that have CDK compatibility issues
 # from .slack_bot_stack import OscarSlackBotStack
@@ -21,7 +22,8 @@ from .permissions_stack import OscarPermissionsStack
 
 __all__ = [
     'OscarStorageStack',
-    'OscarPermissionsStack'
+    'OscarPermissionsStack',
+    'OscarSecretsStack'
     # 'OscarSlackBotStack',
     # 'OscarLambdaStack'
 ]
