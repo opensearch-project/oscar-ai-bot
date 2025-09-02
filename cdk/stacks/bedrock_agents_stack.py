@@ -34,16 +34,34 @@ from constructs import Construct
 # Configure logging
 logger = logging.getLogger(__name__)
 
-# Import utilities
+# Import utilities - try multiple import paths
+AgentConfigBuilder = None
+AgentConfigValidator = None
+AgentConfig = None
+
 try:
-    from utils.agent_config_builder import AgentConfigBuilder, AgentConfig
-    from utils.agent_config_validator import AgentConfigValidator
-except ImportError as e:
-    # Fallback for when utilities are not available
-    logger.error(f"Failed to import utilities: {e}")
-    AgentConfigBuilder = None
-    AgentConfigValidator = None
-    AgentConfig = None
+    # Try relative import first
+    from ..utils.agent_config_builder import AgentConfigBuilder, AgentConfig
+    from ..utils.agent_config_validator import AgentConfigValidator
+except ImportError:
+    try:
+        # Try absolute import
+        from utils.agent_config_builder import AgentConfigBuilder, AgentConfig
+        from utils.agent_config_validator import AgentConfigValidator
+    except ImportError:
+        try:
+            # Try direct import from current directory
+            import sys
+            import os
+            sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
+            from utils.agent_config_builder import AgentConfigBuilder, AgentConfig
+            from utils.agent_config_validator import AgentConfigValidator
+        except ImportError as e:
+            # Fallback for when utilities are not available
+            logger.warning(f"Failed to import utilities: {e} - Bedrock agents will be skipped")
+            AgentConfigBuilder = None
+            AgentConfigValidator = None
+            AgentConfig = None
 
 
 class OscarAgentsStack(Stack):
@@ -115,6 +133,12 @@ class OscarAgentsStack(Stack):
         """
         logger.info("Creating Bedrock agents from configuration files")
         
+        # If utilities are not available, create basic agents directly
+        if self.config_builder is None:
+            logger.warning("AgentConfigBuilder is not available - creating basic agents directly")
+            self._create_basic_agents()
+            return
+        
         # Define agent configurations to deploy
         agent_configs = [
             {
@@ -140,6 +164,90 @@ class OscarAgentsStack(Stack):
                 logger.error(f"Failed to create agent from {config_info['config_file']}: {e}")
                 # Continue with other agents even if one fails
                 continue
+    
+    def _create_basic_agents(self) -> None:
+        """
+        Create basic Bedrock agents without configuration files.
+        This is a fallback when the configuration utilities are not available.
+        """
+        logger.info("Creating basic Bedrock agents")
+        
+        # Get the agent execution role from permissions stack
+        agent_role_arn = self.permissions_stack.bedrock_agent_role.role_arn
+        
+        # Create privileged agent
+        try:
+            privileged_agent = bedrock.CfnAgent(
+                self, "OscarPrivilegedAgent",
+                agent_name="oscar-privileged-agent-cdk-created",
+                description="Privileged OSCAR agent with full access capabilities",
+                foundation_model="anthropic.claude-3-5-sonnet-20241022-v2:0",
+                instruction="You are OSCAR, an AI assistant for the OpenSearch project. You have full access to help with development, testing, and operations tasks.",
+                agent_resource_role_arn=agent_role_arn,
+                idle_session_ttl_in_seconds=1800,
+                tags={
+                    "Environment": self.env_name,
+                    "Project": "OSCAR",
+                    "AgentType": "Privileged"
+                }
+            )
+            self.agents["privileged"] = privileged_agent
+            logger.info("Created privileged OSCAR agent")
+            
+            # Create agent alias
+            privileged_alias = bedrock.CfnAgentAlias(
+                self, "OscarPrivilegedAgentAlias",
+                agent_id=privileged_agent.attr_agent_id,
+                agent_alias_name="CURRENT",
+                description="Current version of the privileged OSCAR agent",
+                tags={
+                    "Environment": self.env_name,
+                    "Project": "OSCAR"
+                }
+            )
+            self.agent_aliases["privileged"] = privileged_alias
+            logger.info("Created privileged agent alias")
+            
+        except Exception as e:
+            logger.error(f"Failed to create privileged agent: {e}")
+        
+        # Create limited agent
+        try:
+            limited_agent_role_arn = self.permissions_stack.bedrock_agent_role.role_arn
+            
+            limited_agent = bedrock.CfnAgent(
+                self, "OscarLimitedAgent", 
+                agent_name="oscar-limited-agent-cdk-created",
+                description="Limited OSCAR agent with read-only access",
+                foundation_model="anthropic.claude-3-5-sonnet-20241022-v2:0",
+                instruction="You are OSCAR, an AI assistant for the OpenSearch project. You have read-only access to help with information and analysis tasks.",
+                agent_resource_role_arn=limited_agent_role_arn,
+                idle_session_ttl_in_seconds=1800,
+                tags={
+                    "Environment": self.env_name,
+                    "Project": "OSCAR", 
+                    "AgentType": "Limited"
+                }
+            )
+            self.agents["limited"] = limited_agent
+            logger.info("Created limited OSCAR agent")
+            
+            # Create agent alias
+            limited_alias = bedrock.CfnAgentAlias(
+                self, "OscarLimitedAgentAlias",
+                agent_id=limited_agent.attr_agent_id,
+                agent_alias_name="CURRENT",
+                description="Current version of the limited OSCAR agent",
+                tags={
+                    "Environment": self.env_name,
+                    "Project": "OSCAR"
+                }
+            )
+            self.agent_aliases["limited"] = limited_alias
+            logger.info("Created limited agent alias")
+            
+        except Exception as e:
+            logger.error(f"Failed to create limited agent: {e}")
     
     def _create_agent_from_config(self, config_file: str, agent_key: str, description: str) -> None:
         """

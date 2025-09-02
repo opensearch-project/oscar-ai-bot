@@ -179,13 +179,27 @@ class OscarVpcStack(Stack):
         
         # S3 Gateway Endpoint (no additional charges)
         try:
+            # Try private subnets first, fallback to public if needed
+            subnet_selection = None
+            try:
+                # Check if private subnets exist
+                private_subnets = self.vpc.select_subnets(
+                    subnet_type=ec2.SubnetType.PRIVATE_WITH_EGRESS
+                ).subnets
+                if private_subnets:
+                    subnet_selection = [ec2.SubnetSelection(subnet_type=ec2.SubnetType.PRIVATE_WITH_EGRESS)]
+            except:
+                pass
+            
+            if not subnet_selection:
+                # Use public subnets if no private subnets available
+                subnet_selection = [ec2.SubnetSelection(subnet_type=ec2.SubnetType.PUBLIC)]
+            
             s3_endpoint = ec2.GatewayVpcEndpoint(
                 self, "S3VpcEndpoint",
                 vpc=self.vpc,
                 service=ec2.GatewayVpcEndpointAwsService.S3,
-                subnets=[ec2.SubnetSelection(
-                    subnet_type=ec2.SubnetType.PRIVATE_WITH_EGRESS
-                )]
+                subnets=subnet_selection
             )
             endpoints["s3"] = s3_endpoint
             logger.info("Created S3 VPC Gateway Endpoint")
@@ -194,13 +208,25 @@ class OscarVpcStack(Stack):
         
         # DynamoDB Gateway Endpoint (no additional charges)
         try:
+            # Use same subnet selection logic
+            subnet_selection = None
+            try:
+                private_subnets = self.vpc.select_subnets(
+                    subnet_type=ec2.SubnetType.PRIVATE_WITH_EGRESS
+                ).subnets
+                if private_subnets:
+                    subnet_selection = [ec2.SubnetSelection(subnet_type=ec2.SubnetType.PRIVATE_WITH_EGRESS)]
+            except:
+                pass
+            
+            if not subnet_selection:
+                subnet_selection = [ec2.SubnetSelection(subnet_type=ec2.SubnetType.PUBLIC)]
+            
             dynamodb_endpoint = ec2.GatewayVpcEndpoint(
                 self, "DynamoDBVpcEndpoint",
                 vpc=self.vpc,
                 service=ec2.GatewayVpcEndpointAwsService.DYNAMODB,
-                subnets=[ec2.SubnetSelection(
-                    subnet_type=ec2.SubnetType.PRIVATE_WITH_EGRESS
-                )]
+                subnets=subnet_selection
             )
             endpoints["dynamodb"] = dynamodb_endpoint
             logger.info("Created DynamoDB VPC Gateway Endpoint")
@@ -222,20 +248,33 @@ class OscarVpcStack(Stack):
             description="HTTPS access from Lambda functions"
         )
         
+        # Determine subnet selection for interface endpoints
+        interface_subnet_selection = None
+        try:
+            private_subnets = self.vpc.select_subnets(
+                subnet_type=ec2.SubnetType.PRIVATE_WITH_EGRESS
+            ).subnets
+            if private_subnets:
+                interface_subnet_selection = ec2.SubnetSelection(subnet_type=ec2.SubnetType.PRIVATE_WITH_EGRESS)
+        except:
+            pass
+        
+        if not interface_subnet_selection:
+            # Use public subnets if no private subnets available
+            interface_subnet_selection = ec2.SubnetSelection(subnet_type=ec2.SubnetType.PUBLIC)
+        
         # Secrets Manager Interface Endpoint
         try:
             secrets_endpoint = ec2.InterfaceVpcEndpoint(
                 self, "SecretsManagerVpcEndpoint",
                 vpc=self.vpc,
                 service=ec2.InterfaceVpcEndpointAwsService.SECRETS_MANAGER,
-                subnets=ec2.SubnetSelection(
-                    subnet_type=ec2.SubnetType.PRIVATE_WITH_EGRESS
-                ),
+                subnets=interface_subnet_selection,
                 security_groups=[endpoint_security_group],
-                private_dns_enabled=True
+                private_dns_enabled=False  # Disabled due to existing DNS conflicts
             )
             endpoints["secrets_manager"] = secrets_endpoint
-            logger.info("Created Secrets Manager VPC Interface Endpoint")
+            logger.info("Created Secrets Manager VPC Interface Endpoint (private DNS disabled)")
         except Exception as e:
             logger.warning(f"Failed to create Secrets Manager VPC endpoint: {e}")
         
@@ -245,14 +284,12 @@ class OscarVpcStack(Stack):
                 self, "STSVpcEndpoint",
                 vpc=self.vpc,
                 service=ec2.InterfaceVpcEndpointAwsService.STS,
-                subnets=ec2.SubnetSelection(
-                    subnet_type=ec2.SubnetType.PRIVATE_WITH_EGRESS
-                ),
+                subnets=interface_subnet_selection,
                 security_groups=[endpoint_security_group],
-                private_dns_enabled=True
+                private_dns_enabled=False  # Disabled due to existing DNS conflicts
             )
             endpoints["sts"] = sts_endpoint
-            logger.info("Created STS VPC Interface Endpoint")
+            logger.info("Created STS VPC Interface Endpoint (private DNS disabled)")
         except Exception as e:
             logger.warning(f"Failed to create STS VPC endpoint: {e}")
         
@@ -268,16 +305,28 @@ class OscarVpcStack(Stack):
         This method creates custom Network ACLs with restrictive rules
         for enhanced security beyond security groups.
         """
-        # Get private subnets for Lambda deployment
-        private_subnets = self.vpc.select_subnets(
-            subnet_type=ec2.SubnetType.PRIVATE_WITH_EGRESS
-        ).subnets
+        # Try to get private subnets for Lambda deployment
+        private_subnets = []
+        
+        try:
+            private_subnets = self.vpc.select_subnets(
+                subnet_type=ec2.SubnetType.PRIVATE_WITH_EGRESS
+            ).subnets
+        except Exception as e:
+            logger.warning(f"No private subnets with egress found: {e}")
         
         if not private_subnets:
-            # Fallback to isolated private subnets
-            private_subnets = self.vpc.select_subnets(
-                subnet_type=ec2.SubnetType.PRIVATE_ISOLATED
-            ).subnets
+            try:
+                # Fallback to isolated private subnets
+                private_subnets = self.vpc.select_subnets(
+                    subnet_type=ec2.SubnetType.PRIVATE_ISOLATED
+                ).subnets
+            except Exception as e:
+                logger.warning(f"No isolated private subnets found: {e}")
+        
+        if not private_subnets:
+            logger.warning("No private subnets found in VPC - skipping Network ACL configuration")
+            return
         
         if private_subnets:
             # Create custom Network ACL for Lambda subnets
@@ -365,22 +414,49 @@ class OscarVpcStack(Stack):
             export_name="OscarLambdaSecurityGroupId"
         )
         
-        # Output private subnet IDs for Lambda deployment
-        private_subnets = self.vpc.select_subnets(
-            subnet_type=ec2.SubnetType.PRIVATE_WITH_EGRESS
-        ).subnet_ids
+        # Output subnet IDs for Lambda deployment (try private first, fallback to public)
+        subnet_ids = []
+        subnet_type_used = "public"
         
-        if not private_subnets:
+        try:
             private_subnets = self.vpc.select_subnets(
-                subnet_type=ec2.SubnetType.PRIVATE_ISOLATED
+                subnet_type=ec2.SubnetType.PRIVATE_WITH_EGRESS
             ).subnet_ids
+            if private_subnets:
+                subnet_ids = private_subnets
+                subnet_type_used = "private-with-egress"
+        except:
+            pass
         
-        if private_subnets:
+        if not subnet_ids:
+            try:
+                isolated_subnets = self.vpc.select_subnets(
+                    subnet_type=ec2.SubnetType.PRIVATE_ISOLATED
+                ).subnet_ids
+                if isolated_subnets:
+                    subnet_ids = isolated_subnets
+                    subnet_type_used = "private-isolated"
+            except:
+                pass
+        
+        if not subnet_ids:
+            # Fallback to public subnets
+            try:
+                public_subnets = self.vpc.select_subnets(
+                    subnet_type=ec2.SubnetType.PUBLIC
+                ).subnet_ids
+                if public_subnets:
+                    subnet_ids = public_subnets
+                    subnet_type_used = "public"
+            except:
+                pass
+        
+        if subnet_ids:
             CfnOutput(
-                self, "PrivateSubnetIds",
-                value=",".join(private_subnets),
-                description="Comma-separated list of private subnet IDs",
-                export_name="OscarPrivateSubnetIds"
+                self, "LambdaSubnetIds",
+                value=",".join(subnet_ids),
+                description=f"Comma-separated list of {subnet_type_used} subnet IDs for Lambda deployment",
+                export_name="OscarLambdaSubnetIds"
             )
         
         # Output VPC CIDR for reference

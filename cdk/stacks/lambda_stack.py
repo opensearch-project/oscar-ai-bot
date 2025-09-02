@@ -178,15 +178,28 @@ class OscarLambdaStack(Stack):
         
         # Get VPC configuration if VPC stack is provided
         vpc_config = None
+        security_groups = None
+        
         if self.vpc_stack:
-            vpc_config = ec2.SubnetSelection(
-                subnets=self.vpc_stack.vpc.select_subnets(
+            # Try to get private subnets first, fallback to public if needed
+            try:
+                private_subnets = self.vpc_stack.vpc.select_subnets(
                     subnet_type=ec2.SubnetType.PRIVATE_WITH_EGRESS
                 ).subnets
-            )
+                if private_subnets:
+                    vpc_config = ec2.SubnetSelection(
+                        subnet_type=ec2.SubnetType.PRIVATE_WITH_EGRESS
+                    )
+                else:
+                    raise Exception("No private subnets found")
+            except:
+                # Fallback to public subnets
+                logger.warning("No private subnets found, using public subnets for Lambda functions")
+                vpc_config = ec2.SubnetSelection(
+                    subnet_type=ec2.SubnetType.PUBLIC
+                )
+            
             security_groups = [self.vpc_stack.lambda_security_group]
-        else:
-            security_groups = None
         
         # Define metrics agent configurations
         metrics_agents = [
@@ -223,7 +236,8 @@ class OscarLambdaStack(Stack):
                 reserved_concurrent_executions=3,  # Limited concurrency for metrics
                 vpc=self.vpc_stack.vpc if self.vpc_stack else None,
                 vpc_subnets=vpc_config,
-                security_groups=security_groups
+                security_groups=security_groups,
+                allow_public_subnet=True  # Allow placement in public subnets when no private subnets available
             )
             
             self.lambda_functions[f"metrics_{agent_config['name'].replace('-', '_')}"] = function

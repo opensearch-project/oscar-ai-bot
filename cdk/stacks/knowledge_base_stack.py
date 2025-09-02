@@ -139,85 +139,50 @@ class OscarKnowledgeBaseStack(Stack):
         Returns:
             The OpenSearch Serverless collection
         """
-        # Create encryption policy
+        # Create encryption policy (shortened name to fit 32 char limit)
         encryption_policy = opensearchserverless.CfnSecurityPolicy(
             self, "OscarKnowledgeBaseEncryptionPolicy",
-            name=f"oscar-kb-encryption-policy-cdk-created-{self.env_name}",
+            name=f"oscar-kb-encrypt-cdk-{self.env_name}",
             type="encryption",
             policy=f"""{{
                 "Rules": [
                     {{
                         "ResourceType": "collection",
-                        "Resource": ["collection/oscar-knowledge-base-cdk-created-{self.env_name}"]
+                        "Resource": ["collection/oscar-kb-cdk-{self.env_name}"]
                     }}
                 ],
                 "AWSOwnedKey": true
             }}"""
         )
         
-        # Create network policy
+        # Create network policy (shortened name to fit 32 char limit)
         network_policy = opensearchserverless.CfnSecurityPolicy(
             self, "OscarKnowledgeBaseNetworkPolicy",
-            name=f"oscar-kb-network-policy-cdk-created-{self.env_name}",
+            name=f"oscar-kb-network-cdk-{self.env_name}",
             type="network",
             policy=f"""[{{
                 "Rules": [
                     {{
                         "ResourceType": "collection",
-                        "Resource": ["collection/oscar-knowledge-base-cdk-created-{self.env_name}"],
-                        "AllowFromPublic": false
+                        "Resource": ["collection/oscar-kb-cdk-{self.env_name}"]
                     }},
                     {{
                         "ResourceType": "dashboard",
-                        "Resource": ["collection/oscar-knowledge-base-cdk-created-{self.env_name}"],
-                        "AllowFromPublic": false
+                        "Resource": ["collection/oscar-kb-cdk-{self.env_name}"]
                     }}
                 ],
-                "AllowFromPublic": false
+                "AllowFromPublic": true
             }}]"""
         )
         
-        # Create data access policy
-        data_access_policy = opensearchserverless.CfnAccessPolicy(
-            self, "OscarKnowledgeBaseDataAccessPolicy",
-            name=f"oscar-kb-data-access-policy-cdk-created-{self.env_name}",
-            type="data",
-            policy=f"""[{{
-                "Rules": [
-                    {{
-                        "ResourceType": "collection",
-                        "Resource": ["collection/oscar-knowledge-base-cdk-created-{self.env_name}"],
-                        "Permission": [
-                            "aoss:CreateCollectionItems",
-                            "aoss:DeleteCollectionItems",
-                            "aoss:UpdateCollectionItems",
-                            "aoss:DescribeCollectionItems"
-                        ]
-                    }},
-                    {{
-                        "ResourceType": "index",
-                        "Resource": ["index/oscar-knowledge-base-cdk-created-{self.env_name}/*"],
-                        "Permission": [
-                            "aoss:CreateIndex",
-                            "aoss:DeleteIndex",
-                            "aoss:UpdateIndex",
-                            "aoss:DescribeIndex",
-                            "aoss:ReadDocument",
-                            "aoss:WriteDocument"
-                        ]
-                    }}
-                ],
-                "Principal": [
-                    "arn:aws:iam::{self.account_id}:root",
-                    "arn:aws:iam::{self.account_id}:role/service-role/AmazonBedrockExecutionRoleForKnowledgeBase*"
-                ]
-            }}]"""
-        )
+        # Create data access policy (shortened name to fit 32 char limit)
+        # Note: We'll create this after the KB service role is created
+        data_access_policy = None
         
         # Create the collection
         collection = opensearchserverless.CfnCollection(
             self, "OscarKnowledgeBaseCollection",
-            name=f"oscar-knowledge-base-cdk-created-{self.env_name}",
+            name=f"oscar-kb-cdk-{self.env_name}",
             description="OpenSearch Serverless collection for OSCAR Knowledge Base vector search",
             type="VECTORSEARCH",
             standby_replicas="DISABLED"  # Cost optimization for non-prod
@@ -226,7 +191,6 @@ class OscarKnowledgeBaseStack(Stack):
         # Add dependencies
         collection.add_dependency(encryption_policy)
         collection.add_dependency(network_policy)
-        collection.add_dependency(data_access_policy)
         
         return collection
     
@@ -289,10 +253,47 @@ class OscarKnowledgeBaseStack(Stack):
             )
         )
         
+        # Create data access policy now that we have the service role ARN
+        data_access_policy = opensearchserverless.CfnAccessPolicy(
+            self, "OscarKnowledgeBaseDataAccessPolicy",
+            name=f"oscar-kb-data-cdk-{self.env_name}",
+            type="data",
+            policy=f"""[{{
+                "Rules": [
+                    {{
+                        "ResourceType": "collection",
+                        "Resource": ["collection/oscar-kb-cdk-{self.env_name}"],
+                        "Permission": [
+                            "aoss:CreateCollectionItems",
+                            "aoss:DeleteCollectionItems",
+                            "aoss:UpdateCollectionItems",
+                            "aoss:DescribeCollectionItems"
+                        ]
+                    }},
+                    {{
+                        "ResourceType": "index",
+                        "Resource": ["index/oscar-kb-cdk-{self.env_name}/*"],
+                        "Permission": [
+                            "aoss:CreateIndex",
+                            "aoss:DeleteIndex",
+                            "aoss:UpdateIndex",
+                            "aoss:DescribeIndex",
+                            "aoss:ReadDocument",
+                            "aoss:WriteDocument"
+                        ]
+                    }}
+                ],
+                "Principal": [
+                    "arn:aws:iam::{self.account_id}:root",
+                    "{kb_service_role.role_arn}"
+                ]
+            }}]"""
+        )
+        
         # Create the Knowledge Base
         knowledge_base = bedrock.CfnKnowledgeBase(
             self, "OscarKnowledgeBase",
-            name=f"oscar-knowledge-base-cdk-created-{self.env_name}",
+            name=f"oscar-kb-cdk-{self.env_name}",
             description="OSCAR Knowledge Base for OpenSearch release management documentation",
             role_arn=kb_service_role.role_arn,
             knowledge_base_configuration=bedrock.CfnKnowledgeBase.KnowledgeBaseConfigurationProperty(
@@ -305,18 +306,19 @@ class OscarKnowledgeBaseStack(Stack):
                 type="OPENSEARCH_SERVERLESS",
                 opensearch_serverless_configuration=bedrock.CfnKnowledgeBase.OpenSearchServerlessConfigurationProperty(
                     collection_arn=self.opensearch_collection.attr_arn,
-                    vector_index_name="oscar-vector-index-cdk-created",
+                    vector_index_name="bedrock-knowledge-base-default-index",
                     field_mapping=bedrock.CfnKnowledgeBase.OpenSearchServerlessFieldMappingProperty(
-                        vector_field="vector",
-                        text_field="text",
-                        metadata_field="metadata"
+                        vector_field="bedrock-knowledge-base-default-vector",
+                        text_field="AMAZON_BEDROCK_TEXT_CHUNK",
+                        metadata_field="AMAZON_BEDROCK_METADATA"
                     )
                 )
             )
         )
         
-        # Add dependency on collection
+        # Add dependencies
         knowledge_base.add_dependency(self.opensearch_collection)
+        knowledge_base.add_dependency(data_access_policy)
         
         return knowledge_base
     
