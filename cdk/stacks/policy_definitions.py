@@ -180,7 +180,7 @@ class OscarPolicyDefinitions:
                 sid="CrossAccountOpenSearchAssumeRole",
                 effect=iam.Effect.ALLOW,
                 actions=["sts:AssumeRole"],
-                resources=["arn:aws:iam::979020455945:role/OpenSearchOscarAccessRole"],
+                resources=[os.environ.get("METRICS_CROSS_ACCOUNT_ROLE_ARN", "arn:aws:iam::979020455945:role/OpenSearchOscarAccessRole")],
                 conditions={
                     "StringEquals": {
                         "sts:ExternalId": "oscar-metrics-access"

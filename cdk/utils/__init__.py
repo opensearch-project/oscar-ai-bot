@@ -1,13 +1,21 @@
-# Configuration management utilities for OSCAR CDK automation
+"""
+OSCAR CDK utilities package.
 
-from .secrets_validator import SecretsValidator, SecretValidationResult, ValidationSummary
-from .secrets_monitor import SecretsMonitor, SecretMetrics, AlertConfig
+This package contains essential utility functions and classes for OSCAR CDK deployment.
+"""
+
+from .config_loader import ConfigLoader
+from .agent_config_builder import AgentConfigBuilder
+from .agent_config_extractor import AgentConfigExtractor
+from .agent_config_validator import AgentConfigValidator
+from .document_manager import DocumentManager
 
 __all__ = [
-    'SecretsValidator',
-    'SecretValidationResult', 
-    'ValidationSummary',
-    'SecretsMonitor',
-    'SecretMetrics',
-    'AlertConfig'
+    'ConfigLoader',
+    'AgentConfigBuilder', 
+    'AgentConfigExtractor',
+    'AgentConfigValidator',
+    'DocumentManager'
 ]
+
+__version__ = '1.0.0'

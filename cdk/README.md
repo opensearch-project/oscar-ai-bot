@@ -1,231 +1,103 @@
 # OSCAR CDK Deployment
 
-This directory contains the AWS Cloud Development Kit (CDK) code for deploying the OSCAR Slack bot infrastructure.
+This directory contains the AWS Cloud Development Kit (CDK) code for deploying the complete OSCAR infrastructure.
 
 ## Architecture
 
-The CDK deployment creates a modular, serverless architecture for the OSCAR Slack bot with the following components:
+The CDK deployment creates a modular, serverless architecture with the following components:
 
-### Storage Resources
-- **DynamoDB Tables**:
-  - `oscar-sessions-v2`: Stores deduplication data and throttling counters with 5-minute TTL
-  - `oscar-context`: Stores conversation context with 7-day TTL (604800 seconds)
+### Core Infrastructure
+- **Permissions Stack**: IAM roles and policies with least-privilege access
+- **Secrets Stack**: AWS Secrets Manager for secure configuration
+- **Storage Stack**: DynamoDB tables for session and context data
+- **VPC Stack**: Optional VPC configuration for Lambda functions
+- **API Gateway Stack**: HTTP endpoints for Slack integration
+- **Knowledge Base Stack**: Bedrock Knowledge Base for document retrieval
+- **Lambda Stack**: All Lambda functions for OSCAR operations
+- **Agents Stack**: Bedrock agents for AI-powered interactions
 
-### Serverless Compute
-- **Lambda Function**: Processes Slack events and interacts with the knowledge base
-- **API Gateway**: HTTP endpoint for receiving Slack events
+## Quick Start
 
-### Security
-- **IAM Roles**: Provides least-privilege permissions for all components
-- **Encryption**: AWS-managed encryption for DynamoDB tables
+1. **Set up environment variables:**
+   ```bash
+   export CDK_DEFAULT_ACCOUNT=your-account-id
+   export CDK_DEFAULT_REGION=us-east-1
+   export ENVIRONMENT=dev
+   ```
 
-## Stack Organization
+2. **Deploy complete infrastructure:**
+   ```bash
+   python scripts/deploy_full_stack.py
+   ```
 
-The CDK code is organized into modular stacks for better maintainability:
+3. **Validate deployment:**
+   ```bash
+   python scripts/validate_deployment.py
+   ```
 
-- **OscarSlackBotStack** (`slack_bot_stack.py`): Main stack that combines all components
-- **OscarStorageStack** (`storage_stack.py`): DynamoDB tables for data storage
-- **OscarLambdaStack** (`lambda_stack.py`): Lambda function and API Gateway for request processing
+## Environment Configuration
 
-## Lambda Code Customization
-
-The Lambda function code is located in the `lambda/` directory and can be easily customized:
-
-### Default Implementation
-- **File**: `lambda/app.py`
-- **Purpose**: Contains a placeholder Lambda handler that returns a success response
-- **Handler**: `app.lambda_handler`
-
-### Customizing the Lambda Code
-To deploy your own Lambda code (such as the full OSCAR Slack bot implementation):
-
-1. **Replace the placeholder code**: Edit or replace `lambda/app.py` with your implementation
-2. **Add dependencies**: Update `lambda/requirements.txt` with any required Python packages
-3. **Maintain the handler signature**: Ensure your main function is named `lambda_handler` and accepts `(event, context)` parameters
-4. **Redeploy**: Run the deployment script to update the Lambda function
-
-Example:
-```python
-# lambda/app.py
-def lambda_handler(event, context):
-    # Your custom implementation here
-    return {
-        'statusCode': 200,
-        'body': 'Your custom response'
-    }
-```
-
-This approach provides maximum flexibility while maintaining a simple deployment process.
-
-## Security Configuration
-
-### CORS (Cross-Origin Resource Sharing)
-The API Gateway is configured with secure CORS settings by default:
-
-- **Default allowed origins**: Slack domains (`https://slack.com`, `https://*.slack.com`, `https://api.slack.com`)
-- **Allowed methods**: POST only (required for Slack events)
-- **Allowed headers**: Content-Type, X-Slack-Request-Timestamp, X-Slack-Signature
-
-To add additional origins (e.g., for testing or custom integrations):
-```bash
-# In your .env file
-CORS_ALLOWED_ORIGINS=https://your-domain.com,https://another-domain.com
-```
-
-**Security Note**: Only add trusted domains to avoid potential security vulnerabilities.
-
-## Environment Variables
-
-The deployment uses the following environment variables, which can be set in a `.env` file in the root directory:
+The deployment uses environment variables from the `.env` file:
 
 ### Required Variables
-- `KNOWLEDGE_BASE_ID`: ID of your Amazon Bedrock knowledge base
-- `MODEL_ARN`: ARN of the Bedrock model to use (default: Claude 3.5 Haiku)
-- `SLACK_BOT_TOKEN`: Bot token from your Slack app
-- `SLACK_SIGNING_SECRET`: Signing secret from your Slack app
+- `CDK_DEFAULT_ACCOUNT`: AWS account ID
+- `CDK_DEFAULT_REGION`: AWS region
 
 ### Optional Variables
-- `AWS_REGION`: AWS region (default: us-east-1)
-- `SESSIONS_TABLE_NAME`: Name of the DynamoDB table for sessions (default: "oscar-sessions-v2")
-- `CONTEXT_TABLE_NAME`: Name of the DynamoDB table for context (default: "oscar-context")
-- `DEDUP_TTL`: Time-to-live for deduplication records in seconds (default: 300)
-- `SESSION_TTL`: Time-to-live for session records in seconds (default: 3600)
-- `CONTEXT_TTL`: Time-to-live for context records in seconds (default: 604800)
-- `MAX_CONTEXT_LENGTH`: Maximum length of context summary (default: 3000)
-- `CONTEXT_SUMMARY_LENGTH`: Length of context summary for each interaction (default: 500)
-- `ENABLE_DM`: Enable direct message functionality (default: false)
-- `PROMPT_TEMPLATE`: Custom prompt template for the Bedrock model
-- `ENVIRONMENT`: Deployment environment (default: dev)
-- `LAMBDA_FUNCTION_NAME`: Name of the Lambda function (default: oscar-slack-bot)
-- `CORS_ALLOWED_ORIGINS`: Comma-separated list of additional CORS origins (default: Slack domains only)
+- `ENVIRONMENT`: Deployment environment (dev/staging/prod)
+- `SESSIONS_TABLE_NAME`: DynamoDB sessions table name
+- `CONTEXT_TABLE_NAME`: DynamoDB context table name
+- `VPC_ID`: Existing VPC ID (if using VPC)
+- `USE_VPC`: Enable VPC deployment (true/false)
 
-### Region Configuration
+## Stack Dependencies
 
-**Important**: The AWS region used for infrastructure deployment must be compatible with your Bedrock resources. Specifically:
+Stacks are deployed in the following order:
+1. **OscarPermissionsStack** - IAM roles and policies
+2. **OscarSecretsStack** - Secrets Manager configuration
+3. **OscarStorageStack** - DynamoDB tables
+4. **OscarVpcStack** - VPC configuration (optional)
+5. **OscarApiGatewayStack** - API Gateway endpoints
+6. **OscarKnowledgeBaseStack** - Bedrock Knowledge Base
+7. **OscarLambdaStack** - Lambda functions
+8. **OscarAgentsStack** - Bedrock agents
 
-1. The region where your Bedrock knowledge base exists must match the `AWS_REGION` environment variable
-2. The region in your `MODEL_ARN` must match the region where the model is available
+## Deployment Scripts
 
-For example, if your knowledge base is in `us-west-2`, you should set:
-```
-AWS_REGION=us-west-2
-MODEL_ARN=arn:aws:bedrock:us-west-2::foundation-model/anthropic.claude-3-5-haiku-20241022-v1:0
-```
+- **`scripts/deploy_full_stack.py`**: Deploy all stacks
+- **`scripts/deploy_lambda_stack.py`**: Deploy only Lambda stack
+- **`scripts/validate_deployment.py`**: Validate deployment
+- **`scripts/migrate_env_to_secrets.py`**: Migrate env vars to Secrets Manager
 
-### Configuration Precedence
+See `scripts/README.md` for detailed script documentation.
 
-When determining which AWS region to use, the deployment script follows this order of precedence:
+## Configuration Files
 
-1. Command-line arguments (`--region` flag) - highest priority
-2. Environment variables from `.env` file (`AWS_REGION` or `AWS_DEFAULT_REGION`)
-3. Region extracted from `MODEL_ARN` environment variable
-4. Default region specified in code (us-east-1) - lowest priority
-
-This allows you to override the region at different levels depending on your needs.
-
-### Region Configuration
-
-**Important**: The AWS region used for infrastructure deployment and the region where your Bedrock knowledge base is located must be compatible:
-
-- The region specified in `AWS_REGION` should match the region in your `MODEL_ARN` and the region where your knowledge base is created
-- If these regions don't match, the Lambda function will not be able to access the knowledge base
-- You can deploy infrastructure in one region while using Bedrock resources from another region by explicitly setting `AWS_REGION` in your `.env` file
-
-### Configuration Precedence
-
-The deployment script uses the following precedence to determine configuration values (highest to lowest):
-
-1. Command-line arguments to `deploy_cdk.sh` (e.g., `--region`, `--account`)
-2. Environment variables from `.env` file
-3. Values extracted from other settings (e.g., region from `MODEL_ARN`)
-4. Default values in code
-
-## Deployment Instructions
-
-### Using the Deployment Script
-
-The easiest way to deploy is using the provided script:
-
-```bash
-# From the root directory
-./deploy_cdk.sh
-```
-
-This script will:
-1. Load environment variables from `.env`
-2. Run tests to ensure everything is working correctly
-3. Bootstrap the CDK environment if needed
-4. Deploy all required AWS resources
-5. Update the Lambda function with the full code
-
-### Command Line Options
-
-The `deploy_cdk.sh` script supports the following options:
-
-- `-a, --account ACCOUNT_ID`: AWS Account ID (default: extracted from .env)
-- `-r, --region REGION`: AWS Region (default: extracted from .env)
-- `--enable-dm`: Enable direct message functionality (overrides .env setting)
-- `-h, --help`: Show help message
-
-## Testing
-
-The CDK code includes unit tests to verify the infrastructure definition:
-
-```bash
-# Run the tests
-cd cdk
-./tests/run_tests.sh
-```
-
-The tests verify:
-- DynamoDB table creation with correct properties
-- Lambda function creation with correct configuration
-- API Gateway creation with correct endpoints
-- IAM role creation with appropriate permissions
-
-## Configuration
-
-### Slack App Configuration
-
-After deployment, you'll need to configure your Slack app:
-
-1. Go to your Slack App configuration at https://api.slack.com/apps
-2. Select your OSCAR app
-3. Go to "Event Subscriptions"
-4. Toggle "Enable Events" to On
-5. Enter the webhook URL from the deployment output as the Request URL
-6. Under "Subscribe to bot events", add:
-   - `app_mention`
-   - `message.im` (if DM functionality is enabled)
-7. Click "Save Changes"
+- **`cdk.json`**: CDK app configuration
+- **`.env`**: Environment variables
+- **`requirements.txt`**: Python dependencies
+- **`agents/configs/`**: Bedrock agent configurations
+- **`knowledge_docs/`**: Knowledge base documents
 
 ## Troubleshooting
 
 ### Common Issues
 
-1. **Lambda Function Errors**:
-   - Check CloudWatch Logs for detailed error messages
-   - Verify that all environment variables are set correctly
-
-2. **Slack Integration Issues**:
-   - Verify the webhook URL is correctly configured in Slack
-   - Check that all required scopes are added to the Slack app
-   - Ensure the bot has been invited to the channel
-
-3. **Knowledge Base Issues**:
-   - Verify that the KNOWLEDGE_BASE_ID environment variable is set correctly
-   - Check that the knowledge base exists and is active
+1. **Missing environment variables**: Ensure `CDK_DEFAULT_ACCOUNT` and `CDK_DEFAULT_REGION` are set
+2. **Permission errors**: Verify AWS credentials have necessary permissions
+3. **Stack dependencies**: Deploy stacks in the correct order using `deploy_full_stack.py`
 
 ### Debugging
 
-To debug deployment issues:
-
 ```bash
-# Get detailed logs during deployment
-cdk deploy --debug
+# Verbose deployment
+python scripts/deploy_full_stack.py --verbose
 
-# Check Lambda logs
-aws logs filter-log-events --log-group-name /aws/lambda/oscar-slack-bot
+# Check specific stack
+cdk deploy OscarLambdaStack --debug
+
+# Validate deployment
+python scripts/validate_deployment.py --verbose
 ```
 
 ## Clean Up
@@ -233,45 +105,13 @@ aws logs filter-log-events --log-group-name /aws/lambda/oscar-slack-bot
 To remove all deployed resources:
 
 ```bash
-# Using CDK
-cd cdk
-cdk destroy
+cdk destroy --all
 ```
 
-## DynamoDB Management
+## Support
 
-This directory now also contains DynamoDB table management scripts:
-
-### `setup_dynamodb_tables.py`
-Python script to create and configure DynamoDB tables for OSCAR:
-- Creates `oscar-agent-context` table for conversation context
-- Creates `oscar-agent-sessions` table for session management
-- Configures TTL (Time To Live) settings
-- Verifies table configuration
-
-```bash
-# Run from project root
-python cdk/setup_dynamodb_tables.py
-```
-
-### `recreate_dynamodb_tables.sh`
-Shell script to completely recreate DynamoDB tables:
-- Deletes existing tables (if they exist)
-- Creates new tables with proper configuration
-- Enables TTL settings
-- Verifies table status
-
-```bash
-# Run from project root
-./cdk/recreate_dynamodb_tables.sh
-```
-
-**Note**: These scripts are automatically called by `deployment_scripts/deploy_all.sh` but can be run independently if needed.
-
-## Configuration Files
-
-- **cdk.json**: Contains CDK app configuration and context values
-- **cdk.context.json**: Contains environment-specific context values like region
-- **requirements.txt**: Python dependencies for the CDK application
-- **setup_dynamodb_tables.py**: DynamoDB table creation and management
-- **recreate_dynamodb_tables.sh**: DynamoDB table recreation script
+For deployment issues:
+1. Check the logs for detailed error messages
+2. Verify prerequisites and dependencies
+3. Ensure AWS credentials are properly configured
+4. Review the script documentation

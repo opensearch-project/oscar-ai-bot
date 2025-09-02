@@ -10,6 +10,7 @@ Creates the central environment secret that contains all OSCAR configuration.
 
 import os
 from aws_cdk import (
+    Stack,
     RemovalPolicy,
     aws_secretsmanager as secretsmanager,
     aws_iam as iam,
@@ -18,7 +19,7 @@ from aws_cdk import (
 from constructs import Construct
 
 
-class OscarSecretsStack(Construct):
+class OscarSecretsStack(Stack):
     """
     Creates the central environment secret for OSCAR configuration.
     
@@ -26,8 +27,8 @@ class OscarSecretsStack(Construct):
     including Slack tokens, Bedrock agent IDs, and Jenkins credentials.
     """
     
-    def __init__(self, scope: Construct, construct_id: str) -> None:
-        super().__init__(scope, construct_id)
+    def __init__(self, scope: Construct, construct_id: str, **kwargs) -> None:
+        super().__init__(scope, construct_id, **kwargs)
         
         environment = os.environ.get("ENVIRONMENT", "dev")
         removal_policy = RemovalPolicy.RETAIN if environment == "prod" else RemovalPolicy.DESTROY
@@ -35,7 +36,7 @@ class OscarSecretsStack(Construct):
         # Create central environment secret
         self.central_env_secret = secretsmanager.Secret(
             self, "CentralEnvSecret",
-            secret_name="oscar-central-env",
+            secret_name="oscar-central-env-cdk-created",
             description="Central environment variables for OSCAR (includes all tokens and config)",
             removal_policy=removal_policy,
             generate_secret_string=secretsmanager.SecretStringGenerator(
