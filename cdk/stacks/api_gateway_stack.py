@@ -86,7 +86,7 @@ class OscarApiGatewayStack(Stack):
         """
         return logs.LogGroup(
             self, "ApiGatewayLogGroup",
-            log_group_name="/aws/apigateway/oscar-slack-bot-cdk-created",
+            log_group_name="/aws/apigateway/oscar-slack-bot-cdk",
             retention=logs.RetentionDays.ONE_MONTH,
             removal_policy=RemovalPolicy.DESTROY
         )
@@ -103,7 +103,7 @@ class OscarApiGatewayStack(Stack):
         
         api = apigateway.RestApi(
             self, "OscarSlackBotApi",
-            rest_api_name="oscar-slack-bot-api-cdk-created",
+            rest_api_name="oscar-slack-bot-api-cdk",
             description="OSCAR Slack Bot API Gateway for webhook endpoints",
             
             # Enable CloudWatch logging
@@ -236,7 +236,7 @@ class OscarApiGatewayStack(Stack):
         return apigateway.RequestValidator(
             self, "SlackRequestValidator",
             rest_api=self.api,
-            request_validator_name="slack-request-validator-cdk-created",
+            request_validator_name="slack-request-validator-cdk",
             validate_request_body=True,
             validate_request_parameters=True
         )
@@ -277,7 +277,7 @@ class OscarApiGatewayStack(Stack):
         # Create usage plan for rate limiting and quotas
         usage_plan = api.add_usage_plan(
             "SlackBotUsagePlan",
-            name="oscar-slack-bot-usage-plan-cdk-created",
+            name="oscar-slack-bot-usage-plan-cdk",
             description="Usage plan for OSCAR Slack Bot API with rate limiting",
             throttle=apigateway.ThrottleSettings(
                 rate_limit=50,  # requests per second per API key
@@ -292,7 +292,7 @@ class OscarApiGatewayStack(Stack):
         # Create API key for additional security (optional, can be used for monitoring)
         api_key = api.add_api_key(
             "SlackBotApiKey",
-            api_key_name="oscar-slack-bot-api-key-cdk-created",
+            api_key_name="oscar-slack-bot-api-key-cdk",
             description="API key for OSCAR Slack Bot"
         )
         
@@ -316,7 +316,7 @@ class OscarApiGatewayStack(Stack):
         # Create SNS topic for alerts (optional)
         alert_topic = sns.Topic(
             self, "ApiGatewayAlerts",
-            topic_name="oscar-api-gateway-alerts-cdk-created"
+            topic_name="oscar-api-gateway-alerts-cdk"
         )
         
         # Create CloudWatch alarms for monitoring
@@ -324,7 +324,7 @@ class OscarApiGatewayStack(Stack):
         # High error rate alarm
         error_rate_alarm = cloudwatch.Alarm(
             self, "HighErrorRateAlarm",
-            alarm_name="oscar-api-gateway-high-error-rate-cdk-created",
+            alarm_name="oscar-api-gateway-high-error-rate-cdk",
             alarm_description="High error rate detected in API Gateway",
             metric=cloudwatch.Metric(
                 namespace="AWS/ApiGateway",
@@ -343,7 +343,7 @@ class OscarApiGatewayStack(Stack):
         # High latency alarm
         latency_alarm = cloudwatch.Alarm(
             self, "HighLatencyAlarm", 
-            alarm_name="oscar-api-gateway-high-latency-cdk-created",
+            alarm_name="oscar-api-gateway-high-latency-cdk",
             alarm_description="High latency detected in API Gateway",
             metric=cloudwatch.Metric(
                 namespace="AWS/ApiGateway",
@@ -362,7 +362,7 @@ class OscarApiGatewayStack(Stack):
         # Throttling alarm
         throttle_alarm = cloudwatch.Alarm(
             self, "ThrottlingAlarm",
-            alarm_name="oscar-api-gateway-throttling-cdk-created",
+            alarm_name="oscar-api-gateway-throttling-cdk",
             alarm_description="API Gateway throttling detected",
             metric=cloudwatch.Metric(
                 namespace="AWS/ApiGateway", 

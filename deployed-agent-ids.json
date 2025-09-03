@@ -1,0 +1,26 @@
+{
+  "jenkins": {
+    "agent_id": "CX9HVZAAMI",
+    "alias_id": "U2LMPJDFYG"
+  },
+  "build-metrics": {
+    "agent_id": "VZTNDKY9NI",
+    "alias_id": "SP5M6SZBN3"
+  },
+  "test-metrics": {
+    "agent_id": "GOW3XYWXWL",
+    "alias_id": "WAIQXWSTDN"
+  },
+  "release-metrics": {
+    "agent_id": "WGG8DP41CU",
+    "alias_id": "LRRZYSVY2L"
+  },
+  "oscar-limited": {
+    "agent_id": "X2JE13HYIJ",
+    "alias_id": "LAHWXWWHEI"
+  },
+  "oscar-privileged": {
+    "agent_id": "SZXE37QEAK",
+    "alias_id": "Y1CVFSXZNB"
+  }
+}

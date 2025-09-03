@@ -1,0 +1,8 @@
+{
+  "collaboratorName": "TestBuildMetricsSpecialist",
+  "collaborationInstruction": "Test collaborator for build metrics analysis.",
+  "agentDescriptor": {
+    "aliasArn": "arn:aws:bedrock:us-east-1:395380602281:agent-alias/VGEWMQKRIS/IKTIAW0H6T"
+  },
+  "relayConversationHistory": "TO_COLLABORATOR"
+}

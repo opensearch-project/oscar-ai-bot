@@ -36,7 +36,7 @@ class OscarSecretsStack(Stack):
         # Create central environment secret
         self.central_env_secret = secretsmanager.Secret(
             self, "CentralEnvSecret",
-            secret_name="oscar-central-env-cdk-created",
+            secret_name=f"oscar-central-env-{environment}-cdk",
             description="Central environment variables for OSCAR (includes all tokens and config)",
             removal_policy=removal_policy,
             generate_secret_string=secretsmanager.SecretStringGenerator(

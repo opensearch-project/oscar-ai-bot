@@ -91,7 +91,7 @@ class OscarLambdaStack(Stack):
         
         function = lambda_.Function(
             self, "MainOscarAgent",
-            function_name="oscar-supervisor-agent-cdk-created",
+            function_name="oscar-supervisor-agent-cdk",
             runtime=lambda_.Runtime.PYTHON_3_12,
             handler="app.lambda_handler",
             code=lambda_.Code.from_asset("../oscar-agent"),
@@ -120,7 +120,7 @@ class OscarLambdaStack(Stack):
         
         function = lambda_.Function(
             self, "CommunicationHandler",
-            function_name="oscar-communication-handler-cdk-created",
+            function_name="oscar-communication-handler-cdk",
             runtime=lambda_.Runtime.PYTHON_3_12,
             handler="communication_handler.lambda_handler.lambda_handler",
             code=lambda_.Code.from_asset("../oscar-agent"),
@@ -149,7 +149,7 @@ class OscarLambdaStack(Stack):
         
         function = lambda_.Function(
             self, "JenkinsAgent",
-            function_name="oscar-jenkins-agent-cdk-created",
+            function_name="oscar-jenkins-agent-cdk",
             runtime=lambda_.Runtime.PYTHON_3_12,
             handler="lambda_function.lambda_handler",
             code=lambda_.Code.from_asset("../jenkins"),
@@ -205,17 +205,17 @@ class OscarLambdaStack(Stack):
         metrics_agents = [
             {
                 "name": "test-metrics",
-                "function_name": "oscar-test-metrics-agent-cdk-created",
+                "function_name": "oscar-test-metrics-agent-cdk",
                 "description": "Test metrics agent for OSCAR test data analysis"
             },
             {
                 "name": "build-metrics", 
-                "function_name": "oscar-build-metrics-agent-cdk-created",
+                "function_name": "oscar-build-metrics-agent-cdk",
                 "description": "Build metrics agent for OSCAR build data analysis"
             },
             {
                 "name": "release-metrics",
-                "function_name": "oscar-release-metrics-agent-cdk-created", 
+                "function_name": "oscar-release-metrics-agent-cdk", 
                 "description": "Release metrics agent for OSCAR release data analysis"
             }
         ]

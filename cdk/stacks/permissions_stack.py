@@ -69,7 +69,7 @@ class OscarPermissionsStack(Stack):
         # Create the role
         role = iam.Role(
             self, "BedrockAgentExecutionRole",
-            role_name="oscar-bedrock-agent-execution-role-cdk-created",
+            role_name="oscar-bedrock-agent-execution-role-cdk",
             assumed_by=iam.ServicePrincipal("bedrock.amazonaws.com"),
             description="Execution role for OSCAR Bedrock agents"
         )
@@ -116,7 +116,7 @@ class OscarPermissionsStack(Stack):
         """
         role = iam.Role(
             self, "BaseLambdaExecutionRole",
-            role_name="oscar-lambda-execution-role-cdk-created",
+            role_name="oscar-lambda-execution-role-cdk",
             assumed_by=iam.ServicePrincipal("lambda.amazonaws.com"),
             managed_policies=[
                 iam.ManagedPolicy.from_aws_managed_policy_name(
@@ -141,7 +141,7 @@ class OscarPermissionsStack(Stack):
         """
         role = iam.Role(
             self, "VpcLambdaExecutionRole",
-            role_name="oscar-vpc-lambda-execution-role-cdk-created",
+            role_name="oscar-vpc-lambda-execution-role-cdk",
             assumed_by=iam.ServicePrincipal("lambda.amazonaws.com"),
             managed_policies=[
                 iam.ManagedPolicy.from_aws_managed_policy_name(
@@ -166,7 +166,7 @@ class OscarPermissionsStack(Stack):
         """
         role = iam.Role(
             self, "CommunicationHandlerRole",
-            role_name="oscar-communication-handler-execution-role-cdk-created",
+            role_name="oscar-communication-handler-execution-role-cdk",
             assumed_by=iam.ServicePrincipal("lambda.amazonaws.com"),
             managed_policies=[
                 iam.ManagedPolicy.from_aws_managed_policy_name(
@@ -191,7 +191,7 @@ class OscarPermissionsStack(Stack):
         """
         role = iam.Role(
             self, "JenkinsLambdaRole",
-            role_name="oscar-jenkins-lambda-execution-role-cdk-created",
+            role_name="oscar-jenkins-lambda-execution-role-cdk",
             assumed_by=iam.ServicePrincipal("lambda.amazonaws.com"),
             managed_policies=[
                 iam.ManagedPolicy.from_aws_managed_policy_name(
@@ -216,7 +216,7 @@ class OscarPermissionsStack(Stack):
         """
         role = iam.Role(
             self, "ApiGatewayExecutionRole",
-            role_name="oscar-api-gateway-execution-role-cdk-created",
+            role_name="oscar-api-gateway-execution-role-cdk",
             assumed_by=iam.ServicePrincipal("apigateway.amazonaws.com"),
             description="Execution role for OSCAR API Gateway"
         )

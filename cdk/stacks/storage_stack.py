@@ -46,52 +46,32 @@ class OscarStorageStack(Stack):
         super().__init__(scope, construct_id, **kwargs)
         
         # Get configuration from environment variables (.env file) with CDK suffix
-        sessions_table_name: str = os.environ.get("SESSIONS_TABLE_NAME", "oscar-agent-sessions") + "-cdk-created"
-        context_table_name: str = os.environ.get("CONTEXT_TABLE_NAME", "oscar-agent-context") + "-cdk-created"
+        environment = os.environ.get("ENVIRONMENT", "dev")
+        context_table_name: str = os.environ.get("CONTEXT_TABLE_NAME", "oscar-agent-context") + f"-{environment}-cdk"
         
         # Get TTL values from environment
-        session_ttl: int = int(os.environ.get("SESSION_TTL", "3600"))  # 1 hour default
         context_ttl: int = int(os.environ.get("CONTEXT_TTL", "604800"))  # 7 days default
         
         # Determine removal policy based on environment
-        environment: str = os.environ.get("ENVIRONMENT", "dev")
         removal_policy: RemovalPolicy = (
             RemovalPolicy.RETAIN if environment == "prod" else RemovalPolicy.DESTROY
         )
         
-        # Create DynamoDB Tables with production configurations
-        self.sessions_table = self._create_sessions_table(
-            sessions_table_name, 
-            removal_policy,
-            session_ttl
-        )
-
+        # Create only the context table (the only one actually used by the application)
         self.context_table = self._create_context_table(
             context_table_name, 
             removal_policy,
             context_ttl
         )
         
-        # Create monitoring and alerting
-        self._create_monitoring_and_alerting()
+        # Create monitoring and alerting for context table only
+        self._create_context_monitoring()
         
         # Outputs
-        CfnOutput(
-            self, "SessionsTableName",
-            value=self.sessions_table.table_name,
-            description="Name of the DynamoDB table for session data"
-        )
-        
         CfnOutput(
             self, "ContextTableName",
             value=self.context_table.table_name,
             description="Name of the DynamoDB table for context data"
-        )
-        
-        CfnOutput(
-            self, "SessionsTableArn",
-            value=self.sessions_table.table_arn,
-            description="ARN of the DynamoDB table for session data"
         )
         
         CfnOutput(
@@ -100,41 +80,7 @@ class OscarStorageStack(Stack):
             description="ARN of the DynamoDB table for context data"
         )
     
-    def _create_sessions_table(
-        self, 
-        table_name: str, 
-        removal_policy: RemovalPolicy,
-        ttl_seconds: int
-    ) -> dynamodb.Table:
-        """
-        Create the sessions DynamoDB table with production configurations.
-        
-        Args:
-            table_name: Name of the DynamoDB table
-            removal_policy: CDK removal policy for the table
-            ttl_seconds: TTL value in seconds for automatic item expiration
-            
-        Returns:
-            The created DynamoDB table
-        """
-        return dynamodb.Table(
-            self, "OscarSessionsTable",
-            table_name=table_name,
-            partition_key=dynamodb.Attribute(
-                name="event_id",
-                type=dynamodb.AttributeType.STRING
-            ),
-            time_to_live_attribute="ttl",
-            billing_mode=dynamodb.BillingMode.PAY_PER_REQUEST,
-            removal_policy=removal_policy,
-            encryption=dynamodb.TableEncryption.AWS_MANAGED,
-            point_in_time_recovery_specification=dynamodb.PointInTimeRecoverySpecification(
-                point_in_time_recovery_enabled=True
-            ),
-            deletion_protection=removal_policy == RemovalPolicy.RETAIN,
-            stream=dynamodb.StreamViewType.NEW_AND_OLD_IMAGES,
-            contributor_insights_enabled=True
-        )
+
     
     def _create_context_table(
         self, 
@@ -172,9 +118,11 @@ class OscarStorageStack(Stack):
             contributor_insights_enabled=True
         )
     
-    def _create_monitoring_and_alerting(self) -> None:
+
+
+    def _create_context_monitoring(self) -> None:
         """
-        Create CloudWatch monitoring and alerting for DynamoDB tables.
+        Create CloudWatch monitoring and alerting for the context table only.
         
         This method creates CloudWatch alarms for monitoring table usage,
         throttling, and error rates with appropriate thresholds.
@@ -182,18 +130,11 @@ class OscarStorageStack(Stack):
         # Create SNS topic for alerts (optional - can be configured later)
         alert_topic = sns.Topic(
             self, "OscarStorageAlerts",
-            topic_name="oscar-storage-alerts-cdk-created",
+            topic_name="oscar-storage-alerts-cdk",
             display_name="OSCAR Storage Monitoring Alerts"
         )
         
-        # Sessions table monitoring
-        self._create_table_alarms(
-            table=self.sessions_table,
-            table_type="Sessions",
-            alert_topic=alert_topic
-        )
-        
-        # Context table monitoring
+        # Context table monitoring only
         self._create_table_alarms(
             table=self.context_table,
             table_type="Context", 
@@ -224,7 +165,7 @@ class OscarStorageStack(Stack):
         # High read throttle alarm
         read_throttle_alarm = cloudwatch.Alarm(
             self, f"Oscar{table_type}ReadThrottleAlarm",
-            alarm_name=f"oscar-{table_type.lower()}-read-throttles-cdk-created",
+            alarm_name=f"oscar-{table_type.lower()}-read-throttles-cdk",
             alarm_description=f"High read throttles on {table_type} table",
             metric=table.metric_throttled_requests_for_operation(
                 operation="GetItem",
@@ -241,7 +182,7 @@ class OscarStorageStack(Stack):
         # High write throttle alarm
         write_throttle_alarm = cloudwatch.Alarm(
             self, f"Oscar{table_type}WriteThrottleAlarm",
-            alarm_name=f"oscar-{table_type.lower()}-write-throttles-cdk-created",
+            alarm_name=f"oscar-{table_type.lower()}-write-throttles-cdk",
             alarm_description=f"High write throttles on {table_type} table",
             metric=table.metric_throttled_requests_for_operation(
                 operation="PutItem",
@@ -258,7 +199,7 @@ class OscarStorageStack(Stack):
         # High error rate alarm - using user errors metric instead
         error_alarm = cloudwatch.Alarm(
             self, f"Oscar{table_type}ErrorAlarm",
-            alarm_name=f"oscar-{table_type.lower()}-errors-cdk-created",
+            alarm_name=f"oscar-{table_type.lower()}-errors-cdk",
             alarm_description=f"High error rate on {table_type} table",
             metric=table.metric_user_errors(
                 statistic=cloudwatch.Stats.SUM
@@ -274,7 +215,7 @@ class OscarStorageStack(Stack):
         # High consumed read capacity alarm (for monitoring usage patterns)
         read_capacity_alarm = cloudwatch.Alarm(
             self, f"Oscar{table_type}ReadCapacityAlarm",
-            alarm_name=f"oscar-{table_type.lower()}-high-read-usage-cdk-created",
+            alarm_name=f"oscar-{table_type.lower()}-high-read-usage-cdk",
             alarm_description=f"High read capacity usage on {table_type} table",
             metric=table.metric_consumed_read_capacity_units(
                 statistic=cloudwatch.Stats.SUM,
@@ -291,7 +232,7 @@ class OscarStorageStack(Stack):
         # High consumed write capacity alarm
         write_capacity_alarm = cloudwatch.Alarm(
             self, f"Oscar{table_type}WriteCapacityAlarm",
-            alarm_name=f"oscar-{table_type.lower()}-high-write-usage-cdk-created",
+            alarm_name=f"oscar-{table_type.lower()}-high-write-usage-cdk",
             alarm_description=f"High write capacity usage on {table_type} table",
             metric=table.metric_consumed_write_capacity_units(
                 statistic=cloudwatch.Stats.SUM,

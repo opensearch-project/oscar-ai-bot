@@ -117,21 +117,24 @@ def main() -> None:
         description="OSCAR API Gateway"
     )
     
-    # 8. Bedrock Agents (last, depends on everything)
-    agents_stack = OscarAgentsStack(
-        app, "OscarAgentsStack",
-        permissions_stack=permissions_stack,
-        knowledge_base_stack=knowledge_base_stack,
-        lambda_stack=lambda_stack,
-        env=env,
-        description="OSCAR Bedrock agents"
-    )
+    # 8. Bedrock Agents (will be deployed manually after CDK stacks)
+    # agents_stack = OscarAgentsStack(
+    #     app, "OscarAgentsStack",
+    #     permissions_stack=permissions_stack,
+    #     knowledge_base_stack=knowledge_base_stack,
+    #     lambda_stack=lambda_stack,
+    #     env=env,
+    #     description="OSCAR Bedrock agents"
+    # )
+    agents_stack = None
     
     # Add tags to all stacks
     stacks_to_tag = [permissions_stack, secrets_stack, storage_stack, api_gateway_stack, 
-                     lambda_stack, agents_stack]
+                     lambda_stack]
     if knowledge_base_stack:
         stacks_to_tag.append(knowledge_base_stack)
+    if agents_stack:
+        stacks_to_tag.append(agents_stack)
     
     for stack in stacks_to_tag:
         Tags.of(stack).add("Project", "OSCAR")
