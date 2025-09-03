@@ -14,11 +14,12 @@ ingestion pipeline and vector embeddings using Titan.
 """
 
 import os
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Any
 from aws_cdk import (
     Stack,
     RemovalPolicy,
     Duration,
+    CustomResource,
     aws_s3 as s3,
     aws_s3_notifications as s3n,
     aws_opensearchserverless as opensearchserverless,
@@ -29,8 +30,7 @@ from aws_cdk import (
     aws_events_targets as targets,
     aws_logs as logs,
     CfnOutput,
-    CustomResource,
-    custom_resources as cr
+
 )
 from constructs import Construct
 
@@ -290,6 +290,9 @@ class OscarKnowledgeBaseStack(Stack):
             }}]"""
         )
         
+        # Note: Bedrock will automatically create the vector index when the Knowledge Base is created
+        # No need for custom bootstrap resource
+        
         # Create the Knowledge Base
         knowledge_base = bedrock.CfnKnowledgeBase(
             self, "OscarKnowledgeBase",
@@ -398,7 +401,7 @@ class OscarKnowledgeBaseStack(Stack):
         sync_lambda = lambda_.Function(
             self, "DocumentSyncLambda",
             function_name=f"oscar-document-sync-cdk-created-{self.env_name}",
-            runtime=lambda_.Runtime.PYTHON_3_11,
+            runtime=lambda_.Runtime.PYTHON_3_12,
             handler="document_sync_handler.lambda_handler",
             code=lambda_.Code.from_asset("lambda"),
             role=sync_lambda_role,
@@ -416,6 +419,8 @@ class OscarKnowledgeBaseStack(Stack):
         sync_lambda.node.add_dependency(self.data_source)
         
         return sync_lambda
+    
+
     
     def _configure_s3_notifications(self) -> None:
         """

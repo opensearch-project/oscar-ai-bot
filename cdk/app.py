@@ -90,12 +90,13 @@ def main() -> None:
             description="OSCAR VPC configuration"
         )
     
-    # 5. Knowledge Base (before Lambda functions)
-    knowledge_base_stack = OscarKnowledgeBaseStack(
-        app, "OscarKnowledgeBaseStack",
-        env=env,
-        description="OSCAR Bedrock Knowledge Base"
-    )
+    # 5. Knowledge Base (temporarily disabled - will add back later)
+    # knowledge_base_stack = OscarKnowledgeBaseStack(
+    #     app, "OscarKnowledgeBaseStack",
+    #     env=env,
+    #     description="OSCAR Bedrock Knowledge Base"
+    # )
+    knowledge_base_stack = None
     
     # 6. Lambda Functions (before API Gateway)
     lambda_stack = OscarLambdaStack(
@@ -127,8 +128,12 @@ def main() -> None:
     )
     
     # Add tags to all stacks
-    for stack in [permissions_stack, secrets_stack, storage_stack, api_gateway_stack, 
-                  knowledge_base_stack, lambda_stack, agents_stack]:
+    stacks_to_tag = [permissions_stack, secrets_stack, storage_stack, api_gateway_stack, 
+                     lambda_stack, agents_stack]
+    if knowledge_base_stack:
+        stacks_to_tag.append(knowledge_base_stack)
+    
+    for stack in stacks_to_tag:
         Tags.of(stack).add("Project", "OSCAR")
         Tags.of(stack).add("Environment", environment)
         Tags.of(stack).add("ManagedBy", "CDK")

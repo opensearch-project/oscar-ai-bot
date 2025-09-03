@@ -9,11 +9,11 @@
 Bedrock Agents stack for OSCAR CDK automation.
 
 This module defines the Bedrock agents infrastructure including:
-- Privileged agent with full access capabilities and Claude 3.5 Sonnet
-- Limited agent with read-only access and Claude 3.5 Sonnet
-- Action groups for communication orchestration, metrics analysis, and Jenkins operations
-- Knowledge Base associations and retrieval settings
-- Collaborator agent configurations
+- Privileged agent with full access capabilities and Claude 3.7 Sonnet
+- Limited agent with read-only access and Claude 3.7 Sonnet
+- Jenkins agent for CI/CD operations
+- Metrics agents for integration tests, build metrics, and release metrics
+- Action groups with proper Lambda function associations
 """
 
 import os
@@ -34,35 +34,6 @@ from constructs import Construct
 # Configure logging
 logger = logging.getLogger(__name__)
 
-# Import utilities - try multiple import paths
-AgentConfigBuilder = None
-AgentConfigValidator = None
-AgentConfig = None
-
-try:
-    # Try relative import first
-    from ..utils.agent_config_builder import AgentConfigBuilder, AgentConfig
-    from ..utils.agent_config_validator import AgentConfigValidator
-except ImportError:
-    try:
-        # Try absolute import
-        from utils.agent_config_builder import AgentConfigBuilder, AgentConfig
-        from utils.agent_config_validator import AgentConfigValidator
-    except ImportError:
-        try:
-            # Try direct import from current directory
-            import sys
-            import os
-            sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
-            from utils.agent_config_builder import AgentConfigBuilder, AgentConfig
-            from utils.agent_config_validator import AgentConfigValidator
-        except ImportError as e:
-            # Fallback for when utilities are not available
-            logger.warning(f"Failed to import utilities: {e} - Bedrock agents will be skipped")
-            AgentConfigBuilder = None
-            AgentConfigValidator = None
-            AgentConfig = None
-
 
 class OscarAgentsStack(Stack):
     """
@@ -71,9 +42,9 @@ class OscarAgentsStack(Stack):
     This construct creates and configures Bedrock agents including:
     - Privileged agent with full access capabilities
     - Limited agent with read-only access
-    - Action groups for various operations
-    - Knowledge Base associations
-    - Collaborator configurations
+    - Jenkins agent for CI/CD operations
+    - Metrics agents for test, build, and release analysis
+    - Action groups with proper Lambda function associations
     """
     
     def __init__(
@@ -108,587 +79,288 @@ class OscarAgentsStack(Stack):
         self.aws_region = os.environ.get("CDK_DEFAULT_REGION", "us-east-1")
         self.env_name = os.environ.get("ENVIRONMENT", "dev")
         
-        # Initialize configuration utilities
-        if AgentConfigBuilder is None:
-            logger.error("AgentConfigBuilder is not available - skipping agent creation")
-            self.config_builder = None
-            self.config_validator = None
-        else:
-            self.config_builder = AgentConfigBuilder()
-            self.config_validator = AgentConfigValidator() if AgentConfigValidator else None
-        
         # Dictionary to store created agents
         self.agents: Dict[str, bedrock.CfnAgent] = {}
         self.agent_aliases: Dict[str, bedrock.CfnAgentAlias] = {}
         
-        # Create agents from configuration files
-        self._create_agents_from_configs()
+        # Create agents
+        self._create_basic_agents()
         
         # Create outputs
         self._create_outputs()
     
-    def _create_agents_from_configs(self) -> None:
-        """
-        Create Bedrock agents from JSON configuration files.
-        """
-        logger.info("Creating Bedrock agents from configuration files")
-        
-        # If utilities are not available, create basic agents directly
-        if self.config_builder is None:
-            logger.warning("AgentConfigBuilder is not available - creating basic agents directly")
-            self._create_basic_agents()
-            return
-        
-        # Define agent configurations to deploy
-        agent_configs = [
-            {
-                "config_file": "oscar-privileged-agent-current.json",
-                "agent_key": "privileged",
-                "description": "Privileged OSCAR agent with full access capabilities"
-            },
-            {
-                "config_file": "oscar-limited-agent-current.json", 
-                "agent_key": "limited",
-                "description": "Limited OSCAR agent with read-only access"
-            }
-        ]
-        
-        for config_info in agent_configs:
-            try:
-                self._create_agent_from_config(
-                    config_info["config_file"],
-                    config_info["agent_key"],
-                    config_info["description"]
-                )
-            except Exception as e:
-                logger.error(f"Failed to create agent from {config_info['config_file']}: {e}")
-                # Continue with other agents even if one fails
-                continue
-    
     def _create_basic_agents(self) -> None:
         """
-        Create basic Bedrock agents without configuration files.
-        This is a fallback when the configuration utilities are not available.
+        Create Bedrock agents using configurations from JSON files.
         """
-        logger.info("Creating basic Bedrock agents")
+        logger.info("Creating Bedrock agents from configuration files")
         
         # Get the agent execution role from permissions stack
         agent_role_arn = self.permissions_stack.bedrock_agent_role.role_arn
         
-        # Create privileged agent
-        try:
-            privileged_agent = bedrock.CfnAgent(
-                self, "OscarPrivilegedAgent",
-                agent_name="oscar-privileged-agent-cdk-created",
-                description="Privileged OSCAR agent with full access capabilities",
-                foundation_model="anthropic.claude-3-5-sonnet-20241022-v2:0",
-                instruction="You are OSCAR, an AI assistant for the OpenSearch project. You have full access to help with development, testing, and operations tasks.",
-                agent_resource_role_arn=agent_role_arn,
-                idle_session_ttl_in_seconds=1800,
-                tags={
-                    "Environment": self.env_name,
-                    "Project": "OSCAR",
-                    "AgentType": "Privileged"
-                }
-            )
-            self.agents["privileged"] = privileged_agent
-            logger.info("Created privileged OSCAR agent")
-            
-            # Create agent alias
-            privileged_alias = bedrock.CfnAgentAlias(
-                self, "OscarPrivilegedAgentAlias",
-                agent_id=privileged_agent.attr_agent_id,
-                agent_alias_name="CURRENT",
-                description="Current version of the privileged OSCAR agent",
-                tags={
-                    "Environment": self.env_name,
-                    "Project": "OSCAR"
-                }
-            )
-            self.agent_aliases["privileged"] = privileged_alias
-            logger.info("Created privileged agent alias")
-            
-        except Exception as e:
-            logger.error(f"Failed to create privileged agent: {e}")
+        # Define individual agent mappings (created first)
+        individual_agent_mappings = [
+            {
+                "config_file": "jenkins-agent-current.json",
+                "agent_name": "oscar-jenkins-agent-cdk-created", 
+                "construct_id": "OscarJenkinsAgent",
+                "alias_id": "OscarJenkinsAgentAlias",
+                "agent_key": "jenkins"
+            },
+            {
+                "config_file": "integration-test-agent-current.json",
+                "agent_name": "oscar-test-metrics-agent-cdk-created",
+                "construct_id": "OscarTestMetricsAgent", 
+                "alias_id": "OscarTestMetricsAgentAlias",
+                "agent_key": "test_metrics"
+            },
+            {
+                "config_file": "build-metrics-agent-current.json",
+                "agent_name": "oscar-build-metrics-agent-cdk-created",
+                "construct_id": "OscarBuildMetricsAgent",
+                "alias_id": "OscarBuildMetricsAgentAlias", 
+                "agent_key": "build_metrics"
+            },
+            {
+                "config_file": "release-metrics-agent-current.json",
+                "agent_name": "oscar-release-metrics-agent-cdk-created",
+                "construct_id": "OscarReleaseMetricsAgent",
+                "alias_id": "OscarReleaseMetricsAgentAlias",
+                "agent_key": "release_metrics"
+            }
+        ]
         
-        # Create limited agent
-        try:
-            limited_agent_role_arn = self.permissions_stack.bedrock_agent_role.role_arn
-            
-            limited_agent = bedrock.CfnAgent(
-                self, "OscarLimitedAgent", 
-                agent_name="oscar-limited-agent-cdk-created",
-                description="Limited OSCAR agent with read-only access",
-                foundation_model="anthropic.claude-3-5-sonnet-20241022-v2:0",
-                instruction="You are OSCAR, an AI assistant for the OpenSearch project. You have read-only access to help with information and analysis tasks.",
-                agent_resource_role_arn=limited_agent_role_arn,
-                idle_session_ttl_in_seconds=1800,
-                tags={
-                    "Environment": self.env_name,
-                    "Project": "OSCAR", 
-                    "AgentType": "Limited"
-                }
-            )
-            self.agents["limited"] = limited_agent
-            logger.info("Created limited OSCAR agent")
-            
-            # Create agent alias
-            limited_alias = bedrock.CfnAgentAlias(
-                self, "OscarLimitedAgentAlias",
-                agent_id=limited_agent.attr_agent_id,
-                agent_alias_name="CURRENT",
-                description="Current version of the limited OSCAR agent",
-                tags={
-                    "Environment": self.env_name,
-                    "Project": "OSCAR"
-                }
-            )
-            self.agent_aliases["limited"] = limited_alias
-            logger.info("Created limited agent alias")
-            
-        except Exception as e:
-            logger.error(f"Failed to create limited agent: {e}")
+        # Define supervisor agent mappings (created after individual agents)
+        supervisor_agent_mappings = [
+            {
+                "config_file": "oscar-privileged-agent-current.json",
+                "agent_name": "oscar-privileged-agent-cdk-created",
+                "construct_id": "OscarPrivilegedAgent",
+                "alias_id": "OscarPrivilegedAgentAlias",
+                "agent_key": "privileged"
+            },
+            {
+                "config_file": "oscar-limited-agent-current.json", 
+                "agent_name": "oscar-limited-agent-cdk-created",
+                "construct_id": "OscarLimitedAgent",
+                "alias_id": "OscarLimitedAgentAlias",
+                "agent_key": "limited"
+            }
+        ]
+        
+        # Create individual agents first (no dependencies)
+        logger.info("Creating individual agents (Jenkins and metrics agents)")
+        for mapping in individual_agent_mappings:
+            try:
+                self._create_agent_from_config(mapping, agent_role_arn)
+            except Exception as e:
+                logger.error(f"Failed to create individual agent {mapping['agent_name']}: {e}")
+                continue
+        
+        # Create supervisor agents second (depend on individual agents and knowledge base)
+        logger.info("Creating supervisor agents (privileged and limited)")
+        for mapping in supervisor_agent_mappings:
+            try:
+                self._create_agent_from_config(mapping, agent_role_arn)
+            except Exception as e:
+                logger.error(f"Failed to create agent {mapping['agent_name']}: {e}")
+                continue
     
-    def _create_agent_from_config(self, config_file: str, agent_key: str, description: str) -> None:
+    def _create_agent_from_config(self, mapping: Dict[str, str], agent_role_arn: str) -> None:
         """
-        Create a Bedrock agent from a configuration file.
+        Create a Bedrock agent from its JSON configuration file.
         
         Args:
-            config_file: Name of the configuration file
-            agent_key: Key to store the agent in the agents dictionary
-            description: Description for the agent
+            mapping: Configuration mapping with file paths and construct IDs
+            agent_role_arn: IAM role ARN for the agent
         """
-        logger.info(f"Creating agent from configuration: {config_file}")
+        config_path = os.path.join(os.path.dirname(__file__), "..", "agents", "configs", mapping["config_file"])
         
+        if not os.path.exists(config_path):
+            logger.error(f"Configuration file not found: {config_path}")
+            return
+            
         try:
-            # Load agent configuration
-            agent_config = self.config_builder.load_agent_config(config_file)
+            # Load the configuration
+            with open(config_path, 'r') as f:
+                config = json.load(f)
             
-            # Validate configuration
-            validation_result = self.config_validator.validate_agent_config(agent_config)
-            if validation_result.has_errors:
-                logger.error(f"Configuration validation failed for {config_file}")
-                for error in validation_result.errors:
-                    logger.error(f"  {error}")
-                return
+            # Replace dynamic IDs with actual CDK-created resource IDs
+            config = self._replace_dynamic_ids(config, mapping["agent_key"])
             
-            if validation_result.warnings:
-                for warning in validation_result.warnings:
-                    logger.warning(f"  {warning}")
+            logger.info(f"Creating agent from config: {mapping['config_file']}")
             
-            # Update Lambda function ARNs with current deployment
-            self._update_lambda_arns_in_config(agent_config)
+            # Create action groups from config
+            action_groups = []
+            for ag_config in config.get("action_groups", []):
+                # Update Lambda ARN to use CDK-created functions
+                lambda_arn = self._get_lambda_arn_for_action_group(ag_config["name"])
+                if lambda_arn:
+                    action_group = bedrock.CfnAgent.AgentActionGroupProperty(
+                        action_group_name=ag_config["name"],
+                        description=ag_config["description"],
+                        action_group_executor=bedrock.CfnAgent.ActionGroupExecutorProperty(
+                            lambda_=lambda_arn
+                        ),
+                        action_group_state="ENABLED"
+                    )
+                    action_groups.append(action_group)
             
-            # Update Knowledge Base ID with current deployment
-            self._update_knowledge_base_id_in_config(agent_config)
+            # Create knowledge base associations from config
+            knowledge_bases = []
+            for kb_config in config.get("knowledge_bases", []):
+                if kb_config.get("knowledge_base_id") and kb_config["knowledge_base_id"] != "CDK_KNOWLEDGE_BASE_ID":
+                    knowledge_base = bedrock.CfnAgent.AgentKnowledgeBaseProperty(
+                        knowledge_base_id=kb_config["knowledge_base_id"],
+                        description=kb_config.get("description", "Knowledge base for OSCAR agent"),
+                        knowledge_base_state=kb_config.get("knowledge_base_state", "ENABLED")
+                    )
+                    knowledge_bases.append(knowledge_base)
             
-            # Create the agent
-            agent = self._create_bedrock_agent(agent_config, agent_key)
+            # Create the agent with config values
+            agent = bedrock.CfnAgent(
+                self, mapping["construct_id"],
+                agent_name=mapping["agent_name"],
+                agent_resource_role_arn=agent_role_arn,
+                description=config.get("description", "OSCAR agent"),
+                foundation_model=config.get("foundation_model", "anthropic.claude-3-5-sonnet-20241022-v2:0"),
+                instruction=config.get("instructions", "You are an AI assistant for OpenSearch."),
+                idle_session_ttl_in_seconds=config.get("idle_session_ttl_in_seconds", 1800),
+                action_groups=action_groups if action_groups else None,
+                knowledge_bases=knowledge_bases if knowledge_bases else None,
+                auto_prepare=True
+            )
             
             # Create agent alias
-            alias = self._create_agent_alias(agent, agent_config, agent_key)
+            alias = bedrock.CfnAgentAlias(
+                self, mapping["alias_id"],
+                agent_alias_name="LIVE",
+                agent_id=agent.attr_agent_id,
+                description=f"Live alias for {config.get('description', 'OSCAR agent')}"
+            )
             
             # Store references
-            self.agents[agent_key] = agent
-            self.agent_aliases[agent_key] = alias
+            self.agents[mapping["agent_key"]] = agent
+            self.agent_aliases[mapping["agent_key"]] = alias
             
-            logger.info(f"Successfully created agent: {agent_config.agent_name}")
+            # Store collaborator config for post-deployment setup
+            if config.get("collaborators"):
+                self._store_collaborator_config(mapping["agent_key"], config["collaborators"])
             
-        except FileNotFoundError:
-            logger.error(f"Configuration file not found: {config_file}")
+            logger.info(f"Successfully created agent: {mapping['agent_name']}")
+            
         except Exception as e:
-            logger.error(f"Error creating agent from {config_file}: {e}")
+            logger.error(f"Failed to create agent from {mapping['config_file']}: {e}")
             raise
     
-    def _update_lambda_arns_in_config(self, agent_config: AgentConfig) -> None:
+    def _get_lambda_arn_for_action_group(self, action_group_name: str) -> Optional[str]:
         """
-        Update Lambda function ARNs in agent configuration with current deployment.
+        Get the Lambda ARN for a given action group name.
         
         Args:
-            agent_config: Agent configuration to update
+            action_group_name: Name of the action group
+            
+        Returns:
+            Lambda function ARN or None if not found
         """
-        # Mapping of action group names to Lambda function keys
-        lambda_function_mapping = {
+        # Map action group names to Lambda function keys
+        action_group_mappings = {
             "communication-orchestration": "communication_handler",
-            "oscar-enhanced-routing-v2": "main_agent",
+            "oscar-enhanced-routing-v2": "main_agent", 
             "jenkins-operations": "jenkins_agent",
-            "metrics-analysis": "metrics_test_metrics"  # Default to test metrics
+            "jenkins_operations": "jenkins_agent",
+            "integration_test_action_group": "metrics_test_metrics",
+            "build-metrics-group-agent": "metrics_build_metrics", 
+            "release-metrics-group-agent": "metrics_release_metrics",
+            "release-metrics-actions-group": "metrics_release_metrics"
         }
         
-        for action_group in agent_config.action_groups:
-            if action_group.name in lambda_function_mapping:
-                function_key = lambda_function_mapping[action_group.name]
-                
-                # Get Lambda function from the Lambda stack
-                if function_key in self.lambda_stack.lambda_functions:
-                    lambda_function = self.lambda_stack.lambda_functions[function_key]
-                    action_group.lambda_function_arn = lambda_function.function_arn
-                    logger.info(f"Updated Lambda ARN for action group {action_group.name}: {lambda_function.function_arn}")
-                else:
-                    logger.warning(f"Lambda function not found for action group {action_group.name}: {function_key}")
+        lambda_key = action_group_mappings.get(action_group_name)
+        if lambda_key and lambda_key in self.lambda_stack.lambda_functions:
+            return self.lambda_stack.lambda_functions[lambda_key].function_arn
+        
+        logger.warning(f"No Lambda function found for action group: {action_group_name}")
+        return None
     
-    def _update_knowledge_base_id_in_config(self, agent_config: AgentConfig) -> None:
+    def _replace_dynamic_ids(self, config: Dict[str, Any], agent_key: str) -> Dict[str, Any]:
         """
-        Update Knowledge Base ID in agent configuration with current deployment.
+        Replace dynamic placeholder IDs with actual CDK-created resource IDs.
         
         Args:
-            agent_config: Agent configuration to update
-        """
-        if agent_config.knowledge_bases and self.knowledge_base_stack:
-            for kb_config in agent_config.knowledge_bases:
-                # Update with the current Knowledge Base ID
-                kb_config.knowledge_base_id = self.knowledge_base_stack.knowledge_base.attr_knowledge_base_id
-                logger.info(f"Updated Knowledge Base ID: {kb_config.knowledge_base_id}")
-    
-    def _create_bedrock_agent(self, agent_config: AgentConfig, agent_key: str) -> bedrock.CfnAgent:
-        """
-        Create a Bedrock agent from configuration.
-        
-        Args:
-            agent_config: Agent configuration
-            agent_key: Key for the agent
+            config: Agent configuration dictionary
+            agent_key: Key identifying the agent type
             
         Returns:
-            Created Bedrock agent
+            Updated configuration with real resource IDs
         """
-        logger.info(f"Creating Bedrock agent: {agent_config.agent_name}")
+        # Create a deep copy to avoid modifying the original
+        import copy
+        updated_config = copy.deepcopy(config)
         
-        # Get the Bedrock agent execution role
-        agent_role = self.permissions_stack.bedrock_agent_role
-        
-        # Prepare agent properties
-        agent_props = {
-            "agent_name": f"{agent_config.agent_name}-cdk-created-{self.env_name}",
-            "description": agent_config.description,
-            "instruction": agent_config.instructions,
-            "foundation_model": self._get_foundation_model_arn(agent_config.foundation_model),
-            "agent_resource_role_arn": agent_role.role_arn,
-            "idle_session_ttl_in_seconds": agent_config.idle_session_ttl_in_seconds
-        }
-        
-        # Add customer encryption key if specified
-        if agent_config.customer_encryption_key_arn:
-            agent_props["customer_encryption_key_arn"] = agent_config.customer_encryption_key_arn
-        
-        # Add guardrails if configured
-        if agent_config.guardrails:
-            agent_props["guardrail_configuration"] = bedrock.CfnAgent.GuardrailConfigurationProperty(
-                guardrail_identifier=agent_config.guardrails.guardrail_identifier,
-                guardrail_version=agent_config.guardrails.guardrail_version
-            )
-        
-        # Create the agent
-        agent = bedrock.CfnAgent(
-            self, f"BedrockAgent{agent_key.title()}",
-            **agent_props
-        )
-        
-        # Add tags
-        if agent_config.tags:
-            for key, value in agent_config.tags.items():
-                agent.add_property_override(f"Tags.{key}", value)
-        
-        # Add default tags
-        agent.add_property_override("Tags.Project", "OSCAR")
-        agent.add_property_override("Tags.Environment", self.env_name)
-        agent.add_property_override("Tags.AgentType", agent_key)
-        
-        return agent
-    
-    def _create_agent_alias(self, agent: bedrock.CfnAgent, agent_config: AgentConfig, agent_key: str) -> bedrock.CfnAgentAlias:
-        """
-        Create an agent alias for the Bedrock agent.
-        
-        Args:
-            agent: The Bedrock agent
-            agent_config: Agent configuration
-            agent_key: Key for the agent
+        # Only replace IDs for supervisor agents that have collaborators
+        if agent_key in ["privileged", "limited"]:
+            # Replace knowledge base IDs
+            if "knowledge_bases" in updated_config:
+                for kb in updated_config["knowledge_bases"]:
+                    if kb.get("knowledge_base_id") == "CDK_KNOWLEDGE_BASE_ID":
+                        if self.knowledge_base_stack and hasattr(self.knowledge_base_stack, 'knowledge_base') and self.knowledge_base_stack.knowledge_base:
+                            kb["knowledge_base_id"] = self.knowledge_base_stack.knowledge_base.attr_knowledge_base_id
+                            logger.info(f"Replaced knowledge base ID for {agent_key} agent")
+                        else:
+                            logger.warning(f"Knowledge base not available for {agent_key} agent - removing knowledge base configuration")
+                            # Remove knowledge base configuration if not available
+                            updated_config["knowledge_bases"] = []
             
-        Returns:
-            Created agent alias
-        """
-        logger.info(f"Creating agent alias for: {agent_config.agent_name}")
-        
-        alias = bedrock.CfnAgentAlias(
-            self, f"BedrockAgentAlias{agent_key.title()}",
-            agent_alias_name=f"{agent_config.agent_name}-alias-cdk-created-{self.env_name}",
-            agent_id=agent.attr_agent_id,
-            description=f"Primary alias for {agent_config.agent_name}",
-            routing_configuration=[
-                bedrock.CfnAgentAlias.AgentAliasRoutingConfigurationListItemProperty(
-                    agent_version="DRAFT"
-                )
-            ]
-        )
-        
-        # Add dependency on agent
-        alias.add_dependency(agent)
-        
-        return alias
-    
-    def _get_foundation_model_arn(self, foundation_model: str) -> str:
-        """
-        Get the full ARN for a foundation model.
-        
-        Args:
-            foundation_model: Foundation model identifier
-            
-        Returns:
-            Full ARN for the foundation model
-        """
-        # If it's already a full ARN (inference profile), return as-is
-        if foundation_model.startswith("arn:aws:bedrock:"):
-            return foundation_model
-        
-        # Convert model ID to ARN
-        return f"arn:aws:bedrock:{self.aws_region}::foundation-model/{foundation_model}"
-    
-    def _create_action_groups_for_agent(self, agent: bedrock.CfnAgent, agent_config: AgentConfig, agent_key: str) -> None:
-        """
-        Create action groups for a Bedrock agent.
-        
-        Args:
-            agent: The Bedrock agent
-            agent_config: Agent configuration
-            agent_key: Key for the agent
-        """
-        logger.info(f"Creating action groups for agent: {agent_config.agent_name}")
-        
-        for i, action_group_config in enumerate(agent_config.action_groups):
-            try:
-                # Prepare action group properties
-                action_group_props = {
-                    "agent_id": agent.attr_agent_id,
-                    "agent_version": "DRAFT",
-                    "action_group_name": action_group_config.name,
-                    "description": action_group_config.description,
-                    "action_group_state": action_group_config.action_group_state
-                }
-                
-                # Add Lambda function executor
-                if action_group_config.lambda_function_arn:
-                    action_group_props["action_group_executor"] = bedrock.CfnAgentActionGroup.ActionGroupExecutorProperty(
-                        lambda_=action_group_config.lambda_function_arn
-                    )
-                
-                # Add API schema if available
-                if action_group_config.api_schema and isinstance(action_group_config.api_schema, dict):
-                    # Check if it's a valid OpenAPI schema
-                    if "openAPIVersion" in action_group_config.api_schema:
-                        action_group_props["api_schema"] = bedrock.CfnAgentActionGroup.APISchemaProperty(
-                            payload=json.dumps(action_group_config.api_schema)
-                        )
-                
-                # Create action group
-                action_group = bedrock.CfnAgentActionGroup(
-                    self, f"ActionGroup{agent_key.title()}{i}",
-                    **action_group_props
-                )
-                
-                # Add dependency on agent
-                action_group.add_dependency(agent)
-                
-                logger.info(f"Created action group: {action_group_config.name}")
-                
-            except Exception as e:
-                logger.error(f"Failed to create action group {action_group_config.name}: {e}")
-                continue
-    
-    def _create_knowledge_base_associations_for_agent(self, agent: bedrock.CfnAgent, agent_config: AgentConfig, agent_key: str) -> None:
-        """
-        Create knowledge base associations for a Bedrock agent.
-        
-        Args:
-            agent: The Bedrock agent
-            agent_config: Agent configuration
-            agent_key: Key for the agent
-        """
-        logger.info(f"Creating knowledge base associations for agent: {agent_config.agent_name}")
-        
-        for i, kb_config in enumerate(agent_config.knowledge_bases):
-            try:
-                # Create knowledge base association
-                kb_association = bedrock.CfnAgentKnowledgeBase(
-                    self, f"KnowledgeBaseAssociation{agent_key.title()}{i}",
-                    agent_id=agent.attr_agent_id,
-                    agent_version="DRAFT",
-                    knowledge_base_id=kb_config.knowledge_base_id,
-                    description=kb_config.description or f"Knowledge base association for {agent_config.agent_name}",
-                    knowledge_base_state=kb_config.knowledge_base_state,
-                    retrieval_configuration=bedrock.CfnAgentKnowledgeBase.KnowledgeBaseRetrievalConfigurationProperty(
-                        vector_search_configuration=bedrock.CfnAgentKnowledgeBase.KnowledgeBaseVectorSearchConfigurationProperty(
-                            number_of_results=kb_config.retrieval_configuration.get("vectorSearchConfiguration", {}).get("numberOfResults", 10),
-                            override_search_type=kb_config.retrieval_configuration.get("vectorSearchConfiguration", {}).get("overrideSearchType", "HYBRID")
-                        )
-                    ) if kb_config.retrieval_configuration else None
-                )
-                
-                # Add dependencies
-                kb_association.add_dependency(agent)
-                if self.knowledge_base_stack:
-                    kb_association.add_dependency(self.knowledge_base_stack.knowledge_base)
-                
-                logger.info(f"Created knowledge base association: {kb_config.knowledge_base_id}")
-                
-            except Exception as e:
-                logger.error(f"Failed to create knowledge base association {kb_config.knowledge_base_id}: {e}")
-                continue
-    
-    def update_agent_configuration(self, agent_key: str, config_file: str) -> bool:
-        """
-        Update agent configuration without recreating dependent resources.
-        
-        Args:
-            agent_key: Key of the agent to update
-            config_file: Configuration file to load
-            
-        Returns:
-            True if update was successful, False otherwise
-        """
-        try:
-            logger.info(f"Updating agent configuration for: {agent_key}")
-            
-            # Load new configuration
-            agent_config = self.config_builder.load_agent_config(config_file)
-            
-            # Validate configuration
-            validation_result = self.config_validator.validate_agent_config(agent_config)
-            if validation_result.has_errors:
-                logger.error(f"Configuration validation failed for {config_file}")
-                return False
-            
-            # Update Lambda ARNs and Knowledge Base IDs
-            self._update_lambda_arns_in_config(agent_config)
-            self._update_knowledge_base_id_in_config(agent_config)
-            
-            # Note: In CDK, configuration updates happen during deployment
-            # This method provides the interface for configuration updates
-            logger.info(f"Configuration update prepared for {agent_key}")
-            return True
-            
-        except Exception as e:
-            logger.error(f"Failed to update agent configuration for {agent_key}: {e}")
-            return False
-    
-    def validate_agent_configurations(self) -> Dict[str, Any]:
-        """
-        Validate all agent configurations and action group associations.
-        
-        Returns:
-            Dictionary with validation results
-        """
-        logger.info("Validating agent configurations")
-        
-        validation_results = {}
-        
-        # Get list of configuration files
-        config_files = self.config_builder.list_agent_configs()
-        
-        for config_file in config_files:
-            if config_file.startswith("oscar-"):  # Only validate OSCAR agent configs
-                try:
-                    config_path = f"cdk/agents/configs/{config_file}.json"
-                    result = self.config_validator.validate_config_file(config_path)
-                    validation_results[config_file] = {
-                        "is_valid": result.is_valid,
-                        "errors": [str(error) for error in result.errors],
-                        "warnings": [str(warning) for warning in result.warnings]
+            # Replace collaborator agent IDs
+            if "collaborators" in updated_config:
+                for collaborator in updated_config["collaborators"]:
+                    agent_id_placeholder = collaborator.get("agent_id")
+                    
+                    # Map placeholder IDs to actual agent keys
+                    id_mapping = {
+                        "CDK_JENKINS_AGENT_ID": "jenkins",
+                        "CDK_BUILD_METRICS_AGENT_ID": "build_metrics", 
+                        "CDK_TEST_METRICS_AGENT_ID": "test_metrics",
+                        "CDK_RELEASE_METRICS_AGENT_ID": "release_metrics"
                     }
-                except Exception as e:
-                    validation_results[config_file] = {
-                        "is_valid": False,
-                        "errors": [f"Validation failed: {e}"],
-                        "warnings": []
-                    }
+                    
+                    if agent_id_placeholder in id_mapping:
+                        collaborator_key = id_mapping[agent_id_placeholder]
+                        if collaborator_key in self.agents:
+                            collaborator["agent_id"] = self.agents[collaborator_key].attr_agent_id
+                            logger.info(f"Replaced {agent_id_placeholder} with actual agent ID for {agent_key} agent")
+                        else:
+                            logger.warning(f"Collaborator agent {collaborator_key} not found for {agent_key} agent")
         
-        return validation_results
+        return updated_config
+    
+    def _store_collaborator_config(self, agent_key: str, collaborators: List[Dict[str, Any]]) -> None:
+        """
+        Store collaborator configuration for post-deployment setup.
+        
+        Args:
+            agent_key: Key identifying the agent
+            collaborators: List of collaborator configurations
+        """
+        if not hasattr(self, 'collaborator_configs'):
+            self.collaborator_configs = {}
+        
+        self.collaborator_configs[agent_key] = collaborators
+        logger.info(f"Stored collaborator config for {agent_key} agent with {len(collaborators)} collaborators")
     
     def _create_outputs(self) -> None:
-        """Create CloudFormation outputs for the Bedrock agents."""
-        # Output for each agent
+        """Create CloudFormation outputs for the agents."""
         for agent_key, agent in self.agents.items():
-            # Agent ID output
             CfnOutput(
-                self, f"BedrockAgent{agent_key.title()}Id",
+                self, f"Agent{agent_key.title()}Id",
                 value=agent.attr_agent_id,
-                description=f"ID of the {agent_key} Bedrock agent",
-                export_name=f"OscarBedrockAgent{agent_key.title()}Id"
+                description=f"ID of the {agent_key} OSCAR agent"
             )
             
-            # Agent ARN output
-            CfnOutput(
-                self, f"BedrockAgent{agent_key.title()}Arn",
-                value=agent.attr_agent_arn,
-                description=f"ARN of the {agent_key} Bedrock agent",
-                export_name=f"OscarBedrockAgent{agent_key.title()}Arn"
-            )
-        
-        # Output for each agent alias
-        for agent_key, alias in self.agent_aliases.items():
-            # Alias ID output
-            CfnOutput(
-                self, f"BedrockAgentAlias{agent_key.title()}Id",
-                value=alias.attr_agent_alias_id,
-                description=f"ID of the {agent_key} Bedrock agent alias",
-                export_name=f"OscarBedrockAgentAlias{agent_key.title()}Id"
-            )
-            
-            # Alias ARN output
-            CfnOutput(
-                self, f"BedrockAgentAlias{agent_key.title()}Arn",
-                value=alias.attr_agent_alias_arn,
-                description=f"ARN of the {agent_key} Bedrock agent alias",
-                export_name=f"OscarBedrockAgentAlias{agent_key.title()}Arn"
-            )
-        
-        # Summary output
-        agent_ids = [agent.attr_agent_id for agent in self.agents.values()]
-        CfnOutput(
-            self, "AllBedrockAgentIds",
-            value=",".join(agent_ids),
-            description="Comma-separated list of all OSCAR Bedrock agent IDs"
-        )
-    
-    @property
-    def privileged_agent(self) -> Optional[bedrock.CfnAgent]:
-        """Get the privileged agent."""
-        return self.agents.get("privileged")
-    
-    @property
-    def limited_agent(self) -> Optional[bedrock.CfnAgent]:
-        """Get the limited agent."""
-        return self.agents.get("limited")
-    
-    @property
-    def privileged_agent_alias(self) -> Optional[bedrock.CfnAgentAlias]:
-        """Get the privileged agent alias."""
-        return self.agent_aliases.get("privileged")
-    
-    @property
-    def limited_agent_alias(self) -> Optional[bedrock.CfnAgentAlias]:
-        """Get the limited agent alias."""
-        return self.agent_aliases.get("limited")
-    
-    def get_agent_by_key(self, agent_key: str) -> Optional[bedrock.CfnAgent]:
-        """
-        Get agent by key.
-        
-        Args:
-            agent_key: Key of the agent to retrieve
-            
-        Returns:
-            Bedrock agent or None if not found
-        """
-        return self.agents.get(agent_key)
-    
-    def get_agent_alias_by_key(self, agent_key: str) -> Optional[bedrock.CfnAgentAlias]:
-        """
-        Get agent alias by key.
-        
-        Args:
-            agent_key: Key of the agent alias to retrieve
-            
-        Returns:
-            Bedrock agent alias or None if not found
-        """
-        return self.agent_aliases.get(agent_key)
+            if agent_key in self.agent_aliases:
+                alias = self.agent_aliases[agent_key]
+                CfnOutput(
+                    self, f"Agent{agent_key.title()}AliasId",
+                    value=alias.attr_agent_alias_id,
+                    description=f"Alias ID of the {agent_key} OSCAR agent"
+                )

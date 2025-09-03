@@ -66,16 +66,38 @@ echo "This may take 15-20 minutes..."
 cdk deploy --all --require-approval never
 
 echo ""
-echo "🎉 Deployment completed successfully!"
-echo "=================================="
+echo "🎉 CDK Deployment completed successfully!"
+echo "========================================"
+
+# Run post-deployment collaborator setup
+echo ""
+echo "🔗 Setting up agent collaborators..."
+echo "This step configures collaborator relationships between agents..."
+
+if python3 scripts/setup_collaborators.py OscarAgentsStack; then
+    echo "✅ Agent collaborators configured successfully!"
+else
+    echo "⚠️  Warning: Collaborator setup failed. You may need to run this manually:"
+    echo "   python3 scripts/setup_collaborators.py OscarAgentsStack"
+fi
+
+echo ""
+echo "🎉 Complete OSCAR deployment finished!"
+echo "====================================="
 echo ""
 echo "📋 Next steps:"
 echo "1. Note the API Gateway URLs from the outputs above"
 echo "2. Update your Slack app webhook URLs with the new endpoints"
 echo "3. Test the bot functionality"
+echo "4. Verify agent collaborators are working correctly"
 echo ""
 echo "🔗 Key outputs to save:"
 echo "  - SlackEventsUrl: Use this for Slack Events API"
 echo "  - SlackInteractiveUrl: Use this for Slack Interactive Components"
 echo "  - Bedrock Agent IDs: These will be the new agent IDs"
+echo ""
+echo "🧪 Testing commands:"
+echo "  - Test individual agents in AWS Bedrock console"
+echo "  - Test supervisor agents with collaborator routing"
+echo "  - Test Jenkins operations and metrics queries"
 echo ""

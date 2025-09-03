@@ -7,16 +7,16 @@
       },
       "description": "Enhanced routing and coordination with knowledge base integration",
       "execution_role_arn": null,
-      "lambda_function_arn": "arn:aws:lambda:us-east-1:395380602281:function:oscar-supervisor-agent",
+      "lambda_function_arn": "arn:aws:lambda:us-east-1:395380602281:function:oscar-supervisor-agent-cdk-created",
       "name": "oscar-enhanced-routing-v2"
     }
   ],
   "agent_id": "DKGVSQJG3D",
   "agent_name": "oscar-supervisor-agent-limited",
-  "agent_resource_role_arn": "arn:aws:iam::395380602281:role/service-role/AmazonBedrockExecutionRoleForAgents_HMSYCIAB60I",
+  "agent_resource_role_arn": "arn:aws:iam::395380602281:role/oscar-bedrock-agent-execution-role-cdk-created",
   "collaborators": [
     {
-      "agent_id": "0NBATJIVCH",
+      "agent_id": "CDK_BUILD_METRICS_AGENT_ID",
       "agent_version": "GC8VS65XKY",
       "collaboration_instruction": "This BuildMetricsSpecialist agent specializes in build metrics, distribution build analysis, and build pipeline performance. It can analyze build failures, success rates, and component-specific build issues across different versions and time ranges. Collaborate with this BuildMetricsSpecialist for dynamic/analytical queries regarding Build Metrics.",
       "collaboration_role": "BuildMetricsSpecialist",
@@ -24,7 +24,7 @@
       "relay_conversation_history": "TO_COLLABORATOR"
     },
     {
-      "agent_id": "YXSZJ659S7",
+      "agent_id": "CDK_TEST_METRICS_AGENT_ID",
       "agent_version": "NYQWUYAZON",
       "collaboration_instruction": "This IntegrationTestSpecialist agent specializes in integration test failures, RC-based analysis, and component testing patterns. It can analyze test failures across different platforms, architectures, and distributions. You provide detailed failure analysis with test reports and build URLs for debugging. Collaborate with this IntegrationTestSpecialist for dynamic/analytical queries regarding Test Metrics.",
       "collaboration_role": "IntegrationTestSpecialist",
@@ -32,7 +32,7 @@
       "relay_conversation_history": "TO_COLLABORATOR"
     },
     {
-      "agent_id": "4FCARBPEYB",
+      "agent_id": "CDK_RELEASE_METRICS_AGENT_ID",
       "agent_version": "0EPUVOEY6Y",
       "collaboration_instruction": "This ReleaseReadinessSpecialist agent specializes in release readiness analysis, component release status, and release blocking issues. It can assess release readiness scores, identify components that need attention, and provide release owner information for coordination. Collaborate with this ReleaseReadinessSpecialist for dynamic/analytical queries regarding Release Metrics.",
       "collaboration_role": "ReleaseReadinessSpecialist",
@@ -47,7 +47,7 @@
   "knowledge_bases": [
     {
       "description": "Use this for OpenSearch documentation, build commands, guides, release references, best practices, troubleshooting, & feature explanations. Prioritize for static information and how-to questions.",
-      "knowledge_base_id": "NBRUVWHAYY",
+      "knowledge_base_id": "CDK_KNOWLEDGE_BASE_ID",
       "knowledge_base_state": "ENABLED",
       "retrieval_configuration": {
         "vectorSearchConfiguration": {

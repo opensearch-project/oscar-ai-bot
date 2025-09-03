@@ -7,13 +7,13 @@
       },
       "description": "Comprehensive Jenkins job operations with parameter validation",
       "execution_role_arn": null,
-      "lambda_function_arn": "arn:aws:lambda:us-east-1:395380602281:function:oscar-jenkins-agent",
+      "lambda_function_arn": "arn:aws:lambda:us-east-1:395380602281:function:oscar-jenkins-agent-cdk-created",
       "name": "jenkins-operations"
     }
   ],
   "agent_id": "PN1WKOJ0U7",
   "agent_name": "jenkins-agent",
-  "agent_resource_role_arn": "arn:aws:iam::395380602281:role/service-role/AmazonBedrockExecutionRoleForAgents_UY8CPTFPXRQ",
+  "agent_resource_role_arn": "arn:aws:iam::395380602281:role/oscar-bedrock-agent-execution-role-cdk-created",
   "collaborators": [],
   "description": "Dedicated Jenkins operations agent for OSCAR: handles job triggers, monitoring, and parameter validation",
   "foundation_model": "arn:aws:bedrock:us-east-1:395380602281:inference-profile/us.anthropic.claude-3-7-sonnet-20250219-v1:0",

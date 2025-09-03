@@ -227,7 +227,7 @@ class OscarLambdaStack(Stack):
                 function_name=agent_config["function_name"],
                 runtime=lambda_.Runtime.PYTHON_3_12,
                 handler="lambda_function.lambda_handler",
-                code=lambda_.Code.from_asset("../metrics"),
+                code=lambda_.Code.from_asset(f"lambda/metrics_{agent_config['name'].replace('-', '_')}"),
                 timeout=Duration.seconds(180),  # 3 minutes for metrics queries
                 memory_size=1024,  # Higher memory for data processing
                 environment=self._get_metrics_agent_environment_variables(agent_config["name"]),
