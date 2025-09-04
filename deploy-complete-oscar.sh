@@ -138,9 +138,9 @@ log_success "✅ Secrets Manager updated with complete environment configuration
 
 # Step 7: Fix Lambda Agent Permissions
 log_info "🔐 Step 7: Fixing Lambda function permissions for Bedrock agent invocation"
-log_info "This adds resource-based policies allowing agents to invoke their respective Lambda functions"
+log_info "This adds comprehensive IAM policies and resource-based policies for all Lambda functions"
 
-./lambda_agent_permissions_fixer.sh
+./fix-cdk-lambda-permissions.sh
 
 log_success "✅ Lambda function permissions fixed!"
 
