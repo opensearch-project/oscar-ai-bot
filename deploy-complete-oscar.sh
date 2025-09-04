@@ -136,8 +136,16 @@ log_info "This populates the secret with all environment variables from the .env
 
 log_success "✅ Secrets Manager updated with complete environment configuration!"
 
-# Step 7: Final verification
-log_info "🔍 Step 7: Final Integration Verification"
+# Step 7: Fix Lambda Agent Permissions
+log_info "🔐 Step 7: Fixing Lambda function permissions for Bedrock agent invocation"
+log_info "This adds resource-based policies allowing agents to invoke their respective Lambda functions"
+
+./lambda_agent_permissions_fixer.sh
+
+log_success "✅ Lambda function permissions fixed!"
+
+# Step 8: Final verification
+log_info "🔍 Step 8: Final Integration Verification"
 
 log_info "Verifying deployed resources..."
 

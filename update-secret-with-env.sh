@@ -36,42 +36,19 @@ log_error() {
     echo -e "${RED}[ERROR]${NC} $1"
 }
 
-# Convert .env file to JSON format for Secrets Manager
-convert_env_to_json() {
+# Read .env file content as plain text (same format as main secret)
+read_env_content() {
     local env_file=$1
-    local json_output=""
     
-    log_info "Converting .env file to JSON format..."
+    log_info "Reading .env file content..." >&2
     
-    # Read .env file and convert to JSON
-    while IFS='=' read -r key value || [[ -n "$key" ]]; do
-        # Skip empty lines and comments
-        [[ -z "$key" || "$key" =~ ^[[:space:]]*# ]] && continue
-        
-        # Remove leading/trailing whitespace
-        key=$(echo "$key" | xargs)
-        value=$(echo "$value" | xargs)
-        
-        # Skip if key is empty
-        [[ -z "$key" ]] && continue
-        
-        # Remove quotes from value if present
-        value=$(echo "$value" | sed 's/^["'\'']\|["'\'']$//g')
-        
-        # Escape special characters for JSON
-        value=$(echo "$value" | sed 's/\\/\\\\/g; s/"/\\"/g')
-        
-        # Add to JSON (with comma if not first entry)
-        if [[ -n "$json_output" ]]; then
-            json_output="${json_output},"
-        fi
-        json_output="${json_output}\"${key}\":\"${value}\""
-        
-        log_info "Added: $key"
-    done < "$env_file"
-    
-    # Wrap in JSON object
-    echo "{${json_output}}"
+    # Simply read the file content as-is (plain text format like main secret)
+    if [[ -f "$env_file" ]]; then
+        cat "$env_file"
+    else
+        log_error "File not found: $env_file" >&2
+        return 1
+    fi
 }
 
 # Update Secrets Manager secret
@@ -138,29 +115,31 @@ main() {
         exit 1
     fi
     
-    # Convert .env to JSON
+    # Read .env content as plain text (same format as main secret)
     log_info "Reading .env file: $ENV_FILE"
-    local json_content=$(convert_env_to_json "$ENV_FILE")
+    local env_content=$(read_env_content "$ENV_FILE")
     
-    if [[ -z "$json_content" || "$json_content" == "{}" ]]; then
-        log_error "Failed to convert .env file to JSON or file is empty"
+    if [[ -z "$env_content" ]]; then
+        log_error "Failed to read .env file or file is empty"
         exit 1
     fi
     
-    log_info "Generated JSON with $(echo "$json_content" | jq -r 'keys | length') environment variables"
+    local var_count=$(echo "$env_content" | grep -c '^[A-Z]' || echo "0")
+    log_info "Read .env content with $var_count environment variables"
     
     # Update the secret
-    update_secret "$SECRET_NAME" "$json_content"
+    update_secret "$SECRET_NAME" "$env_content"
     
     # Verify the update
     log_info "Verifying secret update..."
-    local stored_keys=$(aws secretsmanager get-secret-value \
+    local stored_content=$(aws secretsmanager get-secret-value \
         --region "$AWS_REGION" \
         --secret-id "$SECRET_NAME" \
         --query "SecretString" \
-        --output text | jq -r 'keys | length')
+        --output text)
     
-    log_success "✅ Secret updated successfully with $stored_keys environment variables!"
+    local stored_var_count=$(echo "$stored_content" | grep -c '^[A-Z]' || echo "0")
+    log_success "✅ Secret updated successfully with $stored_var_count environment variables!"
     log_info "📁 Source file: $ENV_FILE"
     log_info "🔐 Secret name: $SECRET_NAME"
     log_info "🌍 Region: $AWS_REGION"

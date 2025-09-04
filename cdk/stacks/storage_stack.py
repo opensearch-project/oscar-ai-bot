@@ -47,7 +47,9 @@ class OscarStorageStack(Stack):
         
         # Get configuration from environment variables (.env file) with CDK suffix
         environment = os.environ.get("ENVIRONMENT", "dev")
-        context_table_name: str = os.environ.get("CONTEXT_TABLE_NAME", "oscar-agent-context") + f"-{environment}-cdk"
+        # Use base name to avoid suffix duplication
+        base_table_name = "oscar-agent-context"
+        context_table_name: str = f"{base_table_name}-{environment}-cdk"
         
         # Get TTL values from environment
         context_ttl: int = int(os.environ.get("CONTEXT_TTL", "604800"))  # 7 days default

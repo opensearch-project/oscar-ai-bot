@@ -101,6 +101,66 @@ get_api_gateway_url() {
     fi
 }
 
+# Update agent IDs from deployed-agent-ids.json
+update_agent_ids() {
+    local agent_ids_file="deployed-agent-ids.json"
+    
+    if [[ ! -f "$agent_ids_file" ]]; then
+        log_warning "Agent IDs file not found: $agent_ids_file"
+        return 0
+    fi
+    
+    log_info "Updating agent IDs from deployment..."
+    
+    # Update Jenkins agent
+    local jenkins_id=$(jq -r '.jenkins.agent_id // empty' "$agent_ids_file")
+    local jenkins_alias=$(jq -r '.jenkins.alias_id // empty' "$agent_ids_file")
+    if [[ -n "$jenkins_id" ]]; then
+        update_env_var "JENKINS_AGENT_ID" "$jenkins_id"
+        update_env_var "JENKINS_AGENT_ALIAS_ID" "$jenkins_alias"
+    fi
+    
+    # Update Build Metrics agent
+    local build_id=$(jq -r '."build-metrics".agent_id // empty' "$agent_ids_file")
+    local build_alias=$(jq -r '."build-metrics".alias_id // empty' "$agent_ids_file")
+    if [[ -n "$build_id" ]]; then
+        update_env_var "BUILD_METRICS_AGENT_ID" "$build_id"
+        update_env_var "BUILD_METRICS_AGENT_ALIAS_ID" "$build_alias"
+    fi
+    
+    # Update Test Metrics agent
+    local test_id=$(jq -r '."test-metrics".agent_id // empty' "$agent_ids_file")
+    local test_alias=$(jq -r '."test-metrics".alias_id // empty' "$agent_ids_file")
+    if [[ -n "$test_id" ]]; then
+        update_env_var "TEST_METRICS_AGENT_ID" "$test_id"
+        update_env_var "TEST_METRICS_AGENT_ALIAS_ID" "$test_alias"
+    fi
+    
+    # Update Release Metrics agent
+    local release_id=$(jq -r '."release-metrics".agent_id // empty' "$agent_ids_file")
+    local release_alias=$(jq -r '."release-metrics".alias_id // empty' "$agent_ids_file")
+    if [[ -n "$release_id" ]]; then
+        update_env_var "RELEASE_METRICS_AGENT_ID" "$release_id"
+        update_env_var "RELEASE_METRICS_AGENT_ALIAS_ID" "$release_alias"
+    fi
+    
+    # Update OSCAR Limited agent
+    local limited_id=$(jq -r '."oscar-limited".agent_id // empty' "$agent_ids_file")
+    local limited_alias=$(jq -r '."oscar-limited".alias_id // empty' "$agent_ids_file")
+    if [[ -n "$limited_id" ]]; then
+        update_env_var "OSCAR_LIMITED_BEDROCK_AGENT_ID" "$limited_id"
+        update_env_var "OSCAR_LIMITED_BEDROCK_AGENT_ALIAS_ID" "$limited_alias"
+    fi
+    
+    # Update OSCAR Privileged agent
+    local privileged_id=$(jq -r '."oscar-privileged".agent_id // empty' "$agent_ids_file")
+    local privileged_alias=$(jq -r '."oscar-privileged".alias_id // empty' "$agent_ids_file")
+    if [[ -n "$privileged_id" ]]; then
+        update_env_var "OSCAR_PRIVILEGED_BEDROCK_AGENT_ID" "$privileged_id"
+        update_env_var "OSCAR_PRIVILEGED_BEDROCK_AGENT_ALIAS_ID" "$privileged_alias"
+    fi
+}
+
 # Main function
 main() {
     log_info "🔄 Updating .env file with CDK-deployed resource IDs..."
@@ -120,9 +180,18 @@ main() {
     update_env_var "TEST_METRICS_LAMBDA_ARN" "$(get_lambda_arn 'oscar-test-metrics-agent-cdk')"
     update_env_var "RELEASE_METRICS_LAMBDA_ARN" "$(get_lambda_arn 'oscar-release-metrics-agent-cdk')"
     
+    # Update Lambda function names for metrics configuration
+    log_info "Updating Lambda function names..."
+    update_env_var "METRICS_TEST_FUNCTION" "oscar-test-metrics-agent-cdk"
+    update_env_var "METRICS_BUILD_FUNCTION" "oscar-build-metrics-agent-cdk"
+    update_env_var "METRICS_RELEASE_FUNCTION" "oscar-release-metrics-agent-cdk"
+    update_env_var "METRICS_DEPLOYMENT_FUNCTION" "oscar-deployment-metrics-agent-cdk"
+    update_env_var "JENKINS_LAMBDA_FUNCTION_NAME" "oscar-jenkins-agent-cdk"
+    
     # Update DynamoDB table names
     log_info "Updating DynamoDB table names..."
-    local context_table=$(get_table_name "oscar-agent-context")
+    # Get the actual deployed table name from CDK stack output
+    local context_table=$(get_stack_output "OscarStorageStack" "ContextTableName")
     if [[ -n "$context_table" ]]; then
         update_env_var "CONTEXT_TABLE_NAME" "$context_table"
     fi
@@ -147,6 +216,9 @@ main() {
     log_info "Updating IAM role ARNs..."
     update_env_var "LAMBDA_EXECUTION_ROLE_ARN" "$(get_stack_output 'OscarPermissionsStack' 'LambdaExecutionRoleBaseArn')"
     update_env_var "BEDROCK_AGENT_ROLE_ARN" "$(get_stack_output 'OscarPermissionsStack' 'BedrockAgentRoleArn')"
+    
+    # Update agent IDs from deployment
+    update_agent_ids
     
     # Clean up backup if everything succeeded
     rm -f "${ENV_FILE}.bak"

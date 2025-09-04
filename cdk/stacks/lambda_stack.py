@@ -243,9 +243,9 @@ class OscarLambdaStack(Stack):
             # Central secret reference - Lambda will load from Secrets Manager at runtime
             "CENTRAL_SECRET_NAME": self.secrets_stack.central_env_secret.secret_name,
             
-            # DynamoDB table names from .env with CDK suffix
-            "SESSIONS_TABLE_NAME": os.environ.get("SESSIONS_TABLE_NAME", "oscar-agent-sessions") + f"-{os.environ.get('ENVIRONMENT', 'dev')}-cdk",
-            "CONTEXT_TABLE_NAME": os.environ.get("CONTEXT_TABLE_NAME", "oscar-agent-context") + f"-{os.environ.get('ENVIRONMENT', 'dev')}-cdk",
+            # DynamoDB table names with CDK suffix (use base names to avoid duplication)
+            "SESSIONS_TABLE_NAME": f"oscar-agent-sessions-{os.environ.get('ENVIRONMENT', 'dev')}-cdk",
+            "CONTEXT_TABLE_NAME": f"oscar-agent-context-{os.environ.get('ENVIRONMENT', 'dev')}-cdk",
             
             # TTL configurations from .env
             "DEDUP_TTL": os.environ.get("DEDUP_TTL", "300"),
@@ -277,9 +277,9 @@ class OscarLambdaStack(Stack):
             # Central secret reference
             "CENTRAL_SECRET_NAME": self.secrets_stack.central_env_secret.secret_name,
             
-            # DynamoDB table names with CDK suffix
-            "SESSIONS_TABLE_NAME": os.environ.get("SESSIONS_TABLE_NAME", "oscar-agent-sessions") + f"-{os.environ.get('ENVIRONMENT', 'dev')}-cdk",
-            "CONTEXT_TABLE_NAME": os.environ.get("CONTEXT_TABLE_NAME", "oscar-agent-context") + f"-{os.environ.get('ENVIRONMENT', 'dev')}-cdk",
+            # DynamoDB table names with CDK suffix (use base names to avoid duplication)
+            "SESSIONS_TABLE_NAME": f"oscar-agent-sessions-{os.environ.get('ENVIRONMENT', 'dev')}-cdk",
+            "CONTEXT_TABLE_NAME": f"oscar-agent-context-{os.environ.get('ENVIRONMENT', 'dev')}-cdk",
             
             # Communication settings
             "MESSAGE_TIMEOUT": os.environ.get("MESSAGE_TIMEOUT", "30"),
