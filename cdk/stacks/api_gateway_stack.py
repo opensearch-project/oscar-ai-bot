@@ -12,23 +12,15 @@ This module defines the API Gateway with Slack webhook endpoints, security,
 and monitoring for the OSCAR Slack Bot infrastructure.
 """
 
-import logging
-import os
-from typing import Dict, List, Optional, Any
+from typing import Any
 from aws_cdk import (
-    Duration,
     Stack,
     RemovalPolicy,
     aws_apigateway as apigateway,
-    aws_lambda as lambda_,
-    aws_iam as iam,
     aws_logs as logs,
     CfnOutput
 )
 from constructs import Construct
-
-# Configure logging
-logger = logging.getLogger(__name__)
 
 class OscarApiGatewayStack(Stack):
     """
@@ -147,168 +139,8 @@ class OscarApiGatewayStack(Stack):
             authorization_type=apigateway.AuthorizationType.NONE
         )
     
-    def _create_request_validator(self) -> apigateway.RequestValidator:
-        """
-        Create request validator for API Gateway endpoints.
-        
-        Returns:
-            The created request validator
-        """
-        return apigateway.RequestValidator(
-            self, "SlackRequestValidator",
-            rest_api=self.api,
-            request_validator_name="slack-request-validator-cdk",
-            validate_request_body=True,
-            validate_request_parameters=True
-        )
-    
-    def _get_cors_origins(self) -> List[str]:
-        """
-        Get CORS origins configuration with security best practices.
-        
-        Returns:
-            List of allowed CORS origins
-        """
-        # Default secure origins for Slack bot
-        default_origins = [
-            "https://slack.com",
-            "https://*.slack.com", 
-            "https://api.slack.com",
-            "https://hooks.slack.com"
-        ]
-        
-        # Allow users to specify additional origins via environment variable
-        custom_origins = os.environ.get("CORS_ALLOWED_ORIGINS", "")
-        if custom_origins:
-            # Parse comma-separated origins and add to defaults
-            additional_origins = [origin.strip() for origin in custom_origins.split(",") if origin.strip()]
-            default_origins.extend(additional_origins)
-            logger.info(f"Added custom CORS origins: {additional_origins}")
-        
-        logger.info(f"Configured CORS origins: {default_origins}")
-        return default_origins
-    
-    def _add_security_features(self, api: apigateway.RestApi) -> None:
-        """
-        Add additional security features to the API Gateway.
-        
-        Args:
-            api: The REST API Gateway to enhance
-        """
-        # Create usage plan for rate limiting and quotas
-        usage_plan = api.add_usage_plan(
-            "SlackBotUsagePlan",
-            name="oscar-slack-bot-usage-plan-cdk",
-            description="Usage plan for OSCAR Slack Bot API with rate limiting",
-            throttle=apigateway.ThrottleSettings(
-                rate_limit=50,  # requests per second per API key
-                burst_limit=100  # burst capacity per API key
-            ),
-            quota=apigateway.QuotaSettings(
-                limit=10000,  # requests per period
-                period=apigateway.Period.DAY
-            )
-        )
-        
-        # Create API key for additional security (optional, can be used for monitoring)
-        api_key = api.add_api_key(
-            "SlackBotApiKey",
-            api_key_name="oscar-slack-bot-api-key-cdk",
-            description="API key for OSCAR Slack Bot"
-        )
-        
-        # Associate API key with usage plan
-        usage_plan.add_api_key(api_key)
-        
-        # Add WAF web ACL for additional protection (if needed)
-        # Note: This would require additional configuration and is optional
-        
-    def _add_monitoring_features(self, api: apigateway.RestApi) -> None:
-        """
-        Add monitoring and alerting features to the API Gateway.
-        
-        Args:
-            api: The REST API Gateway to monitor
-        """
-        from aws_cdk import aws_cloudwatch as cloudwatch
-        from aws_cdk import aws_cloudwatch_actions as cw_actions
-        from aws_cdk import aws_sns as sns
-        
-        # Create SNS topic for alerts (optional)
-        alert_topic = sns.Topic(
-            self, "ApiGatewayAlerts",
-            topic_name="oscar-api-gateway-alerts-cdk"
-        )
-        
-        # Create CloudWatch alarms for monitoring
-        
-        # High error rate alarm
-        error_rate_alarm = cloudwatch.Alarm(
-            self, "HighErrorRateAlarm",
-            alarm_name="oscar-api-gateway-high-error-rate-cdk",
-            alarm_description="High error rate detected in API Gateway",
-            metric=cloudwatch.Metric(
-                namespace="AWS/ApiGateway",
-                metric_name="4XXError",
-                dimensions_map={
-                    "ApiName": api.rest_api_name
-                },
-                statistic="Sum",
-                period=Duration.minutes(5)
-            ),
-            threshold=10,  # 10 errors in 5 minutes
-            evaluation_periods=2,
-            comparison_operator=cloudwatch.ComparisonOperator.GREATER_THAN_THRESHOLD
-        )
-        
-        # High latency alarm
-        latency_alarm = cloudwatch.Alarm(
-            self, "HighLatencyAlarm", 
-            alarm_name="oscar-api-gateway-high-latency-cdk",
-            alarm_description="High latency detected in API Gateway",
-            metric=cloudwatch.Metric(
-                namespace="AWS/ApiGateway",
-                metric_name="Latency",
-                dimensions_map={
-                    "ApiName": api.rest_api_name
-                },
-                statistic="Average",
-                period=Duration.minutes(5)
-            ),
-            threshold=5000,  # 5 seconds
-            evaluation_periods=3,
-            comparison_operator=cloudwatch.ComparisonOperator.GREATER_THAN_THRESHOLD
-        )
-        
-        # Throttling alarm
-        throttle_alarm = cloudwatch.Alarm(
-            self, "ThrottlingAlarm",
-            alarm_name="oscar-api-gateway-throttling-cdk",
-            alarm_description="API Gateway throttling detected",
-            metric=cloudwatch.Metric(
-                namespace="AWS/ApiGateway", 
-                metric_name="ThrottledRequests",
-                dimensions_map={
-                    "ApiName": api.rest_api_name
-                },
-                statistic="Sum",
-                period=Duration.minutes(1)
-            ),
-            threshold=5,  # 5 throttled requests in 1 minute
-            evaluation_periods=2,
-            comparison_operator=cloudwatch.ComparisonOperator.GREATER_THAN_THRESHOLD
-        )
-        
-        # Add SNS actions to alarms (optional)
-        error_rate_alarm.add_alarm_action(cw_actions.SnsAction(alert_topic))
-        latency_alarm.add_alarm_action(cw_actions.SnsAction(alert_topic))
-        throttle_alarm.add_alarm_action(cw_actions.SnsAction(alert_topic))
-        
-        # Store references for outputs
-        self.alert_topic = alert_topic
-        self.error_rate_alarm = error_rate_alarm
-        self.latency_alarm = latency_alarm
-        self.throttle_alarm = throttle_alarm
+
+
 
     def _add_outputs(self) -> None:
         """
@@ -327,27 +159,7 @@ class OscarApiGatewayStack(Stack):
         )
         
         CfnOutput(
-            self, "SlackInteractiveUrl",
-            value=f"{self.api.url}slack/interactive", 
-            description="URL for Slack Interactive Components webhook"
-        )
-        
-        CfnOutput(
             self, "ApiGatewayId",
             value=self.api.rest_api_id,
             description="ID of the API Gateway"
         )
-        
-        CfnOutput(
-            self, "ApiGatewayLogGroupName",
-            value=self.log_group.log_group_name,
-            description="Name of the API Gateway CloudWatch log group"
-        )
-        
-        # Add monitoring outputs
-        if hasattr(self, 'alert_topic'):
-            CfnOutput(
-                self, "AlertTopicArn",
-                value=self.alert_topic.topic_arn,
-                description="ARN of the SNS topic for API Gateway alerts"
-            )

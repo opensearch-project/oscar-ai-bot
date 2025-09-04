@@ -1,0 +1,34 @@
+{
+  "resource": "/slack/events",
+  "path": "/slack/events",
+  "httpMethod": "POST",
+  "headers": {
+    "Content-Type": "application/json"
+  },
+  "multiValueHeaders": {},
+  "queryStringParameters": null,
+  "multiValueQueryStringParameters": null,
+  "pathParameters": null,
+  "stageVariables": null,
+  "requestContext": {
+    "resourceId": "ut7s13",
+    "resourcePath": "/slack/events",
+    "httpMethod": "POST",
+    "extendedRequestId": "test",
+    "requestTime": "03/Sep/2025:15:00:00 +0000",
+    "path": "/prod/slack/events",
+    "accountId": "395380602281",
+    "protocol": "HTTP/1.1",
+    "stage": "prod",
+    "domainPrefix": "ggjmr44j4i",
+    "requestTimeEpoch": 1725379200000,
+    "requestId": "test-request-id",
+    "identity": {
+      "sourceIp": "127.0.0.1"
+    },
+    "domainName": "ggjmr44j4i.execute-api.us-east-1.amazonaws.com",
+    "apiId": "ggjmr44j4i"
+  },
+  "body": "{\"type\": \"url_verification\", \"challenge\": \"test_challenge_123\"}",
+  "isBase64Encoded": false
+}

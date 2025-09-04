@@ -1,0 +1,159 @@
+#!/bin/bash
+
+# Update .env file with CDK-deployed resource IDs
+# This script extracts resource IDs from deployed CDK stacks and updates the .env file
+
+set -e
+
+# Configuration
+AWS_REGION="us-east-1"
+CDK_DIR="cdk"
+ENV_FILE="$CDK_DIR/.env"
+
+# Colors for output
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+NC='\033[0m' # No Color
+
+# Logging functions
+log_info() {
+    echo -e "${BLUE}[INFO]${NC} $1"
+}
+
+log_success() {
+    echo -e "${GREEN}[SUCCESS]${NC} $1"
+}
+
+log_warning() {
+    echo -e "${YELLOW}[WARNING]${NC} $1"
+}
+
+log_error() {
+    echo -e "${RED}[ERROR]${NC} $1"
+}
+
+# Update environment variable in .env file
+update_env_var() {
+    local var_name=$1
+    local var_value=$2
+    
+    if [[ -z "$var_value" ]]; then
+        log_warning "Empty value for $var_name, skipping..."
+        return 0
+    fi
+    
+    # Create backup
+    cp "$ENV_FILE" "${ENV_FILE}.bak"
+    
+    # Update or add the variable
+    if grep -q "^${var_name}=" "$ENV_FILE"; then
+        # Variable exists, update it
+        sed -i.tmp "s|^${var_name}=.*|${var_name}=${var_value}|" "$ENV_FILE"
+        rm -f "${ENV_FILE}.tmp"
+        log_info "Updated $var_name=$var_value"
+    else
+        # Variable doesn't exist, add it
+        echo "${var_name}=${var_value}" >> "$ENV_FILE"
+        log_info "Added $var_name=$var_value"
+    fi
+}
+
+# Get CDK stack output
+get_stack_output() {
+    local stack_name=$1
+    local output_key=$2
+    
+    aws cloudformation describe-stacks \
+        --region "$AWS_REGION" \
+        --stack-name "$stack_name" \
+        --query "Stacks[0].Outputs[?OutputKey=='$output_key'].OutputValue" \
+        --output text 2>/dev/null || echo ""
+}
+
+# Get Lambda function ARN
+get_lambda_arn() {
+    local function_name=$1
+    
+    aws lambda get-function \
+        --region "$AWS_REGION" \
+        --function-name "$function_name" \
+        --query "Configuration.FunctionArn" \
+        --output text 2>/dev/null || echo ""
+}
+
+# Get DynamoDB table name
+get_table_name() {
+    local table_pattern=$1
+    
+    aws dynamodb list-tables \
+        --region "$AWS_REGION" \
+        --query "TableNames[?contains(@, '$table_pattern')]" \
+        --output text 2>/dev/null || echo ""
+}
+
+# Get API Gateway URL
+get_api_gateway_url() {
+    local api_id=$(get_stack_output "OscarApiGatewayStack" "ApiGatewayId")
+    if [[ -n "$api_id" ]]; then
+        echo "https://${api_id}.execute-api.${AWS_REGION}.amazonaws.com/prod"
+    fi
+}
+
+# Main function
+main() {
+    log_info "🔄 Updating .env file with CDK-deployed resource IDs..."
+    log_info "====================================================="
+    
+    if [[ ! -f "$ENV_FILE" ]]; then
+        log_error ".env file not found: $ENV_FILE"
+        exit 1
+    fi
+    
+    # Update Lambda function ARNs
+    log_info "Updating Lambda function ARNs..."
+    update_env_var "MAIN_LAMBDA_ARN" "$(get_lambda_arn 'oscar-supervisor-agent-cdk')"
+    update_env_var "COMMUNICATION_LAMBDA_ARN" "$(get_lambda_arn 'oscar-communication-handler-cdk')"
+    update_env_var "JENKINS_LAMBDA_ARN" "$(get_lambda_arn 'oscar-jenkins-agent-cdk')"
+    update_env_var "BUILD_METRICS_LAMBDA_ARN" "$(get_lambda_arn 'oscar-build-metrics-agent-cdk')"
+    update_env_var "TEST_METRICS_LAMBDA_ARN" "$(get_lambda_arn 'oscar-test-metrics-agent-cdk')"
+    update_env_var "RELEASE_METRICS_LAMBDA_ARN" "$(get_lambda_arn 'oscar-release-metrics-agent-cdk')"
+    
+    # Update DynamoDB table names
+    log_info "Updating DynamoDB table names..."
+    local context_table=$(get_table_name "oscar-agent-context")
+    if [[ -n "$context_table" ]]; then
+        update_env_var "CONTEXT_TABLE_NAME" "$context_table"
+    fi
+    
+    # Update API Gateway URL
+    log_info "Updating API Gateway URL..."
+    local api_url=$(get_api_gateway_url)
+    if [[ -n "$api_url" ]]; then
+        update_env_var "API_GATEWAY_URL" "$api_url"
+        update_env_var "SLACK_EVENTS_URL" "${api_url}/slack/events"
+    fi
+    
+    # Update Secrets Manager secret name
+    log_info "Updating Secrets Manager secret name..."
+    local secret_arn=$(get_stack_output "OscarSecretsStack" "CentralEnvSecretArn")
+    if [[ -n "$secret_arn" ]]; then
+        local secret_name=$(echo "$secret_arn" | sed 's|.*:secret:\([^:]*\).*|\1|')
+        update_env_var "CENTRAL_SECRET_NAME" "$secret_name"
+    fi
+    
+    # Update IAM role ARNs
+    log_info "Updating IAM role ARNs..."
+    update_env_var "LAMBDA_EXECUTION_ROLE_ARN" "$(get_stack_output 'OscarPermissionsStack' 'LambdaExecutionRoleBaseArn')"
+    update_env_var "BEDROCK_AGENT_ROLE_ARN" "$(get_stack_output 'OscarPermissionsStack' 'BedrockAgentRoleArn')"
+    
+    # Clean up backup if everything succeeded
+    rm -f "${ENV_FILE}.bak"
+    
+    log_success "✅ .env file updated with all CDK resource IDs!"
+    log_info "📁 Updated file: $ENV_FILE"
+}
+
+# Run main function
+main "$@"

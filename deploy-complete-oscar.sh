@@ -54,14 +54,29 @@ fi
 export CDK_DEFAULT_ACCOUNT=$AWS_ACCOUNT_ID
 export CDK_DEFAULT_REGION=$AWS_DEFAULT_REGION
 
+# Lambda code will be deployed directly from source directories
+
 log_info "Deploying CDK stacks in correct order..."
 
 # Deploy in dependency order (Secrets Manager will be deployed LAST)
 log_info "Deploying Permissions stack..."
+# Check if roles exist and handle drift
+if ! aws iam get-role --role-name oscar-lambda-execution-role-cdk >/dev/null 2>&1; then
+    log_warning "IAM roles missing - checking for stack drift..."
+    if aws cloudformation describe-stacks --stack-name OscarPermissionsStack >/dev/null 2>&1; then
+        log_info "Permissions stack exists but roles are missing - deleting and recreating..."
+        aws cloudformation delete-stack --stack-name OscarPermissionsStack
+        log_info "Waiting for stack deletion..."
+        aws cloudformation wait stack-delete-complete --stack-name OscarPermissionsStack
+    fi
+fi
 cdk deploy OscarPermissionsStack --require-approval never
 
 log_info "Deploying Storage stack..."
 cdk deploy OscarStorageStack --require-approval never
+
+log_info "Preparing Lambda assets with dependencies..."
+./prepare_lambda_assets.sh
 
 log_info "Deploying Lambda stack..."
 cdk deploy OscarLambdaStack --require-approval never
@@ -75,6 +90,12 @@ cd ..
 
 # Step 2: Update Lambda ARNs in agent configurations
 log_info "📝 Step 2: Updating Lambda ARNs in agent configurations"
+log_info "Lambda functions have been deployed, now updating agent configurations with their ARNs"
+
+# Wait for Lambda functions to be fully active
+log_info "Waiting for Lambda functions to be active..."
+sleep 10
+
 ./update-lambda-arns.sh
 
 log_success "✅ Lambda ARNs updated in agent configurations"
@@ -87,20 +108,36 @@ log_info "Using proven manual deployment logic with proper wait times and collab
 
 log_success "✅ All agents deployed successfully with proper collaborator relationships!"
 
-# Step 4: Deploy Secrets Manager with all resource IDs (LAST)
-log_info "🔐 Step 4: Deploying Secrets Manager with all resource IDs"
+# Step 4: Update .env file with all CDK resource IDs
+log_info "📝 Step 4: Updating .env file with CDK resource IDs"
+log_info "This ensures all deployed resource IDs are captured before Secrets Manager deployment"
+
+./update-cdk-env.sh
+
+log_success "✅ .env file updated with all CDK resource IDs!"
+
+# Step 5: Deploy Secrets Manager with all resource IDs (LAST)
+log_info "🔐 Step 5: Deploying Secrets Manager with all resource IDs"
 log_info "This is deployed LAST because it needs all agent IDs and resource ARNs"
 
 cd cdk
-log_info "Deploying Secrets Manager stack with complete resource inventory..."
+log_info "Deploying Secrets Manager stack..."
 cdk deploy OscarSecretsStack --require-approval never
 
-log_success "✅ Secrets Manager deployed with all resource IDs!"
+log_success "✅ Secrets Manager stack deployed!"
 
 cd ..
 
-# Step 5: Final verification
-log_info "🔍 Step 5: Final Integration Verification"
+# Step 6: Update Secrets Manager with complete .env content
+log_info "📝 Step 6: Updating Secrets Manager with complete .env content"
+log_info "This populates the secret with all environment variables from the .env file"
+
+./update-secret-with-env.sh
+
+log_success "✅ Secrets Manager updated with complete environment configuration!"
+
+# Step 7: Final verification
+log_info "🔍 Step 7: Final Integration Verification"
 
 log_info "Verifying deployed resources..."
 
