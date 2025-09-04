@@ -266,7 +266,6 @@ class OscarAgentsStack(Stack):
         # Map action group names to Lambda function keys
         action_group_mappings = {
             "communication-orchestration": "communication_handler",
-            "oscar-enhanced-routing-v2": "main_agent", 
             "jenkins-operations": "jenkins_agent",
             "jenkins_operations": "jenkins_agent",
             "integration_test_action_group": "metrics_test_metrics",

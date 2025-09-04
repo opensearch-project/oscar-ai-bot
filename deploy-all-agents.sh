@@ -188,11 +188,7 @@ update_lambda_arns() {
             
             # Update action groups configuration (for privileged agent with multiple action groups)
             if [[ -f "agent-configs/$agent_type/action-groups.json" ]]; then
-                # Update supervisor Lambda ARN
-                jq --arg arn "$lambda_arn" \
-                   '(.[] | select(.actionGroupName == "oscar-enhanced-routing-v2") | .actionGroupExecutor | select(.lambda == "PLACEHOLDER_SUPERVISOR_LAMBDA_ARN") | .lambda) = $arn' \
-                   "agent-configs/$agent_type/action-groups.json" > "agent-configs/$agent_type/action-groups.json.tmp" && \
-                   mv "agent-configs/$agent_type/action-groups.json.tmp" "agent-configs/$agent_type/action-groups.json"
+                # No supervisor Lambda ARN updates needed - oscar-enhanced-routing-v2 removed
                 log_success "Updated routing action group Lambda ARN for $agent_type"
             fi
         else
@@ -486,12 +482,7 @@ deploy_agent() {
                     log_warning "Skipping $action_group_name - Lambda function $comm_lambda not found"
                     should_create=false
                 fi
-            elif [[ "$action_group_name" == "oscar-enhanced-routing-v2" ]]; then
-                local lambda_function=$(jq -r --arg type "$agent_type" '.agents[$type].lambda_function' "$CONFIG_FILE")
-                if [[ "$lambda_function" != "null" ]] && ! check_lambda_exists "$lambda_function"; then
-                    log_warning "Skipping $action_group_name - Lambda function $lambda_function not found"
-                    should_create=false
-                fi
+            # oscar-enhanced-routing-v2 action group removed - no longer needed
             fi
             
             if [[ "$should_create" == "true" ]]; then
