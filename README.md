@@ -1,312 +1,284 @@
-# OSCAR Agent Deployment System
+# OSCAR - OpenSearch Conversational AI Release Assistant
 
-This directory contains a comprehensive, dependency-aware deployment system for all OSCAR agents using AWS CLI commands with JSON-based configurations.
+OSCAR is a comprehensive AI-powered assistant system built on AWS Bedrock that helps manage OpenSearch releases, Jenkins operations, and metrics queries through Slack integration.
 
-## 🏗️ System Overview
+## 🏗️ Architecture Overview
 
-The deployment system handles:
-- **6 Agent Types**: Jenkins, Build Metrics, Test Metrics, Release Metrics, OSCAR Limited, OSCAR Privileged
-- **Dependency Management**: Automatic Lambda ARN updates and collaborator linking
-- **Knowledge Base Integration**: Automatic association with OpenSearch documentation
-- **Deployment Order**: Ensures dependencies are deployed before dependent agents
-- **Update Capabilities**: Scripts to update existing agents when dependencies change
+OSCAR consists of multiple specialized AI agents working together:
 
-## 📁 Directory Structure
+- **OSCAR Privileged Agent**: Full access supervisor with advanced capabilities
+- **OSCAR Limited Agent**: Restricted access agent for basic operations  
+- **Jenkins Agent**: Handles Jenkins CI/CD operations
+- **Metrics Agents**: Query OpenSearch metrics (Test, Build, Release)
+- **Communication Handler**: Manages Slack integration and routing
 
-```
-├── agent-configs/                    # Agent configuration directories
-│   ├── jenkins/                     # Jenkins agent configs
-│   ├── build-metrics/               # Build metrics agent configs
-│   ├── test-metrics/                # Test metrics agent configs
-│   ├── release-metrics/             # Release metrics agent configs
-│   ├── oscar-limited/               # OSCAR limited supervisor configs
-│   └── oscar-privileged/            # OSCAR privileged supervisor configs
-├── deployment-config.json           # Master deployment configuration
-├── deploy-all-agents.sh            # Main deployment script
-├── update-agent-dependencies.sh    # Update existing agent dependencies
-├── update-knowledge-bases.sh       # Update knowledge base associations
-├── validate-deployment.sh          # Pre-deployment validation
-└── test_oscar_limited_agent.sh     # Testing script
-```
-
-## 🚀 Quick Start
-
-### Fresh Account Deployment
-
-1. **Validate deployment readiness**:
-   ```bash
-   ./validate-deployment.sh
-   ```
-   This checks:
-   - Configuration file syntax
-   - IAM roles existence
-   - Lambda functions availability
-   - Knowledge base accessibility
-   - Collaborator placeholder setup
-
-2. **Deploy all agents**:
-   ```bash
-   ./deploy-all-agents.sh
-   ```
-   This will:
-   - Deploy agents in dependency order
-   - Update Lambda ARNs automatically
-   - Replace collaborator placeholders with actual agent IDs
-   - Link collaborators correctly
-   - Associate knowledge bases
-   - Create aliases for all agents
-   - Save agent IDs for future updates
-
-### Existing Account Updates
-
-1. **Update Dependencies** (when Lambda functions change):
-   ```bash
-   ./update-agent-dependencies.sh oscar-limited
-   ./update-agent-dependencies.sh oscar-privileged
-   ```
-
-2. **Update Knowledge Bases**:
-```bash
-# Update specific agent
-./update-knowledge-bases.sh update-agent oscar-limited
-
-# Update all agents with knowledge bases
-./update-knowledge-bases.sh update-all
-
-# Update knowledge base ID in configuration
-./update-knowledge-bases.sh update-config opensearch-docs NEW_KB_ID
-```
-
-## 🔧 Agent Configurations
-
-### Jenkins Agent
-- **Name**: `jenkins-agent-cdk-created`
-- **Lambda**: `oscar-jenkins-agent-cdk-created`
-- **Functions**: `get_job_info`, `list_jobs`, `trigger_job`
-- **Purpose**: Jenkins job operations with security confirmation workflow
-
-### Build Metrics Agent
-- **Name**: `build-metrics-agent-cdk-created`
-- **Lambda**: `oscar-build-metrics-agent-cdk-created`
-- **Functions**: `get_build_metrics`, `resolve_components_from_builds`
-- **Purpose**: Distribution build analysis and component build performance
-
-### Test Metrics Agent
-- **Name**: `integration-test-agent-cdk-created`
-- **Lambda**: `oscar-test-metrics-agent-cdk-created`
-- **Functions**: `get_integration_test_metrics`, `get_rc_build_mapping`
-- **Purpose**: Integration test failure analysis and RC-based queries
-
-### Release Metrics Agent
-- **Name**: `release-metrics-agent-cdk-created`
-- **Lambda**: `oscar-release-metrics-agent-cdk-created`
-- **Functions**: `get_release_metrics`
-- **Purpose**: Release readiness analysis and component release status
-
-### OSCAR Limited Supervisor
-- **Name**: `oscar-supervisor-agent-limited-cdk-created`
-- **Lambda**: `oscar-supervisor-agent-cdk-created`
-- **Functions**: `process_oscar_query`
-- **Collaborators**: Build, Test, Release Metrics agents
-- **Knowledge Base**: OpenSearch documentation
-- **Limitations**: No communication or Jenkins features
-
-### OSCAR Privileged Supervisor
-- **Name**: `oscar-supervisor-agent-privileged-cdk-created`
-- **Lambdas**: 
-  - `oscar-supervisor-agent-cdk-created` (routing)
-  - `oscar-communication-handler-cdk-created` (messaging)
-- **Functions**: `process_oscar_query`, `send_automated_message`
-- **Collaborators**: Jenkins, Build, Test, Release Metrics agents
-- **Knowledge Base**: OpenSearch documentation
-- **Features**: Full communication and Jenkins capabilities
-
-## 🔄 Dependency Management
-
-### Automatic Updates
-The system automatically handles:
-- **Lambda ARN Updates**: When new Lambda functions are deployed
-- **Collaborator Linking**: When dependent agents are created/updated
-- **Knowledge Base Association**: When knowledge bases are created/changed
-
-### Deployment Order
-```
-1. jenkins-agent
-2. build-metrics-agent  
-3. test-metrics-agent
-4. release-metrics-agent
-5. oscar-limited-supervisor (depends on metrics agents)
-6. oscar-privileged-supervisor (depends on all agents)
-```
-
-### Configuration Files
-Each agent has:
-- **`agent-config.json`**: Main agent configuration (name, model, instructions)
-- **`action-group.json`** or **`action-groups.json`**: Function schemas and Lambda ARNs
-- **`knowledge-base.json`**: Knowledge base associations (if applicable)
-- **`collaborators.json`**: Collaborator configurations (if applicable)
-
-## 📊 Tracking and State Management
-
-### Agent IDs File
-The system maintains `deployed-agent-ids.json` with:
-```json
-{
-  "jenkins": {
-    "agent_id": "PN1WKOJ0U7",
-    "alias_id": "MPGKGSVQZO"
-  },
-  "oscar-limited": {
-    "agent_id": "DKGVSQJG3D", 
-    "alias_id": "QMKM8LNJKC"
-  }
-}
-```
-
-### Master Configuration
-`deployment-config.json` defines:
-- Agent dependencies and deployment order
-- Lambda function mappings
-- Knowledge base configurations
-- Collaborator relationships
-
-## 🧪 Testing and Validation
-
-### Pre-Deployment Validation
-```bash
-./validate-deployment.sh
-```
-Validates:
-- Configuration file syntax and structure
-- IAM role existence (`oscar-bedrock-agent-execution-role-cdk`)
-- Lambda function availability
-- Knowledge base accessibility
-- Collaborator placeholder configuration
-
-### Component-Specific Validation
-```bash
-./validate-deployment.sh lambda      # Check Lambda functions only
-./validate-deployment.sh iam         # Check IAM roles only
-./validate-deployment.sh kb          # Check knowledge bases only
-./validate-deployment.sh config      # Check configuration files only
-```
-
-### Test Individual Agent
-```bash
-./test_oscar_limited_agent.sh
-# Enter agent ID and alias ID when prompted
-```
-
-### Agent Testing Validation
-The test script validates:
-1. Basic agent functionality
-2. Knowledge base integration
-3. Limitation responses (for limited agent)
-4. Function schema correctness
-
-## 🔧 Advanced Usage
-
-### Redeploy Specific Agent
-```bash
-# The script will prompt for confirmation if agent exists
-./deploy-all-agents.sh
-# Choose 'y' when asked about redeploying existing agents
-```
-
-### Update Only Lambda ARNs
-```bash
-./update-agent-dependencies.sh oscar-privileged
-```
-
-### Add New Knowledge Base
-1. Update `deployment-config.json`:
-```json
-"knowledge_bases": {
-  "new-kb": {
-    "id": "NEW_KB_ID",
-    "name": "New Knowledge Base"
-  }
-}
-```
-
-2. Update agent configuration:
-```json
-"knowledge_bases": ["opensearch-docs", "new-kb"]
-```
-
-3. Run update:
-```bash
-./update-knowledge-bases.sh update-all
-```
-
-## 🏗️ Fresh Account Deployment Requirements
+## 🚀 Quick Start Deployment
 
 ### Prerequisites
-Before deploying to a fresh AWS account, ensure:
 
-1. **IAM Role**: Create `oscar-bedrock-agent-execution-role-cdk` with:
-   - Bedrock agent permissions
-   - Lambda invoke permissions
-   - Knowledge base access permissions
+Before deploying OSCAR, ensure you have:
 
-2. **Lambda Functions**: Deploy all required Lambda functions:
-   - `oscar-jenkins-agent-cdk`
-   - `oscar-build-metrics-agent-cdk`
-   - `oscar-test-metrics-agent-cdk`
-   - `oscar-release-metrics-agent-cdk`
-   - `oscar-supervisor-agent-cdk`
-   - `oscar-communication-handler-cdk`
+1. **AWS CLI configured** with appropriate permissions
+2. **CDK installed** (`npm install -g aws-cdk`)
+3. **Python 3.12+** with pip
+4. **Node.js 18+** for CDK
+5. **Pre-existing AWS resources**:
+   - VPC with subnets and security groups
+   - Knowledge Base in AWS Bedrock
+   - Cross-account OpenSearch access role (for metrics)
 
-3. **Knowledge Bases**: Create OpenSearch documentation knowledge base
-   - Update `deployment-config.json` with correct knowledge base ID
+### Step 1: Configure Environment
 
-### Collaborator Placeholder System
-The system uses placeholder values for fresh deployments:
-- `PLACEHOLDER_JENKINS_AGENT_ID`
-- `PLACEHOLDER_BUILD_METRICS_AGENT_ID`
-- `PLACEHOLDER_TEST_METRICS_AGENT_ID`
-- `PLACEHOLDER_RELEASE_METRICS_AGENT_ID`
+1. **Update `cdk/.env`** with your AWS resources:
 
-These are automatically replaced with actual agent IDs during deployment.
+```bash
+# Required Pre-existing Resources
+AWS_ACCOUNT_ID=your-account-id
+AWS_REGION=us-east-1
+VPC_ID=vpc-xxxxxxxxx
+SUBNET_IDS=subnet-xxx,subnet-yyy,subnet-zzz
+SECURITY_GROUP_ID=sg-xxxxxxxxx
+KNOWLEDGE_BASE_ID=your-kb-id
+OSCAR_METRICS_LAMBDA_VPC_ROLE_ARN=arn:aws:iam::account:role/role-name
 
-### Deployment Behavior
-- **Fresh Account**: Creates new agents with placeholder replacement
-- **Existing Account**: Updates existing agents and maintains relationships
-- **Mixed State**: Handles partial deployments gracefully
+# Slack Configuration
+SLACK_BOT_TOKEN=xoxb-your-token
+SLACK_SIGNING_SECRET=your-signing-secret
+CHANNEL_ALLOW_LIST=C1234567890
 
-## 🚨 Important Notes
+# Authorization
+DM_AUTHORIZED_USERS=U1234567890
+FULLY_AUTHORIZED_USERS=U1234567890
+```
 
-### Security Features
-- **Jenkins Agent**: Requires explicit user confirmation for all job executions
-- **Communication**: Privileged agent requires confirmation for message sending
-- **Limited Agent**: Explicitly blocks communication and Jenkins features
+### Step 2: Deploy Everything
 
-### Lambda Function Naming
-All Lambda functions must follow the pattern: `*-cdk` suffix for proper identification and updates.
+Run the complete deployment script:
 
-### Error Handling
-- Scripts validate Lambda function existence before updates
-- Dependency checks ensure proper deployment order
-- Rollback capabilities through agent ID tracking
+```bash
+./deploy-complete-oscar.sh
+```
 
-### Best Practices
-1. Always run `deploy-all-agents.sh` for initial deployment
-2. Use update scripts for incremental changes
-3. Test agents after updates
-4. Keep `deployed-agent-ids.json` backed up
-5. Review configurations before deployment
+This single command will:
+1. Deploy all CDK infrastructure stacks
+2. Create and configure Bedrock agents
+3. Update environment variables dynamically
+4. Configure all permissions
+5. Verify the deployment
 
-## 📝 Troubleshooting
+## 📋 What the Complete Deployment Script Does
+
+The `deploy-complete-oscar.sh` script orchestrates the entire OSCAR deployment in the correct order:
+
+### Phase 1: Infrastructure Deployment
+- **Permissions Stack**: Creates IAM roles and policies
+- **Storage Stack**: Creates DynamoDB tables for context and sessions
+- **Lambda Stack**: Deploys all Lambda functions with dependencies
+- **API Gateway Stack**: Creates REST API for Slack integration
+
+### Phase 2: Agent Configuration
+- **Lambda ARN Updates**: Updates agent configs with deployed Lambda ARNs
+- **Agent Deployment**: Creates all Bedrock agents with proper collaborator relationships
+- **Resource Capture**: Updates `.env` with all created resource IDs
+
+### Phase 3: Final Configuration
+- **Secrets Manager**: Deploys and populates with environment variables
+- **Permissions Fixing**: Applies comprehensive IAM and resource-based policies
+- **Verification**: Confirms all components are working
+
+## 🔧 Dynamic Resource Management
+
+OSCAR uses a **single source of truth** approach where `cdk/.env` contains all resource configurations:
+
+### Resource Flow
+1. **Pre-deployment**: Required resources configured in `.env`
+2. **CDK Deployment**: Creates infrastructure, outputs resource IDs
+3. **Resource Capture**: `update-cdk-env.sh` captures all created resources
+4. **Agent Deployment**: Uses captured Lambda ARNs for action groups
+5. **Permissions Update**: `oscar-permissions-fixer.sh` uses dynamic values
+
+### Key Dynamic Resources
+- Lambda Function ARNs and Names
+- DynamoDB Table Names and ARNs  
+- API Gateway URLs and IDs
+- IAM Role Names and ARNs
+- Secrets Manager Names
+- Agent IDs and Aliases
+
+## 📁 Project Structure
+
+```
+OSCAR/
+├── cdk/                          # CDK Infrastructure
+│   ├── .env                      # Main configuration file
+│   ├── app.py                    # CDK app entry point
+│   ├── stacks/                   # CDK stack definitions
+│   ├── lambda/                   # Lambda function source code
+│   └── agents/                   # Bedrock agent configurations
+├── oscar-agent/                  # Main supervisor agent code
+├── jenkins/                      # Jenkins agent code  
+├── metrics/                      # Metrics agents code
+├── agent-configs/                # Agent configuration files
+├── tests/                        # Test files
+├── deploy-complete-oscar.sh      # Main deployment script
+├── deploy-all-agents.sh          # Agent deployment logic
+├── oscar-permissions-fixer.sh    # Comprehensive permissions fixer
+├── update-cdk-env.sh            # Resource ID capture script
+└── update-lambda-arns.sh        # Lambda ARN update script
+```
+
+## 🔐 Security & Permissions
+
+OSCAR implements comprehensive security with multiple layers:
+
+### Identity-Based Policies (IAM Roles)
+- **Supervisor Agent**: Bedrock agents, DynamoDB, Lambda invocation
+- **Communication Handler**: Bedrock agents, DynamoDB, CloudWatch
+- **Metrics Agents**: Cross-account OpenSearch, Secrets Manager
+- **Jenkins Agent**: Bedrock agents, CloudWatch
+
+### Resource-Based Policies
+- **Lambda Functions**: Allow Bedrock agent invocation
+- **Bedrock Agents**: Allow Lambda role access
+- **DynamoDB Tables**: Scoped access per agent type
+
+### Authorization Levels
+- **Fully Authorized Users**: Complete OSCAR access
+- **DM Authorized Users**: Direct message capabilities
+- **Channel Allow List**: Restricted channel access
+
+## 🛠️ Key Scripts Explained
+
+### `deploy-complete-oscar.sh`
+The master deployment script that orchestrates everything:
+- Validates prerequisites
+- Deploys infrastructure in dependency order
+- Configures agents with proper relationships
+- Applies all necessary permissions
+- Verifies deployment success
+
+### `oscar-permissions-fixer.sh`
+Comprehensive permissions management:
+- **Dynamic Configuration**: Reads all values from `.env`
+- **Identity-Based Policies**: Updates IAM role policies
+- **Resource-Based Policies**: Configures Lambda and Bedrock permissions
+- **Cross-Account Access**: Handles OpenSearch metrics permissions
+
+### `update-cdk-env.sh`
+Resource capture and propagation:
+- Extracts resource IDs from deployed CDK stacks
+- Updates `.env` with Lambda ARNs, table names, API Gateway URLs
+- Captures agent IDs from deployment files
+- Maintains single source of truth
+
+## 🔄 Agent Collaboration System
+
+OSCAR agents work together through a sophisticated collaboration system:
+
+### Supervisor Agents
+- **OSCAR Privileged**: Full system access, can invoke all agents
+- **OSCAR Limited**: Restricted access, basic operations only
+
+### Specialist Agents  
+- **Jenkins Agent**: CI/CD pipeline management
+- **Test Metrics Agent**: Integration test results
+- **Build Metrics Agent**: Build pipeline metrics
+- **Release Metrics Agent**: Release-specific metrics
+
+### Collaboration Flow
+1. User sends message to Slack
+2. Communication Handler routes to appropriate supervisor
+3. Supervisor determines required specialist agents
+4. Specialist agents execute specific tasks
+5. Results aggregated and returned to user
+
+## 🧪 Testing & Verification
+
+After deployment, verify OSCAR functionality:
+
+### 1. Check Deployed Resources
+```bash
+# List agents
+aws bedrock-agent list-agents --query "agentSummaries[?contains(agentName, 'oscar')]"
+
+# List Lambda functions  
+aws lambda list-functions --query "Functions[?contains(FunctionName, 'oscar')]"
+```
+
+### 2. Test Slack Integration
+- Send a direct message to the OSCAR bot
+- Try basic queries like "Hello" or "What can you do?"
+- Test metrics queries: "What are the test results for version 3.2.0?"
+
+### 3. Verify Permissions
+- Check IAM role policies are applied
+- Verify Lambda function resource policies
+- Confirm agent collaboration works
+
+## 🚨 Troubleshooting
 
 ### Common Issues
-1. **Lambda not found**: Ensure Lambda functions are deployed with correct names
-2. **Permission errors**: Verify IAM roles have proper Bedrock permissions
-3. **Dependency errors**: Check deployment order in `deployment-config.json`
-4. **Knowledge base errors**: Verify knowledge base IDs are correct
 
-### Recovery
-If deployment fails:
-1. Check `deployed-agent-ids.json` for partial deployments
-2. Use update scripts to fix specific issues
-3. Redeploy individual agents if needed
-4. Clean up failed agents manually if necessary
+**Deployment Fails**
+- Check AWS credentials and permissions
+- Verify pre-existing resources exist
+- Review CloudFormation stack events
+
+**Agent Creation Fails**
+- Ensure Lambda functions are deployed first
+- Check IAM role permissions
+- Verify knowledge base access
+
+**Permissions Issues**
+- Run `oscar-permissions-fixer.sh` manually
+- Check resource-based policies on Lambda functions
+- Verify cross-account role assumptions
+
+**Slack Integration Issues**
+- Verify API Gateway URL is correct
+- Check Slack app configuration
+- Review CloudWatch logs for errors
+
+### Log Locations
+- **Lambda Logs**: CloudWatch `/aws/lambda/oscar-*`
+- **CDK Deployment**: Local terminal output
+- **Agent Deployment**: `deployed-agent-ids.json`
+
+## 🔄 Updates & Maintenance
+
+### Updating Lambda Code
+```bash
+cd cdk
+./prepare_lambda_assets.sh
+cdk deploy OscarLambdaStack
+```
+
+### Adding New Agents
+1. Create agent configuration in `agent-configs/`
+2. Add to `deployment-config.json`
+3. Run `./deploy-all-agents.sh`
+4. Update permissions with `./oscar-permissions-fixer.sh`
+
+### Environment Changes
+1. Update `cdk/.env` with new values
+2. Run `./update-cdk-env.sh` to propagate changes
+3. Redeploy affected stacks as needed
+
+## 📞 Support
+
+For issues or questions:
+1. Check CloudWatch logs for error details
+2. Review deployment script output
+3. Verify all prerequisites are met
+4. Check AWS service limits and quotas
+
+## 🎯 Next Steps
+
+After successful deployment:
+1. **Test Core Functionality**: Verify all agents respond correctly
+2. **Configure Monitoring**: Set up CloudWatch alarms and dashboards  
+3. **Train Users**: Provide Slack usage guidelines
+4. **Customize Agents**: Adjust agent instructions for your use case
+5. **Scale Resources**: Monitor usage and adjust Lambda memory/timeout as needed
+
+OSCAR is now ready to assist with your OpenSearch release management! 🚀

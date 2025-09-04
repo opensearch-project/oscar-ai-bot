@@ -1,117 +1,124 @@
-# OSCAR CDK Deployment
+# OSCAR CDK Infrastructure
 
-This directory contains the AWS Cloud Development Kit (CDK) code for deploying the complete OSCAR infrastructure.
+This directory contains the AWS CDK infrastructure code for OSCAR (OpenSearch Conversational AI Release Assistant).
 
-## Architecture
+## 🏗️ Infrastructure Components
 
-The CDK deployment creates a modular, serverless architecture with the following components:
+The CDK deploys:
+- **Lambda Functions**: All OSCAR agent implementations
+- **DynamoDB Tables**: Session and context management
+- **IAM Roles & Policies**: Security and permissions
+- **API Gateway**: Slack integration endpoint
+- **Secrets Manager**: Centralized configuration
 
-### Core Infrastructure
-- **Permissions Stack**: IAM roles and policies with least-privilege access
-- **Secrets Stack**: AWS Secrets Manager for secure configuration
-- **Storage Stack**: DynamoDB tables for session and context data
-- **VPC Stack**: Optional VPC configuration for Lambda functions
-- **API Gateway Stack**: HTTP endpoints for Slack integration
-- **Knowledge Base Stack**: Bedrock Knowledge Base for document retrieval
-- **Lambda Stack**: All Lambda functions for OSCAR operations
-- **Agents Stack**: Bedrock agents for AI-powered interactions
+## 📋 CDK Stacks
 
-## Quick Start
+| Stack | Purpose | Resources |
+|-------|---------|-----------|
+| `OscarPermissionsStack` | IAM roles and policies | Execution roles for Lambda and Bedrock |
+| `OscarStorageStack` | Data persistence | DynamoDB tables for sessions/context |
+| `OscarLambdaStack` | Compute functions | All Lambda functions with VPC config |
+| `OscarApiGatewayStack` | Slack integration | REST API with Lambda integration |
+| `OscarSecretsStack` | Configuration management | Secrets Manager for env variables |
 
-1. **Set up environment variables:**
-   ```bash
-   export CDK_DEFAULT_ACCOUNT=your-account-id
-   export CDK_DEFAULT_REGION=us-east-1
-   export ENVIRONMENT=dev
-   ```
+## 🚀 Deployment
 
-2. **Deploy complete infrastructure:**
-   ```bash
-   python scripts/deploy_full_stack.py
-   ```
-
-3. **Validate deployment:**
-   ```bash
-   python scripts/validate_deployment.py
-   ```
-
-## Environment Configuration
-
-The deployment uses environment variables from the `.env` file:
-
-### Required Variables
-- `CDK_DEFAULT_ACCOUNT`: AWS account ID
-- `CDK_DEFAULT_REGION`: AWS region
-
-### Optional Variables
-- `ENVIRONMENT`: Deployment environment (dev/staging/prod)
-- `SESSIONS_TABLE_NAME`: DynamoDB sessions table name
-- `CONTEXT_TABLE_NAME`: DynamoDB context table name
-- `VPC_ID`: Existing VPC ID (if using VPC)
-- `USE_VPC`: Enable VPC deployment (true/false)
-
-## Stack Dependencies
-
-Stacks are deployed in the following order:
-1. **OscarPermissionsStack** - IAM roles and policies
-2. **OscarSecretsStack** - Secrets Manager configuration
-3. **OscarStorageStack** - DynamoDB tables
-4. **OscarVpcStack** - VPC configuration (optional)
-5. **OscarApiGatewayStack** - API Gateway endpoints
-6. **OscarKnowledgeBaseStack** - Bedrock Knowledge Base
-7. **OscarLambdaStack** - Lambda functions
-8. **OscarAgentsStack** - Bedrock agents
-
-## Deployment Scripts
-
-- **`scripts/deploy_full_stack.py`**: Deploy all stacks
-- **`scripts/deploy_lambda_stack.py`**: Deploy only Lambda stack
-- **`scripts/validate_deployment.py`**: Validate deployment
-- **`scripts/migrate_env_to_secrets.py`**: Migrate env vars to Secrets Manager
-
-See `scripts/README.md` for detailed script documentation.
-
-## Configuration Files
-
-- **`cdk.json`**: CDK app configuration
-- **`.env`**: Environment variables
-- **`requirements.txt`**: Python dependencies
-- **`agents/configs/`**: Bedrock agent configurations
-- **`knowledge_docs/`**: Knowledge base documents
-
-## Troubleshooting
-
-### Common Issues
-
-1. **Missing environment variables**: Ensure `CDK_DEFAULT_ACCOUNT` and `CDK_DEFAULT_REGION` are set
-2. **Permission errors**: Verify AWS credentials have necessary permissions
-3. **Stack dependencies**: Deploy stacks in the correct order using `deploy_full_stack.py`
-
-### Debugging
-
+**Use the main deployment script** (recommended):
 ```bash
-# Verbose deployment
-python scripts/deploy_full_stack.py --verbose
-
-# Check specific stack
-cdk deploy OscarLambdaStack --debug
-
-# Validate deployment
-python scripts/validate_deployment.py --verbose
+# From project root
+./deploy-complete-oscar.sh
 ```
 
-## Clean Up
+**Manual CDK deployment** (advanced):
+```bash
+cd cdk
+pip install -r requirements.txt
+cdk deploy --all --require-approval never
+```
 
-To remove all deployed resources:
+## ⚙️ Configuration
 
+### Required Environment Variables (`.env`)
+```bash
+# AWS Configuration
+AWS_ACCOUNT_ID=your-account-id
+AWS_REGION=us-east-1
+
+# Pre-existing Resources (REQUIRED)
+VPC_ID=vpc-xxxxxxxxx
+SUBNET_IDS=subnet-xxx,subnet-yyy
+SECURITY_GROUP_ID=sg-xxxxxxxxx
+KNOWLEDGE_BASE_ID=your-kb-id
+OSCAR_METRICS_LAMBDA_VPC_ROLE_ARN=arn:aws:iam::account:role/role-name
+
+# Slack Integration
+SLACK_BOT_TOKEN=xoxb-your-token
+SLACK_SIGNING_SECRET=your-signing-secret
+```
+
+### Dynamic Resources (Auto-populated)
+These are automatically captured during deployment:
+- Lambda function ARNs
+- DynamoDB table names
+- API Gateway URLs
+- IAM role ARNs
+- Agent IDs and aliases
+
+## 🔧 Key Files
+
+| File | Purpose |
+|------|---------|
+| `app.py` | CDK application entry point |
+| `.env` | Configuration and resource IDs |
+| `prepare_lambda_assets.sh` | Packages Lambda code with dependencies |
+| `stacks/` | CDK stack definitions |
+| `lambda/` | Lambda function source code |
+| `agents/` | Bedrock agent configurations |
+
+## 🛠️ Development Workflow
+
+1. **Modify Infrastructure**: Update stack files in `stacks/`
+2. **Test Changes**: `cdk diff StackName`
+3. **Deploy Changes**: `cdk deploy StackName`
+4. **Update Permissions**: Run `../oscar-permissions-fixer.sh`
+
+## 📊 Lambda Functions Deployed
+
+| Function | Purpose | VPC | Memory | Timeout |
+|----------|---------|-----|--------|---------|
+| `oscar-supervisor-agent-cdk` | Main OSCAR logic | No | 1024MB | 180s |
+| `oscar-communication-handler-cdk` | Slack integration | No | 512MB | 180s |
+| `oscar-jenkins-agent-cdk` | Jenkins operations | No | 512MB | 180s |
+| `oscar-*-metrics-agent-cdk` | Metrics queries | Yes | 512MB | 180s |
+
+## 🔐 Security Features
+
+- **Least Privilege**: Each Lambda has minimal required permissions
+- **VPC Isolation**: Metrics functions run in VPC for OpenSearch access
+- **Resource-Based Policies**: Lambda functions secured for Bedrock access
+- **Cross-Account Access**: Secure OpenSearch metrics access
+
+## 🧹 Cleanup
+
+**Remove all resources**:
 ```bash
 cdk destroy --all
 ```
 
-## Support
+**Note**: Some resources like S3 buckets may need manual cleanup if they contain data.
 
-For deployment issues:
-1. Check the logs for detailed error messages
-2. Verify prerequisites and dependencies
-3. Ensure AWS credentials are properly configured
-4. Review the script documentation
+## 📞 Troubleshooting
+
+**Common Issues**:
+- **Bootstrap Required**: Run `cdk bootstrap` if first deployment
+- **Permission Errors**: Ensure AWS credentials have CDK permissions
+- **VPC Resources**: Verify VPC, subnets, and security groups exist
+- **Lambda Packaging**: Run `prepare_lambda_assets.sh` if Lambda deployment fails
+
+**Useful Commands**:
+```bash
+cdk ls                    # List all stacks
+cdk diff                  # Show changes
+cdk synth                 # Generate CloudFormation
+cdk doctor                # Check CDK setup
+```
