@@ -37,12 +37,25 @@ else
 fi
 
 # Configuration from environment or defaults
-PRIVILEGED_AGENT_ID="${OSCAR_PRIVILEGED_BEDROCK_AGENT_ID:-MMJVHNFRAQ}"
-PRIVILEGED_AGENT_ALIAS="${OSCAR_PRIVILEGED_BEDROCK_AGENT_ALIAS_ID:-TEOZAGSWCV}"
-LIMITED_AGENT_ID="${OSCAR_LIMITED_BEDROCK_AGENT_ID:-TBB6FSCSJ2}"
-LIMITED_AGENT_ALIAS="${OSCAR_LIMITED_BEDROCK_AGENT_ALIAS_ID:-L5C80SCNBX}"
-ACCOUNT_ID="${AWS_ACCOUNT_ID:-395380602281}"
-REGION="${AWS_REGION:-us-east-1}"
+PRIVILEGED_AGENT_ID="${OSCAR_PRIVILEGED_BEDROCK_AGENT_ID}"
+PRIVILEGED_AGENT_ALIAS="${OSCAR_PRIVILEGED_BEDROCK_AGENT_ALIAS_ID}"
+LIMITED_AGENT_ID="${OSCAR_LIMITED_BEDROCK_AGENT_ID}"
+LIMITED_AGENT_ALIAS="${OSCAR_LIMITED_BEDROCK_AGENT_ALIAS_ID}"
+ACCOUNT_ID="${AWS_ACCOUNT_ID}"
+REGION="${AWS_REGION}"
+
+# Dynamic IAM role names (with fallbacks for CDK deployment)
+SUPERVISOR_ROLE_NAME="${LAMBDA_EXECUTION_ROLE_NAME:-oscar-lambda-execution-role-cdk}"
+COMM_HANDLER_ROLE_NAME="${COMMUNICATION_HANDLER_ROLE_NAME:-oscar-communication-handler-execution-role-cdk}"
+JENKINS_ROLE_NAME="${JENKINS_LAMBDA_ROLE_NAME:-oscar-jenkins-lambda-execution-role-cdk}"
+METRICS_ROLE_NAME="${OSCAR_METRICS_LAMBDA_VPC_ROLE_NAME:-oscar-metrics-lambda-vpc-role}"
+
+# Validate required configuration
+if [[ -z "$PRIVILEGED_AGENT_ID" || -z "$LIMITED_AGENT_ID" || -z "$ACCOUNT_ID" || -z "$REGION" ]]; then
+    echo -e "${RED}[ERROR] Missing required configuration in .env file!${NC}"
+    echo -e "${RED}Required: OSCAR_PRIVILEGED_BEDROCK_AGENT_ID, OSCAR_LIMITED_BEDROCK_AGENT_ID, AWS_ACCOUNT_ID, AWS_REGION${NC}"
+    exit 1
+fi
 
 echo -e "${BLUE}[INFO] Configuration:${NC}"
 echo -e "${BLUE}[INFO] - Privileged Agent: $PRIVILEGED_AGENT_ID/$PRIVILEGED_AGENT_ALIAS${NC}"
@@ -118,14 +131,10 @@ SUPERVISOR_DYNAMODB_POLICY='{
                 "dynamodb:Scan"
             ],
             "Resource": [
-                "arn:aws:dynamodb:'$REGION':'$ACCOUNT_ID':table/oscar-agent-context-dev-cdk",
-                "arn:aws:dynamodb:'$REGION':'$ACCOUNT_ID':table/oscar-agent-context-dev-cdk/*",
-                "arn:aws:dynamodb:'$REGION':'$ACCOUNT_ID':table/oscar-agent-sessions-dev-cdk",
-                "arn:aws:dynamodb:'$REGION':'$ACCOUNT_ID':table/oscar-agent-sessions-dev-cdk/*",
-                "arn:aws:dynamodb:'$REGION':'$ACCOUNT_ID':table/oscar-context-dev-cdk",
-                "arn:aws:dynamodb:'$REGION':'$ACCOUNT_ID':table/oscar-context-dev-cdk/*",
-                "arn:aws:dynamodb:'$REGION':'$ACCOUNT_ID':table/oscar-sessions-dev-cdk",
-                "arn:aws:dynamodb:'$REGION':'$ACCOUNT_ID':table/oscar-sessions-dev-cdk/*"
+                "arn:aws:dynamodb:'$REGION':'$ACCOUNT_ID':table/'${CONTEXT_TABLE_NAME:-oscar-agent-context-dev-cdk}'",
+                "arn:aws:dynamodb:'$REGION':'$ACCOUNT_ID':table/'${CONTEXT_TABLE_NAME:-oscar-agent-context-dev-cdk}'/*",
+                "arn:aws:dynamodb:'$REGION':'$ACCOUNT_ID':table/'${SESSIONS_TABLE_NAME:-oscar-agent-sessions-dev-cdk}'",
+                "arn:aws:dynamodb:'$REGION':'$ACCOUNT_ID':table/'${SESSIONS_TABLE_NAME:-oscar-agent-sessions-dev-cdk}'/*"
             ]
         }
     ]
@@ -153,9 +162,9 @@ SUPERVISOR_LAMBDA_POLICY='{
     ]
 }'
 
-add_policy_to_role "oscar-lambda-execution-role-cdk" "BedrockAgentInvocationPolicy" "$SUPERVISOR_BEDROCK_POLICY"
-add_policy_to_role "oscar-lambda-execution-role-cdk" "DynamoDBCDKAccess" "$SUPERVISOR_DYNAMODB_POLICY"
-add_policy_to_role "oscar-lambda-execution-role-cdk" "LambdaCDKInvocation" "$SUPERVISOR_LAMBDA_POLICY"
+add_policy_to_role "$SUPERVISOR_ROLE_NAME" "BedrockAgentInvocationPolicy" "$SUPERVISOR_BEDROCK_POLICY"
+add_policy_to_role "$SUPERVISOR_ROLE_NAME" "DynamoDBCDKAccess" "$SUPERVISOR_DYNAMODB_POLICY"
+add_policy_to_role "$SUPERVISOR_ROLE_NAME" "LambdaCDKInvocation" "$SUPERVISOR_LAMBDA_POLICY"
 
 # 2. FIX COMMUNICATION HANDLER (oscar-communication-handler-cdk)
 echo -e "${BLUE}[INFO] 📞 Fixing Communication Handler IAM permissions...${NC}"
@@ -184,10 +193,10 @@ COMM_HANDLER_POLICY='{
                 "dynamodb:Scan"
             ],
             "Resource": [
-                "arn:aws:dynamodb:'$REGION':'$ACCOUNT_ID':table/oscar-agent-context-dev-cdk",
-                "arn:aws:dynamodb:'$REGION':'$ACCOUNT_ID':table/oscar-agent-context-dev-cdk/*",
-                "arn:aws:dynamodb:'$REGION':'$ACCOUNT_ID':table/oscar-agent-sessions-dev-cdk",
-                "arn:aws:dynamodb:'$REGION':'$ACCOUNT_ID':table/oscar-agent-sessions-dev-cdk/*"
+                "arn:aws:dynamodb:'$REGION':'$ACCOUNT_ID':table/'${CONTEXT_TABLE_NAME:-oscar-agent-context-dev-cdk}'",
+                "arn:aws:dynamodb:'$REGION':'$ACCOUNT_ID':table/'${CONTEXT_TABLE_NAME:-oscar-agent-context-dev-cdk}'/*",
+                "arn:aws:dynamodb:'$REGION':'$ACCOUNT_ID':table/'${SESSIONS_TABLE_NAME:-oscar-agent-sessions-dev-cdk}'",
+                "arn:aws:dynamodb:'$REGION':'$ACCOUNT_ID':table/'${SESSIONS_TABLE_NAME:-oscar-agent-sessions-dev-cdk}'/*"
             ]
         },
         {
@@ -202,7 +211,7 @@ COMM_HANDLER_POLICY='{
     ]
 }'
 
-add_policy_to_role "oscar-communication-handler-execution-role-cdk" "CommunicationHandlerCDKPolicy" "$COMM_HANDLER_POLICY"
+add_policy_to_role "$COMM_HANDLER_ROLE_NAME" "CommunicationHandlerCDKPolicy" "$COMM_HANDLER_POLICY"
 
 # 3. FIX METRICS AGENTS (VPC Lambda role - shared by all 3 metrics agents)
 echo -e "${BLUE}[INFO] 📊 Fixing Metrics Agents IAM permissions...${NC}"
@@ -226,14 +235,14 @@ METRICS_ADDITIONAL_POLICY='{
                 "secretsmanager:GetSecretValue"
             ],
             "Resource": [
-                "arn:aws:secretsmanager:'$REGION':'$ACCOUNT_ID':secret:oscar-central-env-dev-cdk*",
+                "arn:aws:secretsmanager:'$REGION':'$ACCOUNT_ID':secret:'${CENTRAL_SECRET_NAME:-oscar-central-env-dev-cdk}'*",
                 "arn:aws:secretsmanager:'$REGION':'$ACCOUNT_ID':secret:oscar-central-env*"
             ]
         }
     ]
 }'
 
-add_policy_to_role "oscar-metrics-lambda-vpc-role" "MetricsAgentsCDKPolicy" "$METRICS_ADDITIONAL_POLICY"
+add_policy_to_role "$METRICS_ROLE_NAME" "MetricsAgentsCDKPolicy" "$METRICS_ADDITIONAL_POLICY"
 
 # 4. FIX JENKINS AGENT (oscar-jenkins-agent-cdk)
 echo -e "${BLUE}[INFO] 🔧 Fixing Jenkins Agent IAM permissions...${NC}"
@@ -263,7 +272,7 @@ JENKINS_POLICY='{
     ]
 }'
 
-add_policy_to_role "oscar-jenkins-lambda-execution-role-cdk" "JenkinsAgentCDKPolicy" "$JENKINS_POLICY"
+add_policy_to_role "$JENKINS_ROLE_NAME" "JenkinsAgentCDKPolicy" "$JENKINS_POLICY"
 
 # =============================================================================
 # PART 2: RESOURCE-BASED POLICIES (Lambda Function Policies)
@@ -332,106 +341,79 @@ remove_existing_permissions() {
 
 echo -e "${BLUE}[INFO] Processing Lambda function resource-based permissions...${NC}"
 
-# Legacy Lambda Functions (if they exist)
-if [ -n "$MAIN_LAMBDA_ARN" ] && [ -n "$LIMITED_AGENT_ID" ]; then
-    FUNCTION_NAME=$(echo "$MAIN_LAMBDA_ARN" | awk -F':' '{print $NF}')
-    remove_existing_permissions "$FUNCTION_NAME" "$LIMITED_AGENT_ID"
-    add_lambda_permission "$FUNCTION_NAME" "$LIMITED_AGENT_ID" "OSCAR Limited"
-fi
+# Process all Lambda functions with their corresponding agents
+echo -e "${BLUE}[INFO] 🔧 Processing Lambda function permissions for all agents...${NC}"
 
-if [ -n "$MAIN_LAMBDA_ARN" ] && [ -n "$PRIVILEGED_AGENT_ID" ]; then
-    FUNCTION_NAME=$(echo "$MAIN_LAMBDA_ARN" | awk -F':' '{print $NF}')
-    remove_existing_permissions "$FUNCTION_NAME" "$PRIVILEGED_AGENT_ID"
-    add_lambda_permission "$FUNCTION_NAME" "$PRIVILEGED_AGENT_ID" "OSCAR Privileged"
-fi
+# Helper function to process Lambda permissions for both agents
+process_lambda_permissions() {
+    local lambda_arn=$1
+    local lambda_name=$2
+    local description=$3
+    
+    if [ -n "$lambda_arn" ]; then
+        local function_name=$(echo "$lambda_arn" | awk -F':' '{print $NF}')
+        echo -e "${BLUE}[INFO] Processing $description Lambda: $function_name${NC}"
+        
+        # Add permissions for both OSCAR agents
+        if [ -n "$LIMITED_AGENT_ID" ]; then
+            remove_existing_permissions "$function_name" "$LIMITED_AGENT_ID"
+            add_lambda_permission "$function_name" "$LIMITED_AGENT_ID" "OSCAR Limited"
+        fi
+        if [ -n "$PRIVILEGED_AGENT_ID" ]; then
+            remove_existing_permissions "$function_name" "$PRIVILEGED_AGENT_ID"
+            add_lambda_permission "$function_name" "$PRIVILEGED_AGENT_ID" "OSCAR Privileged"
+        fi
+        
+        # Add permissions for specific agent if applicable
+        case "$description" in
+            "Jenkins")
+                if [ -n "$JENKINS_AGENT_ID" ]; then
+                    remove_existing_permissions "$function_name" "$JENKINS_AGENT_ID"
+                    add_lambda_permission "$function_name" "$JENKINS_AGENT_ID" "Jenkins"
+                fi
+                ;;
+            "Build Metrics")
+                if [ -n "$BUILD_METRICS_AGENT_ID" ]; then
+                    remove_existing_permissions "$function_name" "$BUILD_METRICS_AGENT_ID"
+                    add_lambda_permission "$function_name" "$BUILD_METRICS_AGENT_ID" "Build Metrics"
+                fi
+                ;;
+            "Test Metrics")
+                if [ -n "$TEST_METRICS_AGENT_ID" ]; then
+                    remove_existing_permissions "$function_name" "$TEST_METRICS_AGENT_ID"
+                    add_lambda_permission "$function_name" "$TEST_METRICS_AGENT_ID" "Test Metrics"
+                fi
+                ;;
+            "Release Metrics")
+                if [ -n "$RELEASE_METRICS_AGENT_ID" ]; then
+                    remove_existing_permissions "$function_name" "$RELEASE_METRICS_AGENT_ID"
+                    add_lambda_permission "$function_name" "$RELEASE_METRICS_AGENT_ID" "Release Metrics"
+                fi
+                ;;
+        esac
+    fi
+}
 
-# Jenkins Agent Lambda
-if [ -n "$JENKINS_LAMBDA_ARN" ] && [ -n "$JENKINS_AGENT_ID" ]; then
-    FUNCTION_NAME=$(echo "$JENKINS_LAMBDA_ARN" | awk -F':' '{print $NF}')
-    remove_existing_permissions "$FUNCTION_NAME" "$JENKINS_AGENT_ID"
-    add_lambda_permission "$FUNCTION_NAME" "$JENKINS_AGENT_ID" "Jenkins"
-fi
-
-# Build Metrics Agent Lambda
-if [ -n "$BUILD_METRICS_LAMBDA_ARN" ] && [ -n "$BUILD_METRICS_AGENT_ID" ]; then
-    FUNCTION_NAME=$(echo "$BUILD_METRICS_LAMBDA_ARN" | awk -F':' '{print $NF}')
-    remove_existing_permissions "$FUNCTION_NAME" "$BUILD_METRICS_AGENT_ID"
-    add_lambda_permission "$FUNCTION_NAME" "$BUILD_METRICS_AGENT_ID" "Build Metrics"
-fi
-
-# Test Metrics Agent Lambda
-if [ -n "$TEST_METRICS_LAMBDA_ARN" ] && [ -n "$TEST_METRICS_AGENT_ID" ]; then
-    FUNCTION_NAME=$(echo "$TEST_METRICS_LAMBDA_ARN" | awk -F':' '{print $NF}')
-    remove_existing_permissions "$FUNCTION_NAME" "$TEST_METRICS_AGENT_ID"
-    add_lambda_permission "$FUNCTION_NAME" "$TEST_METRICS_AGENT_ID" "Test Metrics"
-fi
-
-# Release Metrics Agent Lambda
-if [ -n "$RELEASE_METRICS_LAMBDA_ARN" ] && [ -n "$RELEASE_METRICS_AGENT_ID" ]; then
-    FUNCTION_NAME=$(echo "$RELEASE_METRICS_LAMBDA_ARN" | awk -F':' '{print $NF}')
-    remove_existing_permissions "$FUNCTION_NAME" "$RELEASE_METRICS_AGENT_ID"
-    add_lambda_permission "$FUNCTION_NAME" "$RELEASE_METRICS_AGENT_ID" "Release Metrics"
-fi
+# Process all Lambda functions
+process_lambda_permissions "$MAIN_LAMBDA_ARN" "$CDK_SUPERVISOR_FUNCTION" "Supervisor"
+process_lambda_permissions "$COMMUNICATION_LAMBDA_ARN" "$CDK_COMM_HANDLER_FUNCTION" "Communication Handler"
+process_lambda_permissions "$JENKINS_LAMBDA_ARN" "$CDK_JENKINS_FUNCTION" "Jenkins"
+process_lambda_permissions "$BUILD_METRICS_LAMBDA_ARN" "$CDK_BUILD_METRICS_FUNCTION" "Build Metrics"
+process_lambda_permissions "$TEST_METRICS_LAMBDA_ARN" "$CDK_TEST_METRICS_FUNCTION" "Test Metrics"
+process_lambda_permissions "$RELEASE_METRICS_LAMBDA_ARN" "$CDK_RELEASE_METRICS_FUNCTION" "Release Metrics"
 
 # CDK Lambda Functions
 echo -e "${BLUE}[INFO] 🔧 Processing CDK Lambda function resource-based permissions...${NC}"
 
-# CDK Supervisor Agent Lambda
-CDK_SUPERVISOR_FUNCTION="oscar-supervisor-agent-cdk"
-if aws lambda get-function --function-name "$CDK_SUPERVISOR_FUNCTION" >/dev/null 2>&1; then
-    echo -e "${BLUE}[INFO] Processing CDK Supervisor Agent Lambda...${NC}"
-    if [ -n "$LIMITED_AGENT_ID" ]; then
-        remove_existing_permissions "$CDK_SUPERVISOR_FUNCTION" "$LIMITED_AGENT_ID"
-        add_lambda_permission "$CDK_SUPERVISOR_FUNCTION" "$LIMITED_AGENT_ID" "OSCAR Limited"
-    fi
-    if [ -n "$PRIVILEGED_AGENT_ID" ]; then
-        remove_existing_permissions "$CDK_SUPERVISOR_FUNCTION" "$PRIVILEGED_AGENT_ID"
-        add_lambda_permission "$CDK_SUPERVISOR_FUNCTION" "$PRIVILEGED_AGENT_ID" "OSCAR Privileged"
-    fi
-fi
+# Get Lambda function names from environment variables (with fallbacks)
+CDK_SUPERVISOR_FUNCTION="${MAIN_LAMBDA_FUNCTION_NAME:-oscar-supervisor-agent-cdk}"
+CDK_COMM_HANDLER_FUNCTION="${COMMUNICATION_LAMBDA_FUNCTION_NAME:-oscar-communication-handler-cdk}"
+CDK_JENKINS_FUNCTION="${JENKINS_LAMBDA_FUNCTION_NAME:-oscar-jenkins-agent-cdk}"
+CDK_TEST_METRICS_FUNCTION="${METRICS_TEST_FUNCTION:-oscar-test-metrics-agent-cdk}"
+CDK_BUILD_METRICS_FUNCTION="${METRICS_BUILD_FUNCTION:-oscar-build-metrics-agent-cdk}"
+CDK_RELEASE_METRICS_FUNCTION="${METRICS_RELEASE_FUNCTION:-oscar-release-metrics-agent-cdk}"
 
-# CDK Communication Handler Lambda
-CDK_COMM_HANDLER_FUNCTION="oscar-communication-handler-cdk"
-if aws lambda get-function --function-name "$CDK_COMM_HANDLER_FUNCTION" >/dev/null 2>&1; then
-    echo -e "${BLUE}[INFO] Processing CDK Communication Handler Lambda...${NC}"
-    if [ -n "$LIMITED_AGENT_ID" ]; then
-        remove_existing_permissions "$CDK_COMM_HANDLER_FUNCTION" "$LIMITED_AGENT_ID"
-        add_lambda_permission "$CDK_COMM_HANDLER_FUNCTION" "$LIMITED_AGENT_ID" "OSCAR Limited"
-    fi
-    if [ -n "$PRIVILEGED_AGENT_ID" ]; then
-        remove_existing_permissions "$CDK_COMM_HANDLER_FUNCTION" "$PRIVILEGED_AGENT_ID"
-        add_lambda_permission "$CDK_COMM_HANDLER_FUNCTION" "$PRIVILEGED_AGENT_ID" "OSCAR Privileged"
-    fi
-fi
 
-# CDK Metrics Agent Lambdas
-for cdk_metrics_function in "oscar-test-metrics-agent-cdk" "oscar-build-metrics-agent-cdk" "oscar-release-metrics-agent-cdk"; do
-    if aws lambda get-function --function-name "$cdk_metrics_function" >/dev/null 2>&1; then
-        echo -e "${BLUE}[INFO] Processing CDK Metrics Lambda: $cdk_metrics_function${NC}"
-        if [ -n "$LIMITED_AGENT_ID" ]; then
-            remove_existing_permissions "$cdk_metrics_function" "$LIMITED_AGENT_ID"
-            add_lambda_permission "$cdk_metrics_function" "$LIMITED_AGENT_ID" "OSCAR Limited"
-        fi
-        if [ -n "$PRIVILEGED_AGENT_ID" ]; then
-            remove_existing_permissions "$cdk_metrics_function" "$PRIVILEGED_AGENT_ID"
-            add_lambda_permission "$cdk_metrics_function" "$PRIVILEGED_AGENT_ID" "OSCAR Privileged"
-        fi
-    fi
-done
-
-# CDK Jenkins Agent Lambda
-CDK_JENKINS_FUNCTION="oscar-jenkins-agent-cdk"
-if aws lambda get-function --function-name "$CDK_JENKINS_FUNCTION" >/dev/null 2>&1; then
-    echo -e "${BLUE}[INFO] Processing CDK Jenkins Agent Lambda...${NC}"
-    if [ -n "$LIMITED_AGENT_ID" ]; then
-        remove_existing_permissions "$CDK_JENKINS_FUNCTION" "$LIMITED_AGENT_ID"
-        add_lambda_permission "$CDK_JENKINS_FUNCTION" "$LIMITED_AGENT_ID" "OSCAR Limited"
-    fi
-    if [ -n "$PRIVILEGED_AGENT_ID" ]; then
-        remove_existing_permissions "$CDK_JENKINS_FUNCTION" "$PRIVILEGED_AGENT_ID"
-        add_lambda_permission "$CDK_JENKINS_FUNCTION" "$PRIVILEGED_AGENT_ID" "OSCAR Privileged"
-    fi
-fi
 
 # =============================================================================
 # PART 3: BEDROCK AGENT RESOURCE-BASED POLICIES
@@ -439,10 +421,10 @@ fi
 
 echo -e "${BLUE}[INFO] 🎯 PART 3: Adding resource-based policies to Bedrock agents...${NC}"
 
-# Get all Lambda execution role ARNs
-SUPERVISOR_ROLE_ARN="arn:aws:iam::$ACCOUNT_ID:role/oscar-lambda-execution-role-cdk"
-COMM_HANDLER_ROLE_ARN="arn:aws:iam::$ACCOUNT_ID:role/oscar-communication-handler-execution-role-cdk"
-JENKINS_ROLE_ARN="arn:aws:iam::$ACCOUNT_ID:role/oscar-jenkins-lambda-execution-role-cdk"
+# Get all Lambda execution role ARNs (use from environment or construct dynamically)
+SUPERVISOR_ROLE_ARN="${LAMBDA_EXECUTION_ROLE_ARN:-arn:aws:iam::$ACCOUNT_ID:role/$SUPERVISOR_ROLE_NAME}"
+COMM_HANDLER_ROLE_ARN="${COMMUNICATION_HANDLER_ROLE_ARN:-arn:aws:iam::$ACCOUNT_ID:role/$COMM_HANDLER_ROLE_NAME}"
+JENKINS_ROLE_ARN="${JENKINS_LAMBDA_ROLE_ARN:-arn:aws:iam::$ACCOUNT_ID:role/$JENKINS_ROLE_NAME}"
 
 RESOURCE_POLICY='{
     "Version": "2012-10-17",
@@ -485,17 +467,17 @@ echo -e "${GREEN}[SUCCESS] ✅ Resource-based policies applied to Bedrock agents
 
 echo -e "${BLUE}[INFO] 🔍 Verifying permissions for all roles...${NC}"
 
-echo -e "${BLUE}[INFO] Supervisor Agent Role (oscar-lambda-execution-role-cdk):${NC}"
-aws iam list-role-policies --role-name "oscar-lambda-execution-role-cdk" --query 'PolicyNames' --output table
+echo -e "${BLUE}[INFO] Supervisor Agent Role ($SUPERVISOR_ROLE_NAME):${NC}"
+aws iam list-role-policies --role-name "$SUPERVISOR_ROLE_NAME" --query 'PolicyNames' --output table
 
-echo -e "${BLUE}[INFO] Communication Handler Role (oscar-communication-handler-execution-role-cdk):${NC}"
-aws iam list-role-policies --role-name "oscar-communication-handler-execution-role-cdk" --query 'PolicyNames' --output table
+echo -e "${BLUE}[INFO] Communication Handler Role ($COMM_HANDLER_ROLE_NAME):${NC}"
+aws iam list-role-policies --role-name "$COMM_HANDLER_ROLE_NAME" --query 'PolicyNames' --output table
 
-echo -e "${BLUE}[INFO] VPC Lambda Role for Metrics (oscar-metrics-lambda-vpc-role):${NC}"
-aws iam list-role-policies --role-name "oscar-metrics-lambda-vpc-role" --query 'PolicyNames' --output table
+echo -e "${BLUE}[INFO] VPC Lambda Role for Metrics ($METRICS_ROLE_NAME):${NC}"
+aws iam list-role-policies --role-name "$METRICS_ROLE_NAME" --query 'PolicyNames' --output table
 
-echo -e "${BLUE}[INFO] Jenkins Agent Role (oscar-jenkins-lambda-execution-role-cdk):${NC}"
-aws iam list-role-policies --role-name "oscar-jenkins-lambda-execution-role-cdk" --query 'PolicyNames' --output table
+echo -e "${BLUE}[INFO] Jenkins Agent Role ($JENKINS_ROLE_NAME):${NC}"
+aws iam list-role-policies --role-name "$JENKINS_ROLE_NAME" --query 'PolicyNames' --output table
 
 echo -e "${GREEN}[SUCCESS] ✅ OSCAR Complete Permissions Fixer completed successfully!${NC}"
 echo -e "${BLUE}[INFO] 📋 Summary of fixes applied:${NC}"

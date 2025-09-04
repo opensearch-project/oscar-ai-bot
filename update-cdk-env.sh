@@ -188,17 +188,46 @@ main() {
     update_env_var "METRICS_DEPLOYMENT_FUNCTION" "oscar-deployment-metrics-agent-cdk"
     update_env_var "JENKINS_LAMBDA_FUNCTION_NAME" "oscar-jenkins-agent-cdk"
     
-    # Update DynamoDB table names
-    log_info "Updating DynamoDB table names..."
-    # Get the actual deployed table name from CDK stack output
+    # Update all Lambda function names for dynamic usage
+    update_env_var "MAIN_LAMBDA_FUNCTION_NAME" "oscar-supervisor-agent-cdk"
+    update_env_var "COMMUNICATION_LAMBDA_FUNCTION_NAME" "oscar-communication-handler-cdk"
+    
+    # Update DynamoDB table names and ARNs
+    log_info "Updating DynamoDB table names and ARNs..."
     local context_table=$(get_stack_output "OscarStorageStack" "ContextTableName")
+    local sessions_table=$(get_stack_output "OscarStorageStack" "SessionsTableName")
+    local context_table_arn=$(get_stack_output "OscarStorageStack" "ContextTableArn")
+    local sessions_table_arn=$(get_stack_output "OscarStorageStack" "SessionsTableArn")
+    
     if [[ -n "$context_table" ]]; then
         update_env_var "CONTEXT_TABLE_NAME" "$context_table"
     fi
+    if [[ -n "$sessions_table" ]]; then
+        update_env_var "SESSIONS_TABLE_NAME" "$sessions_table"
+    fi
+    if [[ -n "$context_table_arn" ]]; then
+        update_env_var "CONTEXT_TABLE_ARN" "$context_table_arn"
+    fi
+    if [[ -n "$sessions_table_arn" ]]; then
+        update_env_var "SESSIONS_TABLE_ARN" "$sessions_table_arn"
+    fi
     
-    # Update API Gateway URL
-    log_info "Updating API Gateway URL..."
+    # Update API Gateway resources
+    log_info "Updating API Gateway resources..."
+    local api_id=$(get_stack_output "OscarApiGatewayStack" "ApiGatewayId")
+    local api_stage=$(get_stack_output "OscarApiGatewayStack" "ApiGatewayStage")
+    local api_deployment_id=$(get_stack_output "OscarApiGatewayStack" "ApiGatewayDeploymentId")
     local api_url=$(get_api_gateway_url)
+    
+    if [[ -n "$api_id" ]]; then
+        update_env_var "API_GATEWAY_ID" "$api_id"
+    fi
+    if [[ -n "$api_stage" ]]; then
+        update_env_var "API_GATEWAY_STAGE" "$api_stage"
+    fi
+    if [[ -n "$api_deployment_id" ]]; then
+        update_env_var "API_GATEWAY_DEPLOYMENT_ID" "$api_deployment_id"
+    fi
     if [[ -n "$api_url" ]]; then
         update_env_var "API_GATEWAY_URL" "$api_url"
         update_env_var "SLACK_EVENTS_URL" "${api_url}/slack/events"
@@ -212,10 +241,42 @@ main() {
         update_env_var "CENTRAL_SECRET_NAME" "$secret_name"
     fi
     
-    # Update IAM role ARNs
-    log_info "Updating IAM role ARNs..."
-    update_env_var "LAMBDA_EXECUTION_ROLE_ARN" "$(get_stack_output 'OscarPermissionsStack' 'LambdaExecutionRoleBaseArn')"
-    update_env_var "BEDROCK_AGENT_ROLE_ARN" "$(get_stack_output 'OscarPermissionsStack' 'BedrockAgentRoleArn')"
+    # Update IAM role names and ARNs
+    log_info "Updating IAM role names and ARNs..."
+    local lambda_role_arn=$(get_stack_output 'OscarPermissionsStack' 'LambdaExecutionRoleBaseArn')
+    local bedrock_role_arn=$(get_stack_output 'OscarPermissionsStack' 'BedrockAgentRoleArn')
+    local comm_role_arn=$(get_stack_output 'OscarPermissionsStack' 'LambdaExecutionRoleCommunicationArn')
+    local jenkins_role_arn=$(get_stack_output 'OscarPermissionsStack' 'LambdaExecutionRoleJenkinsArn')
+    local api_role_arn=$(get_stack_output 'OscarPermissionsStack' 'ApiGatewayRoleArn')
+    
+    # Update ARNs
+    update_env_var "LAMBDA_EXECUTION_ROLE_ARN" "$lambda_role_arn"
+    update_env_var "BEDROCK_AGENT_ROLE_ARN" "$bedrock_role_arn"
+    update_env_var "COMMUNICATION_HANDLER_ROLE_ARN" "$comm_role_arn"
+    update_env_var "JENKINS_LAMBDA_ROLE_ARN" "$jenkins_role_arn"
+    update_env_var "API_GATEWAY_ROLE_ARN" "$api_role_arn"
+    
+    # Extract and update role names from ARNs
+    if [[ -n "$lambda_role_arn" ]]; then
+        local lambda_role_name=$(echo "$lambda_role_arn" | awk -F'/' '{print $NF}')
+        update_env_var "LAMBDA_EXECUTION_ROLE_NAME" "$lambda_role_name"
+    fi
+    if [[ -n "$bedrock_role_arn" ]]; then
+        local bedrock_role_name=$(echo "$bedrock_role_arn" | awk -F'/' '{print $NF}')
+        update_env_var "BEDROCK_AGENT_ROLE_NAME" "$bedrock_role_name"
+    fi
+    if [[ -n "$comm_role_arn" ]]; then
+        local comm_role_name=$(echo "$comm_role_arn" | awk -F'/' '{print $NF}')
+        update_env_var "COMMUNICATION_HANDLER_ROLE_NAME" "$comm_role_name"
+    fi
+    if [[ -n "$jenkins_role_arn" ]]; then
+        local jenkins_role_name=$(echo "$jenkins_role_arn" | awk -F'/' '{print $NF}')
+        update_env_var "JENKINS_LAMBDA_ROLE_NAME" "$jenkins_role_name"
+    fi
+    if [[ -n "$api_role_arn" ]]; then
+        local api_role_name=$(echo "$api_role_arn" | awk -F'/' '{print $NF}')
+        update_env_var "API_GATEWAY_ROLE_NAME" "$api_role_name"
+    fi
     
     # Update agent IDs from deployment
     update_agent_ids
