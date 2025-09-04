@@ -66,7 +66,7 @@ class JenkinsConfig:
             )
             
             # Get the .env content from secrets manager
-            response = client.get_secret_value(SecretId='oscar-central-env')
+            response = client.get_secret_value(SecretId='oscar-central-env-dev-cdk')
             env_content = response['SecretString']
             
             # Load the .env content into environment variables

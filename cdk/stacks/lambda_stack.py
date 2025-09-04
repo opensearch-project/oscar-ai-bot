@@ -122,8 +122,8 @@ class OscarLambdaStack(Stack):
             self, "CommunicationHandler",
             function_name="oscar-communication-handler-cdk",
             runtime=lambda_.Runtime.PYTHON_3_12,
-            handler="communication_handler.lambda_handler.lambda_handler",
-            code=lambda_.Code.from_asset("lambda_assets/oscar-agent"),
+            handler="lambda_function.lambda_handler",  # Flattened structure
+            code=lambda_.Code.from_asset("lambda_assets/oscar-communication-handler"),  # Separate flattened asset
             timeout=Duration.seconds(60),
             memory_size=512,
             environment=self._get_communication_handler_environment_variables(),

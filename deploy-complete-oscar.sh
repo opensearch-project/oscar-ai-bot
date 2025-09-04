@@ -144,6 +144,8 @@ log_info "This adds comprehensive IAM policies and resource-based policies for a
 
 log_success "✅ Lambda function permissions fixed!"
 
+
+
 # Step 8: Final verification
 log_info "🔍 Step 8: Final Integration Verification"
 

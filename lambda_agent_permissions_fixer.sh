@@ -135,6 +135,66 @@ if [ -n "$RELEASE_METRICS_LAMBDA_ARN" ] && [ -n "$RELEASE_METRICS_AGENT_ID" ]; t
     add_lambda_permission "$FUNCTION_NAME" "$RELEASE_METRICS_AGENT_ID" "Release Metrics"
 fi
 
+# CDK Lambda Functions (for CDK deployment)
+echo -e "${BLUE}[INFO] 🔧 Processing CDK Lambda function permissions...${NC}"
+
+# CDK Supervisor Agent Lambda
+CDK_SUPERVISOR_FUNCTION="oscar-supervisor-agent-cdk"
+if aws lambda get-function --function-name "$CDK_SUPERVISOR_FUNCTION" >/dev/null 2>&1; then
+    echo -e "${BLUE}[INFO] Processing CDK Supervisor Agent Lambda...${NC}"
+    if [ -n "$OSCAR_LIMITED_BEDROCK_AGENT_ID" ]; then
+        remove_existing_permissions "$CDK_SUPERVISOR_FUNCTION" "$OSCAR_LIMITED_BEDROCK_AGENT_ID"
+        add_lambda_permission "$CDK_SUPERVISOR_FUNCTION" "$OSCAR_LIMITED_BEDROCK_AGENT_ID" "OSCAR Limited"
+    fi
+    if [ -n "$OSCAR_PRIVILEGED_BEDROCK_AGENT_ID" ]; then
+        remove_existing_permissions "$CDK_SUPERVISOR_FUNCTION" "$OSCAR_PRIVILEGED_BEDROCK_AGENT_ID"
+        add_lambda_permission "$CDK_SUPERVISOR_FUNCTION" "$OSCAR_PRIVILEGED_BEDROCK_AGENT_ID" "OSCAR Privileged"
+    fi
+fi
+
+# CDK Communication Handler Lambda
+CDK_COMM_HANDLER_FUNCTION="oscar-communication-handler-cdk"
+if aws lambda get-function --function-name "$CDK_COMM_HANDLER_FUNCTION" >/dev/null 2>&1; then
+    echo -e "${BLUE}[INFO] Processing CDK Communication Handler Lambda...${NC}"
+    if [ -n "$OSCAR_LIMITED_BEDROCK_AGENT_ID" ]; then
+        remove_existing_permissions "$CDK_COMM_HANDLER_FUNCTION" "$OSCAR_LIMITED_BEDROCK_AGENT_ID"
+        add_lambda_permission "$CDK_COMM_HANDLER_FUNCTION" "$OSCAR_LIMITED_BEDROCK_AGENT_ID" "OSCAR Limited"
+    fi
+    if [ -n "$OSCAR_PRIVILEGED_BEDROCK_AGENT_ID" ]; then
+        remove_existing_permissions "$CDK_COMM_HANDLER_FUNCTION" "$OSCAR_PRIVILEGED_BEDROCK_AGENT_ID"
+        add_lambda_permission "$CDK_COMM_HANDLER_FUNCTION" "$OSCAR_PRIVILEGED_BEDROCK_AGENT_ID" "OSCAR Privileged"
+    fi
+fi
+
+# CDK Metrics Agent Lambdas
+for cdk_metrics_function in "oscar-test-metrics-agent-cdk" "oscar-build-metrics-agent-cdk" "oscar-release-metrics-agent-cdk"; do
+    if aws lambda get-function --function-name "$cdk_metrics_function" >/dev/null 2>&1; then
+        echo -e "${BLUE}[INFO] Processing CDK Metrics Lambda: $cdk_metrics_function${NC}"
+        if [ -n "$OSCAR_LIMITED_BEDROCK_AGENT_ID" ]; then
+            remove_existing_permissions "$cdk_metrics_function" "$OSCAR_LIMITED_BEDROCK_AGENT_ID"
+            add_lambda_permission "$cdk_metrics_function" "$OSCAR_LIMITED_BEDROCK_AGENT_ID" "OSCAR Limited"
+        fi
+        if [ -n "$OSCAR_PRIVILEGED_BEDROCK_AGENT_ID" ]; then
+            remove_existing_permissions "$cdk_metrics_function" "$OSCAR_PRIVILEGED_BEDROCK_AGENT_ID"
+            add_lambda_permission "$cdk_metrics_function" "$OSCAR_PRIVILEGED_BEDROCK_AGENT_ID" "OSCAR Privileged"
+        fi
+    fi
+done
+
+# CDK Jenkins Agent Lambda
+CDK_JENKINS_FUNCTION="oscar-jenkins-agent-cdk"
+if aws lambda get-function --function-name "$CDK_JENKINS_FUNCTION" >/dev/null 2>&1; then
+    echo -e "${BLUE}[INFO] Processing CDK Jenkins Agent Lambda...${NC}"
+    if [ -n "$OSCAR_LIMITED_BEDROCK_AGENT_ID" ]; then
+        remove_existing_permissions "$CDK_JENKINS_FUNCTION" "$OSCAR_LIMITED_BEDROCK_AGENT_ID"
+        add_lambda_permission "$CDK_JENKINS_FUNCTION" "$OSCAR_LIMITED_BEDROCK_AGENT_ID" "OSCAR Limited"
+    fi
+    if [ -n "$OSCAR_PRIVILEGED_BEDROCK_AGENT_ID" ]; then
+        remove_existing_permissions "$CDK_JENKINS_FUNCTION" "$OSCAR_PRIVILEGED_BEDROCK_AGENT_ID"
+        add_lambda_permission "$CDK_JENKINS_FUNCTION" "$OSCAR_PRIVILEGED_BEDROCK_AGENT_ID" "OSCAR Privileged"
+    fi
+fi
+
 echo -e "${GREEN}[SUCCESS] ✅ Lambda function permissions have been updated!${NC}"
 echo -e "${BLUE}[INFO] 📋 Summary:${NC}"
 echo -e "${BLUE}[INFO] - Main Lambda: Accessible by OSCAR Limited & Privileged agents${NC}"
@@ -142,4 +202,8 @@ echo -e "${BLUE}[INFO] - Jenkins Lambda: Accessible by Jenkins agent${NC}"
 echo -e "${BLUE}[INFO] - Build Metrics Lambda: Accessible by Build Metrics agent${NC}"
 echo -e "${BLUE}[INFO] - Test Metrics Lambda: Accessible by Test Metrics agent${NC}"
 echo -e "${BLUE}[INFO] - Release Metrics Lambda: Accessible by Release Metrics agent${NC}"
+echo -e "${BLUE}[INFO] - CDK Supervisor Lambda: Accessible by both OSCAR agents${NC}"
+echo -e "${BLUE}[INFO] - CDK Communication Handler: Accessible by both OSCAR agents${NC}"
+echo -e "${BLUE}[INFO] - CDK Metrics Lambdas: Accessible by both OSCAR agents${NC}"
+echo -e "${BLUE}[INFO] - CDK Jenkins Lambda: Accessible by both OSCAR agents${NC}"
 echo -e "${BLUE}[INFO] 🎯 All Bedrock agents can now invoke their respective Lambda functions!${NC}"
