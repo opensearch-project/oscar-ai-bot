@@ -18,6 +18,19 @@ from aws_cdk import (
     Tags
 )
 
+# Load environment variables from .env file
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    # If python-dotenv is not available, manually load .env file
+    if os.path.exists('.env'):
+        with open('.env', 'r') as f:
+            for line in f:
+                if line.strip() and not line.startswith('#') and '=' in line:
+                    key, value = line.strip().split('=', 1)
+                    os.environ[key] = value
+
 # Import working stacks
 from stacks.permissions_stack import OscarPermissionsStack
 from stacks.secrets_stack import OscarSecretsStack

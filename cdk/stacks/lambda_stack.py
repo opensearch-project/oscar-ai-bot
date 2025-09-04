@@ -170,36 +170,43 @@ class OscarLambdaStack(Stack):
         """
         logger.info("Creating metrics agent Lambda functions")
         
-        # Get the VPC execution role from permissions stack
+        # Get the VPC execution role from permissions stack (references existing authorized role)
         execution_role = self.permissions_stack.lambda_execution_roles["vpc"]
         
         # Grant access to central environment secret
         self.secrets_stack.grant_read_access(execution_role)
         
-        # Get VPC configuration if VPC stack is provided
-        vpc_config = None
+        # Get VPC configuration for metrics agents (they need VPC access for OpenSearch)
+        vpc_id = os.environ.get("VPC_ID")
+        subnet_ids = os.environ.get("SUBNET_IDS", "").split(",") if os.environ.get("SUBNET_IDS") else []
+        security_group_id = os.environ.get("SECURITY_GROUP_ID")
+        
+        vpc = None
+        vpc_subnets = None
         security_groups = None
         
-        if self.vpc_stack:
-            # Try to get private subnets first, fallback to public if needed
-            try:
-                private_subnets = self.vpc_stack.vpc.select_subnets(
-                    subnet_type=ec2.SubnetType.PRIVATE_WITH_EGRESS
-                ).subnets
-                if private_subnets:
-                    vpc_config = ec2.SubnetSelection(
-                        subnet_type=ec2.SubnetType.PRIVATE_WITH_EGRESS
-                    )
-                else:
-                    raise Exception("No private subnets found")
-            except:
-                # Fallback to public subnets
-                logger.warning("No private subnets found, using public subnets for Lambda functions")
-                vpc_config = ec2.SubnetSelection(
-                    subnet_type=ec2.SubnetType.PUBLIC
-                )
+        if vpc_id and subnet_ids:
+            # Import existing VPC and subnets
+            vpc = ec2.Vpc.from_lookup(self, "ExistingVpc", vpc_id=vpc_id)
             
-            security_groups = [self.vpc_stack.lambda_security_group]
+            # Import existing subnets
+            subnets = []
+            for i, subnet_id in enumerate(subnet_ids):
+                if subnet_id.strip():
+                    subnet = ec2.Subnet.from_subnet_id(self, f"ExistingSubnet{i}", subnet_id.strip())
+                    subnets.append(subnet)
+            
+            if subnets:
+                vpc_subnets = ec2.SubnetSelection(subnets=subnets)
+            
+            # Import existing security group if provided
+            if security_group_id:
+                security_group = ec2.SecurityGroup.from_security_group_id(
+                    self, "ExistingSecurityGroup", security_group_id
+                )
+                security_groups = [security_group]
+            
+            logger.info(f"Using VPC {vpc_id} with {len(subnets)} subnets for metrics Lambda functions")
         
         # Create separate metrics agents for each type
         metrics_types = [
@@ -219,10 +226,10 @@ class OscarLambdaStack(Stack):
                 memory_size=1024,  # Higher memory for data processing
                 environment=self._get_metrics_agent_environment_variables(metrics_type),
                 role=execution_role,
-                description=f"OSCAR {description}",
+                description=f"OSCAR {description} (VPC-enabled)",
                 reserved_concurrent_executions=5,  # Limited concurrency for metrics
-                vpc=self.vpc_stack.vpc if self.vpc_stack else None,
-                vpc_subnets=vpc_config,
+                vpc=vpc,
+                vpc_subnets=vpc_subnets,
                 security_groups=security_groups,
                 allow_public_subnet=True  # Allow placement in public subnets when no private subnets available
             )

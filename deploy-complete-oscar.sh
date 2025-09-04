@@ -136,13 +136,13 @@ log_info "This populates the secret with all environment variables from the .env
 
 log_success "✅ Secrets Manager updated with complete environment configuration!"
 
-# Step 7: Fix Lambda Agent Permissions
-log_info "🔐 Step 7: Fixing Lambda function permissions for Bedrock agent invocation"
-log_info "This adds comprehensive IAM policies and resource-based policies for all Lambda functions"
+# Step 7: Fix ALL OSCAR Permissions
+log_info "🔐 Step 7: Fixing ALL OSCAR permissions (IAM roles + Lambda functions + Bedrock agents)"
+log_info "This adds comprehensive identity-based and resource-based policies for complete functionality"
 
-./fix-cdk-lambda-permissions.sh
+./oscar-permissions-fixer.sh
 
-log_success "✅ Lambda function permissions fixed!"
+log_success "✅ All OSCAR permissions fixed!"
 
 
 

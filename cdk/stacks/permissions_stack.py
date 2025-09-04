@@ -93,8 +93,12 @@ class OscarPermissionsStack(Stack):
         base_role = self._create_base_lambda_role()
         roles["base"] = base_role
         
-        # VPC Lambda execution role for metrics functions
-        vpc_role = self._create_vpc_lambda_role()
+        # Use existing VPC Lambda execution role for metrics functions
+        # This role is pre-authorized for cross-account access to OpenSearch
+        vpc_role = iam.Role.from_role_arn(
+            self, "ExistingVpcLambdaRole",
+            role_arn="arn:aws:iam::395380602281:role/oscar-metrics-lambda-vpc-role"
+        )
         roles["vpc"] = vpc_role
         
         # Communication handler role
@@ -132,30 +136,7 @@ class OscarPermissionsStack(Stack):
         
         return role
     
-    def _create_vpc_lambda_role(self) -> iam.Role:
-        """
-        Create VPC Lambda execution role for metrics functions.
-        
-        Returns:
-            The VPC Lambda execution role
-        """
-        role = iam.Role(
-            self, "VpcLambdaExecutionRole",
-            role_name="oscar-vpc-lambda-execution-role-cdk",
-            assumed_by=iam.ServicePrincipal("lambda.amazonaws.com"),
-            managed_policies=[
-                iam.ManagedPolicy.from_aws_managed_policy_name(
-                    "service-role/AWSLambdaVPCAccessExecutionRole"
-                )
-            ],
-            description="VPC execution role for OSCAR metrics Lambda functions"
-        )
-        
-        # Add least-privilege policies for VPC Lambda functions
-        for policy_statement in self.policy_definitions.get_vpc_lambda_policies():
-            role.add_to_policy(policy_statement)
-        
-        return role
+
     
     def _create_communication_handler_role(self) -> iam.Role:
         """
