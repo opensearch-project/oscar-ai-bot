@@ -94,7 +94,7 @@ class OscarLambdaStack(Stack):
             function_name="oscar-supervisor-agent-cdk",
             runtime=lambda_.Runtime.PYTHON_3_12,
             handler="app.lambda_handler",
-            code=lambda_.Code.from_asset("../oscar-agent"),
+            code=lambda_.Code.from_asset("lambda_assets/oscar-agent"),
             timeout=Duration.seconds(300),  # 5 minutes for complex agent interactions
             memory_size=1024,  # Higher memory for better performance
             environment=self._get_main_agent_environment_variables(),
@@ -123,7 +123,7 @@ class OscarLambdaStack(Stack):
             function_name="oscar-communication-handler-cdk",
             runtime=lambda_.Runtime.PYTHON_3_12,
             handler="communication_handler.lambda_handler.lambda_handler",
-            code=lambda_.Code.from_asset("../oscar-agent"),
+            code=lambda_.Code.from_asset("lambda_assets/oscar-agent"),
             timeout=Duration.seconds(60),
             memory_size=512,
             environment=self._get_communication_handler_environment_variables(),
@@ -152,7 +152,7 @@ class OscarLambdaStack(Stack):
             function_name="oscar-jenkins-agent-cdk",
             runtime=lambda_.Runtime.PYTHON_3_12,
             handler="lambda_function.lambda_handler",
-            code=lambda_.Code.from_asset("../jenkins"),
+            code=lambda_.Code.from_asset("lambda_assets/jenkins"),
             timeout=Duration.seconds(120),  # 2 minutes for Jenkins API calls
             memory_size=512,
             environment=self._get_jenkins_agent_environment_variables(),
@@ -201,47 +201,27 @@ class OscarLambdaStack(Stack):
             
             security_groups = [self.vpc_stack.lambda_security_group]
         
-        # Define metrics agent configurations
-        metrics_agents = [
-            {
-                "name": "test-metrics",
-                "function_name": "oscar-test-metrics-agent-cdk",
-                "description": "Test metrics agent for OSCAR test data analysis"
-            },
-            {
-                "name": "build-metrics", 
-                "function_name": "oscar-build-metrics-agent-cdk",
-                "description": "Build metrics agent for OSCAR build data analysis"
-            },
-            {
-                "name": "release-metrics",
-                "function_name": "oscar-release-metrics-agent-cdk", 
-                "description": "Release metrics agent for OSCAR release data analysis"
-            }
-        ]
+        # Create unified metrics agent (single function for all metrics types)
+        function = lambda_.Function(
+            self, "MetricsAgent",
+            function_name="oscar-metrics-agent-cdk",
+            runtime=lambda_.Runtime.PYTHON_3_12,
+            handler="lambda_function.lambda_handler",
+            code=lambda_.Code.from_asset("lambda_assets/metrics"),
+            timeout=Duration.seconds(180),  # 3 minutes for metrics queries
+            memory_size=1024,  # Higher memory for data processing
+            environment=self._get_metrics_agent_environment_variables(),
+            role=execution_role,
+            description="Unified metrics agent for OSCAR test, build, and release data analysis",
+            reserved_concurrent_executions=5,  # Limited concurrency for metrics
+            vpc=self.vpc_stack.vpc if self.vpc_stack else None,
+            vpc_subnets=vpc_config,
+            security_groups=security_groups,
+            allow_public_subnet=True  # Allow placement in public subnets when no private subnets available
+        )
         
-        # Create each metrics agent
-        for agent_config in metrics_agents:
-            function = lambda_.Function(
-                self, f"MetricsAgent{agent_config['name'].replace('-', '').title()}",
-                function_name=agent_config["function_name"],
-                runtime=lambda_.Runtime.PYTHON_3_12,
-                handler="lambda_function.lambda_handler",
-                code=lambda_.Code.from_asset(f"lambda/metrics_{agent_config['name'].replace('-', '_')}"),
-                timeout=Duration.seconds(180),  # 3 minutes for metrics queries
-                memory_size=1024,  # Higher memory for data processing
-                environment=self._get_metrics_agent_environment_variables(agent_config["name"]),
-                role=execution_role,
-                description=agent_config["description"],
-                reserved_concurrent_executions=3,  # Limited concurrency for metrics
-                vpc=self.vpc_stack.vpc if self.vpc_stack else None,
-                vpc_subnets=vpc_config,
-                security_groups=security_groups,
-                allow_public_subnet=True  # Allow placement in public subnets when no private subnets available
-            )
-            
-            self.lambda_functions[f"metrics_{agent_config['name'].replace('-', '_')}"] = function
-            logger.info(f"Created {agent_config['name']} metrics agent Lambda function")
+        self.lambda_functions["metrics"] = function
+        logger.info("Created unified metrics agent Lambda function")
         
         logger.info("Created all metrics agent Lambda functions")
     
@@ -254,7 +234,7 @@ class OscarLambdaStack(Stack):
         """
         return {
             # Central secret reference - Lambda will load from Secrets Manager at runtime
-            "CENTRAL_SECRET_NAME": "oscar-central-env-cdk-created",
+            "CENTRAL_SECRET_NAME": self.secrets_stack.central_env_secret.secret_name,
             
             # DynamoDB table names from .env with CDK suffix
             "SESSIONS_TABLE_NAME": os.environ.get("SESSIONS_TABLE_NAME", "oscar-agent-sessions") + "-cdk-created",
@@ -288,7 +268,7 @@ class OscarLambdaStack(Stack):
         """
         return {
             # Central secret reference
-            "CENTRAL_SECRET_NAME": "oscar-central-env-cdk-created",
+            "CENTRAL_SECRET_NAME": self.secrets_stack.central_env_secret.secret_name,
             
             # DynamoDB table names with CDK suffix
             "SESSIONS_TABLE_NAME": os.environ.get("SESSIONS_TABLE_NAME", "oscar-agent-sessions") + "-cdk-created",
@@ -311,7 +291,7 @@ class OscarLambdaStack(Stack):
         """
         return {
             # Central secret reference
-            "CENTRAL_SECRET_NAME": "oscar-central-env-cdk-created",
+            "CENTRAL_SECRET_NAME": self.secrets_stack.central_env_secret.secret_name,
             
             # Jenkins configuration
             "JENKINS_TIMEOUT": os.environ.get("JENKINS_TIMEOUT", "60"),
@@ -321,22 +301,19 @@ class OscarLambdaStack(Stack):
             "LOG_LEVEL": os.environ.get("LOG_LEVEL", "INFO")
         }
     
-    def _get_metrics_agent_environment_variables(self, agent_type: str) -> Dict[str, str]:
+    def _get_metrics_agent_environment_variables(self) -> Dict[str, str]:
         """
-        Get environment variables for metrics agent Lambda functions.
-        
-        Args:
-            agent_type: Type of metrics agent (test, build, release)
+        Get environment variables for unified metrics agent Lambda function.
             
         Returns:
             Dictionary of environment variables for the metrics agent
         """
         return {
             # Central secret reference
-            "CENTRAL_SECRET_NAME": "oscar-central-env-cdk-created",
+            "CENTRAL_SECRET_NAME": self.secrets_stack.central_env_secret.secret_name,
             
-            # Metrics configuration from .env
-            "METRICS_TYPE": agent_type,
+            # Metrics configuration from .env - unified agent handles all types
+            "METRICS_TYPE": "unified",
             "REQUEST_TIMEOUT": os.environ.get("REQUEST_TIMEOUT", "30"),
             "MAX_RESULTS": os.environ.get("MAX_RESULTS", "500"),
             
@@ -419,8 +396,7 @@ class OscarLambdaStack(Stack):
                 elif "jenkins_agent" in key:
                     return self._get_jenkins_agent_environment_variables()
                 elif "metrics" in key:
-                    agent_type = key.replace("metrics_", "").replace("_", "-")
-                    return self._get_metrics_agent_environment_variables(agent_type)
+                    return self._get_metrics_agent_environment_variables()
         
         logger.warning(f"Function {function_name} not found")
         return {}

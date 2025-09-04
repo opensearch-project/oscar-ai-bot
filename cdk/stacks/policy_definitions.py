@@ -164,6 +164,17 @@ class OscarPolicyDefinitions:
                     f"arn:aws:bedrock:{self.region}::foundation-model/anthropic.claude-3-haiku-*",
                     f"arn:aws:bedrock:{self.region}::foundation-model/anthropic.claude-3-sonnet-*"
                 ]
+            ),
+            
+            # Lambda self-invocation for async processing
+            iam.PolicyStatement(
+                sid="LambdaSelfInvocation",
+                effect=iam.Effect.ALLOW,
+                actions=["lambda:InvokeFunction"],
+                resources=[
+                    f"arn:aws:lambda:{self.region}:{self.account_id}:function:oscar-supervisor-agent-cdk",
+                    f"arn:aws:lambda:{self.region}:{self.account_id}:function:oscar-communication-handler-cdk"
+                ]
             )
         ]
     

@@ -98,67 +98,28 @@ class OscarApiGatewayStack(Stack):
         Returns:
             The created REST API Gateway
         """
-        # Configure CORS origins with security in mind
-        cors_origins = self._get_cors_origins()
-        
         api = apigateway.RestApi(
             self, "OscarSlackBotApi",
             rest_api_name="oscar-slack-bot-api-cdk",
             description="OSCAR Slack Bot API Gateway for webhook endpoints",
             
-            # Enable CloudWatch logging
-            cloud_watch_role=True,
+            # Keep minimal configuration
             deploy_options=apigateway.StageOptions(
-                stage_name="prod",
-                logging_level=apigateway.MethodLoggingLevel.INFO,
-                access_log_destination=apigateway.LogGroupLogDestination(self.log_group),
-                access_log_format=apigateway.AccessLogFormat.json_with_standard_fields(
-                    caller=True,
-                    http_method=True,
-                    ip=True,
-                    protocol=True,
-                    request_time=True,
-                    resource_path=True,
-                    response_length=True,
-                    status=True,
-                    user=True
-                ),
-                
-                # Enable throttling and abuse protection
-                throttling_rate_limit=100,  # requests per second
-                throttling_burst_limit=200,  # burst capacity
-                
-                # Enable detailed metrics
-                metrics_enabled=True,
-                data_trace_enabled=False  # Disable for security (contains request/response data)
+                stage_name="prod"
             ),
             
-            # Default CORS configuration
-            default_cors_preflight_options=apigateway.CorsOptions(
-                allow_origins=cors_origins,
-                allow_methods=["POST", "OPTIONS"],
-                allow_headers=[
-                    "Content-Type",
-                    "X-Slack-Request-Timestamp", 
-                    "X-Slack-Signature",
-                    "X-Slack-Retry-Num",
-                    "X-Slack-Retry-Reason"
-                ],
-                max_age=Duration.hours(1)
-            ),
+            # CORS disabled for Slack webhook compatibility
             
             # Security configuration
             endpoint_configuration=apigateway.EndpointConfiguration(
                 types=[apigateway.EndpointType.REGIONAL]
             ),
             
-            # Disable execute API endpoint for security
-            disable_execute_api_endpoint=True
+            # Enable execute API endpoint for Slack webhook access
+            disable_execute_api_endpoint=False
         )
         
-        # Add additional security and monitoring
-        self._add_security_features(api)
-        self._add_monitoring_features(api)
+        # Keep it simple - no additional security or monitoring features
         
         return api
     
@@ -169,60 +130,20 @@ class OscarApiGatewayStack(Stack):
         # Create /slack resource
         slack_resource = self.api.root.add_resource("slack")
         
-        # Create request validator once and reuse
-        request_validator = self._create_request_validator()
+        # No request validator to ensure Slack compatibility
         
-        # Create Lambda integration
+        # Create Lambda proxy integration (required for Slack challenge handling)
         lambda_integration = apigateway.LambdaIntegration(
             self.lambda_function,
-            proxy=False,
-            integration_responses=[
-                apigateway.IntegrationResponse(
-                    status_code="200",
-                    response_parameters={
-                        "method.response.header.Access-Control-Allow-Origin": "'*'"
-                    }
-                ),
-                apigateway.IntegrationResponse(
-                    status_code="400",
-                    selection_pattern="4\\d{2}"
-                ),
-                apigateway.IntegrationResponse(
-                    status_code="500",
-                    selection_pattern="5\\d{2}"
-                )
-            ]
+            proxy=True,  # Enable proxy integration for proper request/response handling
+            allow_test_invoke=True
         )
         
-        # Method response configuration
-        method_responses = [
-            apigateway.MethodResponse(
-                status_code="200",
-                response_parameters={
-                    "method.response.header.Access-Control-Allow-Origin": True
-                }
-            ),
-            apigateway.MethodResponse(status_code="400"),
-            apigateway.MethodResponse(status_code="500")
-        ]
-        
-        # Create /slack/events endpoint
+        # Create /slack/events endpoint with proxy integration (only endpoint needed)
         events_resource = slack_resource.add_resource("events")
         events_resource.add_method(
             "POST",
             lambda_integration,
-            method_responses=method_responses,
-            request_validator=request_validator,
-            authorization_type=apigateway.AuthorizationType.NONE
-        )
-        
-        # Create /slack/interactive endpoint
-        interactive_resource = slack_resource.add_resource("interactive")
-        interactive_resource.add_method(
-            "POST", 
-            lambda_integration,
-            method_responses=method_responses,
-            request_validator=request_validator,
             authorization_type=apigateway.AuthorizationType.NONE
         )
     
