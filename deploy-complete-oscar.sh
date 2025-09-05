@@ -75,10 +75,7 @@ cdk deploy OscarPermissionsStack --require-approval never
 log_info "Deploying Storage stack..."
 cdk deploy OscarStorageStack --require-approval never
 
-log_info "Preparing Lambda assets with dependencies..."
-./prepare_lambda_assets.sh
-
-log_info "Deploying Lambda stack..."
+log_info "Deploying Lambda stack (assets will be prepared automatically)..."
 cdk deploy OscarLambdaStack --require-approval never
 
 log_info "Deploying API Gateway stack..."
@@ -144,7 +141,10 @@ log_info "This adds comprehensive identity-based and resource-based policies for
 
 log_success "✅ All OSCAR permissions fixed!"
 
-
+# Step 7.5: Cleanup Lambda assets to save disk space
+log_info "🧹 Cleaning up Lambda assets to save disk space..."
+rm -rf cdk/lambda_assets
+log_success "✅ Lambda assets cleaned up!"
 
 # Step 8: Final verification
 log_info "🔍 Step 8: Final Integration Verification"
