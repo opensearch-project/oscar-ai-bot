@@ -4,7 +4,13 @@
 # Handles Lambda updates, agent creation, and dependency linking
 
 set -e
-
+if [ -f .env ]; then
+    # Load environment variables
+    source .env
+else
+    echo "Error: .env file not found!"
+    exit 1
+fi
 # Configuration
 AWS_REGION="us-east-1"
 CONFIG_FILE="deployment-config.json"
@@ -145,7 +151,7 @@ update_lambda_arns() {
     if [[ "$lambda_function" != "null" ]]; then
         # Check if Lambda exists
         if check_lambda_exists "$lambda_function"; then
-            local lambda_arn="arn:aws:lambda:$AWS_REGION:395380602281:function:$lambda_function"
+            local lambda_arn="arn:aws:lambda:$AWS_REGION:$AWS_ACCOUNT_ID:function:$lambda_function"
             
             # Map agent type to placeholder pattern
             local placeholder=""
@@ -200,7 +206,7 @@ update_lambda_arns() {
     if [[ "$agent_type" == "oscar-privileged" ]]; then
         local comm_lambda=$(jq -r --arg type "$agent_type" '.agents[$type].communication_lambda' "$CONFIG_FILE")
         if [[ "$comm_lambda" != "null" ]] && check_lambda_exists "$comm_lambda"; then
-            local comm_arn="arn:aws:lambda:$AWS_REGION:395380602281:function:$comm_lambda"
+            local comm_arn="arn:aws:lambda:$AWS_REGION:$AWS_ACCOUNT_ID:function:$comm_lambda"
             
             if [[ -f "agent-configs/$agent_type/action-groups.json" ]]; then
                 jq --arg arn "$comm_arn" \

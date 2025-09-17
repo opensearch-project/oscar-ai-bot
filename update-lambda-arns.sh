@@ -4,10 +4,15 @@
 # This script updates the Lambda ARNs in agent configuration files with CDK-deployed Lambda functions
 
 set -e
-
+if [ -f .env ]; then
+    # Load environment variables
+    source .env
+else
+    echo "Error: .env file not found!"
+    exit 1
+fi
 # Configuration
 AWS_REGION="us-east-1"
-AWS_ACCOUNT_ID="395380602281"
 
 # Colors for output
 RED='\033[0;31m'

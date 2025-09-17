@@ -315,6 +315,7 @@ class DistributionBuildOpenSearchJob(BaseJobDefinition):
             )
         ]
 
+
 class JobRegistry:
     """Registry for managing available Jenkins jobs."""
     

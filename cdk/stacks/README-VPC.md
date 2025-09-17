@@ -5,7 +5,7 @@ The `OscarVpcStack` provides VPC and networking infrastructure for the OSCAR Sla
 ## Features
 
 ### VPC Import
-- Imports existing VPC (`vpc-0f2061a1321c2d669` by default)
+- Imports existing VPC (by default)
 - Supports fallback to default VPC if specific VPC not found
 - Configurable via `VPC_ID` environment variable
 
@@ -78,7 +78,7 @@ isolated_subnets = vpc_stack.get_subnet_ids("isolated")
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `VPC_ID` | Existing VPC ID to import | `vpc-0f2061a1321c2d669` |
+| `VPC_ID` | Existing VPC ID to import | `existing_vpc_id` |
 | `LAMBDA_SECURITY_GROUP_ID` | Existing security group ID to import | None (creates new) |
 | `ENVIRONMENT` | Environment name for tagging | `dev` |
 

@@ -306,9 +306,9 @@ add_lambda_permission() {
         # Check if permission already exists
         aws lambda get-policy --function-name "${function_name}" --query 'Policy' --output text 2>/dev/null | grep -q "${agent_id}"
         if [ $? -eq 0 ]; then
-            echo -e "${YELLOW}[INFO] ⚠️  Permission already exists for ${function_name}${NC}"
+            echo -e "${YELLOW}[INFO]  Permission already exists for ${function_name}${NC}"
         else
-            echo -e "${RED}[ERROR] ❌ Failed to add permission for ${function_name}${NC}"
+            echo -e "${RED}[ERROR] Failed to add permission for ${function_name}${NC}"
             return 1
         fi
     fi

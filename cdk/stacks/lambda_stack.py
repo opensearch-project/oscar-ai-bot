@@ -344,18 +344,18 @@ class OscarLambdaStack(Stack):
             "MAX_RESULTS": os.environ.get("MAX_RESULTS", "500"),
             
             # OpenSearch configuration from .env
-            "OPENSEARCH_HOST": os.environ.get("OPENSEARCH_HOST", "https://aos-a4f4c9d2accb-brkjnnuiccoheln4bmcpzv4auq.us-east-1.es.amazonaws.com"),
-            "OPENSEARCH_DOMAIN_ACCOUNT": os.environ.get("OPENSEARCH_DOMAIN_ACCOUNT", "979020455945"),
+            "OPENSEARCH_HOST": os.environ.get("OPENSEARCH_HOST"),
+            "OPENSEARCH_DOMAIN_ACCOUNT": os.environ.get("OPENSEARCH_DOMAIN_ACCOUNT"),
             "OPENSEARCH_REGION": os.environ.get("OPENSEARCH_REGION", "us-east-1"),
             
             # Cross-account access from .env
-            "METRICS_CROSS_ACCOUNT_ROLE_ARN": os.environ.get("METRICS_CROSS_ACCOUNT_ROLE_ARN", "arn:aws:iam::979020455945:role/OpenSearchOscarAccessRole"),
+            "METRICS_CROSS_ACCOUNT_ROLE_ARN": os.environ.get("METRICS_CROSS_ACCOUNT_ROLE_ARN"),
             "EXTERNAL_ID": "oscar-metrics-access",
             
             # VPC configuration from .env
-            "VPC_ID": os.environ.get("VPC_ID", "vpc-0f2061a1321c2d669"),
-            "SUBNET_IDS": os.environ.get("SUBNET_IDS", "subnet-050b451b74a9e942e,subnet-0689046ab78f4f94d,subnet-04bc37db52fc9603a,subnet-045e091dc5573bd1b,subnet-06b2bf5e225458fd6,subnet-0bfe69389ea34bab3"),
-            "SECURITY_GROUP_ID": os.environ.get("SECURITY_GROUP_ID", "sg-0e18a7fad124327c5"),
+            "VPC_ID": os.environ.get("VPC_ID"),
+            "SUBNET_IDS": os.environ.get("SUBNET_IDS"),
+            "SECURITY_GROUP_ID": os.environ.get("SECURITY_GROUP_ID"),
             
             # Logging from .env
             "LOG_LEVEL": os.environ.get("LOG_LEVEL", "INFO")

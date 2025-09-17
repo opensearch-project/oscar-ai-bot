@@ -16,3 +16,6 @@ urllib3==2.5.0
 # Additional security constraints for transitive dependencies
 requests>=2.31.0
 certifi>=2023.7.22
+
+#.env retrieval 
+python-dotenv>=1.0.0

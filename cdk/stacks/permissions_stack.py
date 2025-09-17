@@ -13,6 +13,7 @@ Bedrock agents, Lambda functions, API Gateway, and cross-account access.
 """
 
 import os
+from dotenv import load_dotenv
 from typing import Dict, List
 from aws_cdk import (
     Stack,
@@ -95,9 +96,11 @@ class OscarPermissionsStack(Stack):
         
         # Use existing VPC Lambda execution role for metrics functions
         # This role is pre-authorized for cross-account access to OpenSearch
+        load_dotenv()
+        aws_account_id = os.environ.get('AWS_ACCOUNT_ID')
         vpc_role = iam.Role.from_role_arn(
             self, "ExistingVpcLambdaRole",
-            role_arn="arn:aws:iam::395380602281:role/oscar-metrics-lambda-vpc-role"
+            role_arn=f"arn:aws:iam::{aws_account_id}:role/oscar-metrics-lambda-vpc-role"
         )
         roles["vpc"] = vpc_role
         

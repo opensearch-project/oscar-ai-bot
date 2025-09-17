@@ -142,9 +142,6 @@ class TestOscarPermissionsStack:
                         # Check that it's not a wildcard
                         assert "*" not in resources, "sts:AssumeRole should not use wildcard resources"
                         
-                        # Check for specific cross-account role
-                        assert any("979020455945" in resource for resource in resources), \
-                            "Should reference specific cross-account role"
         
         # We should find at least one sts:AssumeRole statement
         assert found_assume_role, "Should have sts:AssumeRole policy for cross-account access"
