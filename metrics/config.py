@@ -53,14 +53,13 @@ class MetricsConfig:
         self.opensearch_host = os.environ.get('OPENSEARCH_HOST', '')
         self.opensearch_vpc_endpoint_url = os.environ.get('OPENSEARCH_VPC_ENDPOINT_URL', '')
         self.opensearch_domain_arn = os.environ.get('OPENSEARCH_DOMAIN_ARN', '')
-        self.opensearch_domain_account = os.environ.get('OPENSEARCH_DOMAIN_ACCOUNT', '979020455945')
+        self.opensearch_domain_account = os.environ.get('OPENSEARCH_DOMAIN_ACCOUNT')
         self.opensearch_region = os.environ.get('OPENSEARCH_REGION', 'us-east-1')
         self.opensearch_service = os.environ.get('OPENSEARCH_SERVICE', 'es')
         
         # Cross-account role configuration
         self.metrics_cross_account_role_arn = os.environ.get(
-            'METRICS_CROSS_ACCOUNT_ROLE_ARN', 
-            'arn:aws:iam::979020455945:role/OpenSearchOscarAccessRole'
+            'METRICS_CROSS_ACCOUNT_ROLE_ARN'
         )
         
         # Query configuration
@@ -109,7 +108,7 @@ class MetricsConfig:
             )
             
             # Get the .env content from secrets manager
-            response = client.get_secret_value(SecretId='oscar-central-env')
+            response = client.get_secret_value(SecretId='oscar-central-env-dev-cdk')
             env_content = response['SecretString']
             
             # Load the .env content into environment variables

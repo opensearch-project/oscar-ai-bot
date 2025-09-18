@@ -42,7 +42,7 @@ class JenkinsConfig:
         
         # AWS Configuration
         self.aws_region = os.getenv('AWS_REGION', 'us-east-1')
-        self.aws_account_id = os.getenv('AWS_ACCOUNT_ID', '395380602281')
+        self.aws_account_id = os.getenv('AWS_ACCOUNT_ID')
         
         # Lambda Configuration
         self.lambda_timeout = int(os.getenv('LAMBDA_TIMEOUT', '180'))
@@ -68,7 +68,7 @@ class JenkinsConfig:
             )
             
             # Get the .env content from secrets manager
-            response = client.get_secret_value(SecretId='oscar-central-env')
+            response = client.get_secret_value(SecretId='oscar-central-env-dev-cdk')
             env_content = response['SecretString']
             
             # Load the .env content into environment variables

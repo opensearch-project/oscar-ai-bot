@@ -10,6 +10,8 @@ metrics/docs/
 lambda_update_scripts/
 instructions.md
 instructions.txt
+agent-configs
+cdk.context.json
 
 # Build outputs
 build_docs/
