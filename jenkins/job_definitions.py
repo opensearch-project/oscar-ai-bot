@@ -148,6 +148,47 @@ class DockerScanJob(BaseJobDefinition):
             )
         ]
 
+class ReleaseChores(BaseJobDefinition):
+    """Release chore class definition."""
+    
+    def get_job_name(self) -> str:
+        return "distribution-release-chores"
+    
+    def get_description(self) -> str:
+        return "Does various chores for distribution release"
+    
+    def get_parameters(self) -> List[JobParameter]:
+        return [
+            JobParameter(
+            name="RELEASE_CHORE",
+            description="Release chore to carry out",
+            required=True,
+            parameter_type="string",
+            choices=["checkReleaseOwners", "checkDocumentation", "checkCodeCoverage", "checkReleaseNotes", "checkReleaseIssues", "buildRC", "addRcDetailsComment", "checkDocumentationPullRequests", "checkIntegTestResultsOverview"]
+            ),
+            JobParameter(
+            name="ACTION",
+            description="Release chore action",
+            required=True,
+            parameter_type="string",
+            choices=["check", "request", "assign", "notify", "add", "both", "opensearch", "opensearch-dashboards"]
+            ),
+            JobParameter(
+            name="RELEASE_VERSION",
+            description="Release version (e.g., 2.11.0, 3.0.0)",
+            required=True,
+            parameter_type="string",
+            validation_pattern=r"^\d+\.\d+\.\d+$"
+            ),
+            JobParameter(
+            name="GIT_LOG_DATE",
+            description="Enter data to check commits for release notes in format yyyy-mm-dd, example 2022-07-26.",
+            required=False,
+            parameter_type="string",
+            validation_pattern=r"^\d{4}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12]\d|3[01])$"
+            ),
+        ]
+
 class CentralReleasePromotionJob(BaseJobDefinition):
     """Central release promotion pipeline job definition."""
     
@@ -328,6 +369,7 @@ class JobRegistry:
         self.register_job(DockerScanJob())
         self.register_job(CentralReleasePromotionJob())
         self.register_job(DistributionBuildOpenSearchJob())
+        self.register_job(ReleaseChores())
     
     def register_job(self, job_definition: BaseJobDefinition):
         """Register a new job definition."""

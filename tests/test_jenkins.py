@@ -15,7 +15,7 @@ import os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'jenkins'))
 
 from jenkins_client import JenkinsClient, JenkinsCredentials
-from job_definitions import DockerScanJob, CentralReleasePromotionJob, job_registry
+from job_definitions import DockerScanJob, CentralReleasePromotionJob, ReleaseChores, job_registry
 from lambda_function import lambda_handler, handle_trigger_job, handle_get_job_info
 
 
@@ -80,32 +80,75 @@ class TestJobDefinitions(unittest.TestCase):
         for param in params.values():
             self.assertTrue(param['required'])
     
+    def test_release_chores_job(self):
+        """Test ReleaseChores job definition."""
+        job = ReleaseChores()
+
+        self.assertEqual(job.job_name, 'distribution-release-chores')
+        params = job.get_parameter_info()
+
+        # Verify expected parameters
+        self.assertIn('RELEASE_CHORE', params)
+        self.assertIn('ACTION', params)
+        self.assertIn('RELEASE_VERSION', params)
+        self.assertIn('GIT_LOG_DATE', params)
+
+        # Verify required/optional status
+        self.assertTrue(params['RELEASE_CHORE']['required'])
+        self.assertTrue(params['ACTION']['required'])
+        self.assertTrue(params['RELEASE_VERSION']['required'])
+        self.assertFalse(params['GIT_LOG_DATE']['required'])
+
+        # Verify choices for parameters
+        self.assertIn('checkReleaseOwners', params['RELEASE_CHORE']['choices'])
+        self.assertIn('buildRC', params['RELEASE_CHORE']['choices'])
+        self.assertIn('check', params['ACTION']['choices'])
+        self.assertIn('opensearch-dashboards', params['ACTION']['choices'])
+
     def test_job_registry(self):
         """Test job registry functionality."""
         jobs = job_registry.list_jobs()
-        
+
         self.assertIn('docker-scan', jobs)
         self.assertIn('central-release-promotion', jobs)
-        
+        self.assertIn('distribution-release-chores', jobs)
+
         # Test getting job info
         docker_job = job_registry.get_job('docker-scan')
         self.assertIsNotNone(docker_job)
-        
+
         # Test unknown job
         unknown_job = job_registry.get_job('nonexistent-job')
         self.assertIsNone(unknown_job)
     
     def test_parameter_validation(self):
         """Test job parameter validation."""
-        # Valid parameters
+        # Valid parameters for docker scan
         valid_params = {'IMAGE_FULL_NAME': 'alpine:3.19'}
         validated = job_registry.validate_job_parameters('docker-scan', valid_params)
         self.assertEqual(validated, valid_params)
-        
+
+        # Valid parameters for release chores
+        valid_chores_params = {
+            'RELEASE_CHORE': 'buildRC',
+            'ACTION': 'check',
+            'RELEASE_VERSION': '2.11.0'
+        }
+        validated_chores = job_registry.validate_job_parameters('distribution-release-chores', valid_chores_params)
+        self.assertEqual(validated_chores, valid_chores_params)
+
         # Missing required parameter
         with self.assertRaises(ValueError):
             job_registry.validate_job_parameters('docker-scan', {})
-        
+
+        # Invalid RELEASE_VERSION format in release chores
+        with self.assertRaises(ValueError):
+            job_registry.validate_job_parameters('distribution-release-chores', {
+                'RELEASE_CHORE': 'buildRC',
+                'ACTION': 'check',
+                'RELEASE_VERSION': 'invalid-version'
+            })
+
         # Unknown job
         with self.assertRaises(ValueError):
             job_registry.validate_job_parameters('unknown-job', {})
