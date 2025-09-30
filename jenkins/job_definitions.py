@@ -171,7 +171,7 @@ class ReleaseChores(BaseJobDefinition):
             description="Release chore action",
             required=True,
             parameter_type="string",
-            choices=["check", "request", "assign", "notify", "add", "both", "opensearch", "opensearch-dashboards"]
+            choices=["check", "create", "compile", "request", "assign", "notify", "add", "both", "opensearch", "opensearch-dashboards"]
             ),
             JobParameter(
             name="RELEASE_VERSION",
