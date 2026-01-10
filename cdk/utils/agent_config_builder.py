@@ -12,6 +12,8 @@ from enum import Enum
 
 class FoundationModel(Enum):
     """Supported foundation models for Bedrock agents."""
+    CLAUDE_4_5_SONNET= "anthropic.claude-sonnet-4-5-20250929-v1:0"
+    CLAUDE_4_SONNET= "anthropic.claude-sonnet-4-20250514-v1:0"
     CLAUDE_3_5_SONNET = "anthropic.claude-3-5-sonnet-20241022-v2:0"
     CLAUDE_3_5_HAIKU = "anthropic.claude-3-5-haiku-20241022-v1:0"
     CLAUDE_3_SONNET = "anthropic.claude-3-sonnet-20240229-v1:0"

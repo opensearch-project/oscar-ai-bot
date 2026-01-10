@@ -55,7 +55,7 @@ class OscarVpcStack(Stack):
         self.lambda_security_group = self._create_lambda_security_group()
         
         # Create VPC endpoints for improved security and performance
-        self.vpc_endpoints = self._create_vpc_endpoints()
+        # self.vpc_endpoints = self._create_vpc_endpoints()
         
         # Configure network ACLs for additional security
         self._configure_network_acls()
@@ -77,22 +77,40 @@ class OscarVpcStack(Stack):
         vpc_id = os.environ.get("VPC_ID")
         
         if not vpc_id:
-            raise ValueError("VPC_ID environment variable must be set for VPC deployment")
+            try:
+                logging.info("VPC_ID environment variable not found. A new VPC will be created")
+                vpc = ec2.Vpc(self, "OscarVpc",
+                    max_azs=3,
+                    nat_gateways=1,
+                    subnet_configuration=[
+                        ec2.SubnetConfiguration(
+                            name="public",
+                            subnet_type=ec2.SubnetType.PUBLIC,
+                            cidr_mask=24
+                        ),
+                        ec2.SubnetConfiguration(
+                            name="private",
+                            subnet_type=ec2.SubnetType.PRIVATE_WITH_EGRESS,
+                            cidr_mask=24
+                        )
+                    ])
+                return vpc
+            except Exception as e:
+                logger.error("Failed to create VPC with given CIDR.")
+                raise ValueError("Could not create VPC. Please check your account for details.")
+        else:
+            try:
+                vpc = ec2.Vpc.from_lookup(
+                    self, "ExistingVpc",
+                    vpc_id=vpc_id
+                )
             
-        logger.info(f"Importing existing VPC: {vpc_id}")
-        
-        try:
-            vpc = ec2.Vpc.from_lookup(
-                self, "ExistingVpc",
-                vpc_id=vpc_id
-            )
+                logger.info(f"Successfully imported VPC: {vpc_id}")
+                return vpc
             
-            logger.info(f"Successfully imported VPC: {vpc_id}")
-            return vpc
-            
-        except Exception as e:
-            logger.error(f"Failed to import VPC {vpc_id}: {e}")
-            raise ValueError(f"Could not import VPC {vpc_id}. Please verify the VPC_ID in your .env file.")
+            except Exception as e:
+                logger.error(f"Failed to import VPC {vpc_id}: {e}")
+                raise ValueError(f"Could not import VPC {vpc_id}. Please verify the VPC_ID in your .env file.")
     
     def _create_lambda_security_group(self) -> ec2.SecurityGroup:
         """
@@ -165,7 +183,7 @@ class OscarVpcStack(Stack):
             description="VPC endpoint access within VPC"
         )
         
-        logger.info("Created Lambda security group with OpenSearch access rules")
+        # logger.info("Created Lambda security group with OpenSearch access rules")
         return security_group
     
     def _create_vpc_endpoints(self) -> dict:
@@ -394,7 +412,7 @@ class OscarVpcStack(Stack):
                     subnet=subnet
                 )
             
-            logger.info("Configured Network ACLs for Lambda subnets")
+            # logger.info("Configured Network ACLs for Lambda subnets")
     
     def _add_outputs(self) -> None:
         """
@@ -484,60 +502,60 @@ class OscarVpcStack(Stack):
         Tags.of(self).add("Environment", os.environ.get("ENVIRONMENT", "dev"))
         Tags.of(self).add("ManagedBy", "CDK")
     
-    @property
-    def vpc_config_for_lambda(self) -> dict:
-        """
-        Get VPC configuration dictionary for Lambda functions.
-        
-        Returns:
-            Dictionary with VPC configuration for Lambda deployment
-        """
-        private_subnets = self.vpc.select_subnets(
-            subnet_type=ec2.SubnetType.PRIVATE_WITH_EGRESS
-        ).subnets
-        
-        if not private_subnets:
-            private_subnets = self.vpc.select_subnets(
-                subnet_type=ec2.SubnetType.PRIVATE_ISOLATED
-            ).subnets
-        
-        return {
-            "vpc": self.vpc,
-            "subnets": private_subnets,
-            "security_groups": [self.lambda_security_group]
-        }
+    # @property
+    # def vpc_config_for_lambda(self) -> dict:
+    #     """
+    #     Get VPC configuration dictionary for Lambda functions.
+    #
+    #     Returns:
+    #         Dictionary with VPC configuration for Lambda deployment
+    #     """
+    #     private_subnets = self.vpc.select_subnets(
+    #         subnet_type=ec2.SubnetType.PRIVATE_WITH_EGRESS
+    #     ).subnets
+    #
+    #     if not private_subnets:
+    #         private_subnets = self.vpc.select_subnets(
+    #             subnet_type=ec2.SubnetType.PRIVATE_ISOLATED
+    #         ).subnets
+    #
+    #     return {
+    #         "vpc": self.vpc,
+    #         "subnets": private_subnets,
+    #         "security_groups": [self.lambda_security_group]
+    #     }
     
-    def get_subnet_ids(self, subnet_type: str = "private") -> List[str]:
-        """
-        Get subnet IDs for the specified subnet type.
-        
-        Args:
-            subnet_type: Type of subnets to retrieve ("private", "public", "isolated")
-            
-        Returns:
-            List of subnet IDs
-        """
-        if subnet_type == "private":
-            subnets = self.vpc.select_subnets(
-                subnet_type=ec2.SubnetType.PRIVATE_WITH_EGRESS
-            ).subnet_ids
-            
-            if not subnets:
-                subnets = self.vpc.select_subnets(
-                    subnet_type=ec2.SubnetType.PRIVATE_ISOLATED
-                ).subnet_ids
-                
-        elif subnet_type == "public":
-            subnets = self.vpc.select_subnets(
-                subnet_type=ec2.SubnetType.PUBLIC
-            ).subnet_ids
-            
-        elif subnet_type == "isolated":
-            subnets = self.vpc.select_subnets(
-                subnet_type=ec2.SubnetType.PRIVATE_ISOLATED
-            ).subnet_ids
-            
-        else:
-            raise ValueError(f"Invalid subnet type: {subnet_type}")
-        
-        return subnets
+    # def get_subnet_ids(self, subnet_type: str = "private") -> List[str]:
+    #     """
+    #     Get subnet IDs for the specified subnet type.
+    #
+    #     Args:
+    #         subnet_type: Type of subnets to retrieve ("private", "public", "isolated")
+    #
+    #     Returns:
+    #         List of subnet IDs
+    #     """
+    #     if subnet_type == "private":
+    #         subnets = self.vpc.select_subnets(
+    #             subnet_type=ec2.SubnetType.PRIVATE_WITH_EGRESS
+    #         ).subnet_ids
+    #
+    #         if not subnets:
+    #             subnets = self.vpc.select_subnets(
+    #                 subnet_type=ec2.SubnetType.PRIVATE_ISOLATED
+    #             ).subnet_ids
+    #
+    #     elif subnet_type == "public":
+    #         subnets = self.vpc.select_subnets(
+    #             subnet_type=ec2.SubnetType.PUBLIC
+    #         ).subnet_ids
+    #
+    #     elif subnet_type == "isolated":
+    #         subnets = self.vpc.select_subnets(
+    #             subnet_type=ec2.SubnetType.PRIVATE_ISOLATED
+    #         ).subnet_ids
+    #
+    #     else:
+    #         raise ValueError(f"Invalid subnet type: {subnet_type}")
+    #
+    #     return subnets

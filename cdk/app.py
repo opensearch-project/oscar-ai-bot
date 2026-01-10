@@ -19,8 +19,9 @@ from aws_cdk import (
     Tags
 )
 
+
 # Load environment variables from .env file
-load_dotenv()
+# load_dotenv()
 
 
 # Import working stacks
@@ -57,7 +58,6 @@ def main() -> None:
     if not account:
         raise ValueError("CDK_DEFAULT_ACCOUNT environment variable must be set")
 
-    logger.info(f"Deploying to account: {account}")
     logger.info(f"Deploying to region: {region}")
     logger.info(f"Environment: {environment}")
 
@@ -67,62 +67,61 @@ def main() -> None:
     
     # 1. Permissions (IAM roles and policies)
     permissions_stack = OscarPermissionsStack(
-        app, "OscarPermissionsStack",
+        app, f"OscarPermissionsStack-{environment}",
         env=env,
         description="OSCAR IAM permissions and roles"
     )
     
     # 2. Secrets (AWS Secrets Manager)
     secrets_stack = OscarSecretsStack(
-        app, "OscarSecretsStack",
+        app, f"OscarSecretsStack-{environment}",
         env=env,
         description="OSCAR secrets management"
     )
     
     # 3. Storage (DynamoDB tables)
     storage_stack = OscarStorageStack(
-        app, "OscarStorageStack",
+        app, f"OscarStorageStack-{environment}",
         env=env,
         description="OSCAR DynamoDB storage"
     )
     
     # 4. VPC (if needed for Lambda functions)
-    vpc_stack = None
-    if os.environ.get("VPC_ID") or os.environ.get("USE_VPC", "false").lower() == "true":
-        vpc_stack = OscarVpcStack(
-            app, "OscarVpcStack",
+    # vpc_stack = None
+    # if os.environ.get("VPC_ID") or os.environ.get("USE_VPC", "false").lower() == "true":
+    vpc_stack = OscarVpcStack(
+            app, f"OscarVpcStack-{environment}",
             env=env,
             description="OSCAR VPC configuration"
         )
-    
+
     # 5. Knowledge Base (temporarily disabled - will add back later)
-    # knowledge_base_stack = OscarKnowledgeBaseStack(
-    #     app, "OscarKnowledgeBaseStack",
-    #     env=env,
-    #     description="OSCAR Bedrock Knowledge Base"
-    # )
-    knowledge_base_stack = None
+    knowledge_base_stack = OscarKnowledgeBaseStack(
+        app, f"OscarKnowledgeBaseStack-{environment}",
+        env=env,
+        description="OSCAR Bedrock Knowledge Base"
+    )
     
     # 6. Lambda Functions (before API Gateway)
-    lambda_stack = OscarLambdaStack(
-        app, "OscarLambdaStack",
-        permissions_stack=permissions_stack,
-        secrets_stack=secrets_stack,
-        vpc_stack=vpc_stack,
-        env=env,
-        description="OSCAR Lambda functions"
-    )
-    
-    # 7. API Gateway (after Lambda functions)
-    api_gateway_stack = OscarApiGatewayStack(
-        app, "OscarApiGatewayStack",
-        lambda_stack=lambda_stack,
-        permissions_stack=permissions_stack,
-        env=env,
-        description="OSCAR API Gateway"
-    )
-    
-    # 8. Bedrock Agents (will be deployed manually after CDK stacks)
+    # lambda_stack = OscarLambdaStack(
+    #     app, f"OscarLambdaStack-{environment}",
+    #     permissions_stack=permissions_stack,
+    #     secrets_stack=secrets_stack,
+    #     vpc_stack=vpc_stack,
+    #     env=env,
+    #     description="OSCAR Lambda functions"
+    # )
+    #
+    # # 7. API Gateway (after Lambda functions)
+    # api_gateway_stack = OscarApiGatewayStack(
+    #     app, "OscarApiGatewayStack",
+    #     lambda_stack=lambda_stack,
+    #     permissions_stack=permissions_stack,
+    #     env=env,
+    #     description="OSCAR API Gateway"
+    # )
+    #
+    # # 8. Bedrock Agents (will be deployed manually after CDK stacks)
     # agents_stack = OscarAgentsStack(
     #     app, "OscarAgentsStack",
     #     permissions_stack=permissions_stack,
@@ -131,25 +130,25 @@ def main() -> None:
     #     env=env,
     #     description="OSCAR Bedrock agents"
     # )
-    agents_stack = None
-    
-    # Add tags to all stacks
-    stacks_to_tag = [permissions_stack, secrets_stack, storage_stack, api_gateway_stack, 
-                     lambda_stack]
-    if knowledge_base_stack:
-        stacks_to_tag.append(knowledge_base_stack)
-    if agents_stack:
-        stacks_to_tag.append(agents_stack)
-    
-    for stack in stacks_to_tag:
-        Tags.of(stack).add("Project", "OSCAR")
-        Tags.of(stack).add("Environment", environment)
-        Tags.of(stack).add("ManagedBy", "CDK")
-    
-    if vpc_stack:
-        Tags.of(vpc_stack).add("Project", "OSCAR")
-        Tags.of(vpc_stack).add("Environment", environment)
-        Tags.of(vpc_stack).add("ManagedBy", "CDK")
+    # # agents_stack = None
+    #
+    # # Add tags to all stacks
+    # stacks_to_tag = [permissions_stack, secrets_stack, storage_stack, api_gateway_stack,
+    #                  lambda_stack]
+    # if knowledge_base_stack:
+    #     stacks_to_tag.append(knowledge_base_stack)
+    # if agents_stack:
+    #     stacks_to_tag.append(agents_stack)
+    #
+    # for stack in stacks_to_tag:
+    #     Tags.of(stack).add("Project", "OSCAR")
+    #     Tags.of(stack).add("Environment", environment)
+    #     Tags.of(stack).add("ManagedBy", "CDK")
+    #
+    # if vpc_stack:
+    #     Tags.of(vpc_stack).add("Project", "OSCAR")
+    #     Tags.of(vpc_stack).add("Environment", environment)
+    #     Tags.of(vpc_stack).add("ManagedBy", "CDK")
     
     # Synthesize the CloudFormation templates
     app.synth()

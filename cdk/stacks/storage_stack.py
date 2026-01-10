@@ -135,6 +135,7 @@ class OscarStorageStack(Stack):
             topic_name="oscar-storage-alerts-cdk",
             display_name="OSCAR Storage Monitoring Alerts"
         )
+
         
         # Context table monitoring only
         self._create_table_alarms(

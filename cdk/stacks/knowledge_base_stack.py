@@ -29,7 +29,7 @@ from aws_cdk import (
     aws_events as events,
     aws_events_targets as targets,
     aws_logs as logs,
-    CfnOutput,
+    CfnOutput, custom_resources,
 
 )
 from constructs import Construct
@@ -38,56 +38,65 @@ from constructs import Construct
 class OscarKnowledgeBaseStack(Stack):
     """
     Knowledge Base infrastructure for OSCAR.
-    
+
     This construct creates and configures the Knowledge Base infrastructure including:
     - S3 bucket for document storage with versioning and lifecycle policies
     - OpenSearch Serverless collection with vector search capabilities
     - Bedrock Knowledge Base with document ingestion pipeline
     - Vector embeddings using Titan and metadata extraction
     """
-    
+
     def __init__(self, scope: Construct, construct_id: str, **kwargs) -> None:
         """
         Initialize Knowledge Base stack.
-        
+
         Args:
             scope: The CDK construct scope
             construct_id: The ID of the construct
             **kwargs: Additional keyword arguments
         """
         super().__init__(scope, construct_id, **kwargs)
-        
+
         # Get configuration from environment
         self.account_id = os.environ.get("CDK_DEFAULT_ACCOUNT")
         self.aws_region = os.environ.get("CDK_DEFAULT_REGION", "us-east-1")
         self.env_name = os.environ.get("ENVIRONMENT", "dev")
-        
+
         # Determine removal policy based on environment
         self.removal_policy = (
             RemovalPolicy.RETAIN if self.env_name == "prod" else RemovalPolicy.DESTROY
         )
-        
+
         # Create S3 bucket for document storage
         self.documents_bucket = self._create_documents_bucket()
-        
+
         # Create OpenSearch Serverless collection
         self.opensearch_collection = self._create_opensearch_collection()
-        
+
+        # Create KB service role (needed for data access policy)
+        self.kb_service_role = self._create_kb_service_role()
+
+        # Create data access policy (needed before index creation)
+        self.data_access_policy = self._create_data_access_policy()
+
+        # Create OpenSearch index
+        self.opensearch_index = self._create_opensearch_index()
+
         # Create Knowledge Base
         self.knowledge_base = self._create_knowledge_base()
-        
+        #
         # Create data source for document ingestion
         self.data_source = self._create_data_source()
-        
+
         # Create Lambda function for automatic document synchronization
         self.sync_lambda = self._create_document_sync_lambda()
-        
+
         # Add S3 event notification for automatic sync
         self._configure_s3_notifications()
-        
+
         # Create outputs
         self._create_outputs()
-    
+
     def _create_documents_bucket(self) -> s3.Bucket:
         """
         Create S3 bucket for document storage with versioning and lifecycle policies.
@@ -129,13 +138,13 @@ class OscarKnowledgeBaseStack(Stack):
         )
         
         # We'll add the S3 event notification after creating the Lambda function
-        
+
         return bucket
-    
+
     def _create_opensearch_collection(self) -> opensearchserverless.CfnCollection:
         """
         Create OpenSearch Serverless collection with vector search capabilities.
-        
+
         Returns:
             The OpenSearch Serverless collection
         """
@@ -154,7 +163,7 @@ class OscarKnowledgeBaseStack(Stack):
                 "AWSOwnedKey": true
             }}"""
         )
-        
+
         # Create network policy (shortened name to fit 32 char limit)
         network_policy = opensearchserverless.CfnSecurityPolicy(
             self, "OscarKnowledgeBaseNetworkPolicy",
@@ -174,11 +183,11 @@ class OscarKnowledgeBaseStack(Stack):
                 "AllowFromPublic": true
             }}]"""
         )
-        
+
         # Create data access policy (shortened name to fit 32 char limit)
         # Note: We'll create this after the KB service role is created
         data_access_policy = None
-        
+
         # Create the collection
         collection = opensearchserverless.CfnCollection(
             self, "OscarKnowledgeBaseCollection",
@@ -187,28 +196,26 @@ class OscarKnowledgeBaseStack(Stack):
             type="VECTORSEARCH",
             standby_replicas="DISABLED"  # Cost optimization for non-prod
         )
-        
+
         # Add dependencies
         collection.add_dependency(encryption_policy)
         collection.add_dependency(network_policy)
-        
+
         return collection
-    
-    def _create_knowledge_base(self) -> bedrock.CfnKnowledgeBase:
+
+    def _create_kb_service_role(self) -> iam.Role:
         """
-        Create Bedrock Knowledge Base with vector embeddings using Titan.
-        
+        Create service role for Knowledge Base.
+
         Returns:
-            The Bedrock Knowledge Base
+            The IAM role for Knowledge Base
         """
-        # Create service role for Knowledge Base
         kb_service_role = iam.Role(
             self, "KnowledgeBaseServiceRole",
-            role_name=f"AmazonBedrockExecutionRoleForKnowledgeBase-oscar-cdk-created-{self.env_name}",
             assumed_by=iam.ServicePrincipal("bedrock.amazonaws.com"),
             description="Service role for OSCAR Bedrock Knowledge Base"
         )
-        
+
         # Add permissions for S3 access
         kb_service_role.add_to_policy(
             iam.PolicyStatement(
@@ -224,7 +231,7 @@ class OscarKnowledgeBaseStack(Stack):
                 ]
             )
         )
-        
+
         # Add permissions for OpenSearch Serverless access
         kb_service_role.add_to_policy(
             iam.PolicyStatement(
@@ -238,7 +245,7 @@ class OscarKnowledgeBaseStack(Stack):
                 ]
             )
         )
-        
+
         # Add permissions for Bedrock model access
         kb_service_role.add_to_policy(
             iam.PolicyStatement(
@@ -248,12 +255,20 @@ class OscarKnowledgeBaseStack(Stack):
                     "bedrock:InvokeModel"
                 ],
                 resources=[
-                    f"arn:aws:bedrock:{self.aws_region}::foundation-model/amazon.titan-embed-text-v1"
+                    f"arn:aws:bedrock:{self.aws_region}::foundation-model/amazon.titan-embed-text-v2:0"
                 ]
             )
         )
-        
-        # Create data access policy now that we have the service role ARN
+
+        return kb_service_role
+
+    def _create_data_access_policy(self) -> opensearchserverless.CfnAccessPolicy:
+        """
+        Create data access policy for OpenSearch Serverless.
+
+        Returns:
+            The data access policy
+        """
         data_access_policy = opensearchserverless.CfnAccessPolicy(
             self, "OscarKnowledgeBaseDataAccessPolicy",
             name=f"oscar-kb-data-cdk-{self.env_name}",
@@ -272,37 +287,144 @@ class OscarKnowledgeBaseStack(Stack):
                     }},
                     {{
                         "ResourceType": "index",
-                        "Resource": ["index/oscar-kb-cdk-{self.env_name}/*"],
+                        "Resource": ["index/*/*"],
                         "Permission": [
                             "aoss:CreateIndex",
                             "aoss:DeleteIndex",
                             "aoss:UpdateIndex",
                             "aoss:DescribeIndex",
                             "aoss:ReadDocument",
-                            "aoss:WriteDocument"
+                            "aoss:WriteDocument",
+                            "aoss:*"
                         ]
                     }}
                 ],
                 "Principal": [
                     "arn:aws:iam::{self.account_id}:root",
-                    "{kb_service_role.role_arn}"
+                    "{self.kb_service_role.role_arn}"
                 ]
             }}]"""
         )
-        
-        # Note: Bedrock will automatically create the vector index when the Knowledge Base is created
-        # No need for custom bootstrap resource
-        
-        # Create the Knowledge Base
+
+        # Add dependency on collection
+        data_access_policy.node.add_dependency(self.opensearch_collection)
+
+        return data_access_policy
+
+    def _create_opensearch_index(self) -> opensearchserverless.CfnIndex:
+        """
+        Create OpenSearch index with proper vector mappings for Bedrock Knowledge Base.
+
+        Returns:
+            The OpenSearch Serverless index
+        """
+
+        # Add a wait condition to ensure collection is active
+        wait_condition = custom_resources.AwsCustomResource(
+            self,
+            "WaitForCollection",
+            on_create=custom_resources.AwsSdkCall(
+                service="OpenSearchServerless",
+                action="listCollections",
+                parameters={},
+                physical_resource_id=custom_resources.PhysicalResourceId.of("WaitForCollection")
+            ),
+            policy=custom_resources.AwsCustomResourcePolicy.from_sdk_calls(
+                resources=custom_resources.AwsCustomResourcePolicy.ANY_RESOURCE
+            )
+        )
+
+        wait_condition.node.add_dependency(self.opensearch_collection)
+
+        oss_index = opensearchserverless.CfnIndex(
+            self, 'OSSCfnIndex',
+            collection_endpoint=self.opensearch_collection.attr_collection_endpoint,
+            index_name="bedrock-knowledge-base-default-index",
+            mappings=opensearchserverless.CfnIndex.MappingsProperty(
+                properties={
+                    "bedrock-knowledge-base-default-vector": opensearchserverless.CfnIndex.PropertyMappingProperty(
+                        type="knn_vector",
+                        dimension=1024,
+                        method=opensearchserverless.CfnIndex.MethodProperty(
+                            engine="faiss",
+                            name="hnsw",
+                            space_type="l2"
+                        )
+                    ),
+                    "AMAZON_BEDROCK_METADATA": opensearchserverless.CfnIndex.PropertyMappingProperty(
+                        type="text",
+                        index=False
+                    ),
+                    "AMAZON_BEDROCK_TEXT": opensearchserverless.CfnIndex.PropertyMappingProperty(
+                        type="text"
+                    ),
+                    "AMAZON_BEDROCK_TEXT_CHUNK": opensearchserverless.CfnIndex.PropertyMappingProperty(
+                        type="text"
+                    ),
+                    "id": opensearchserverless.CfnIndex.PropertyMappingProperty(
+                        type="text"
+                    )
+                }
+            ),
+            settings=opensearchserverless.CfnIndex.IndexSettingsProperty(
+                index=opensearchserverless.CfnIndex.IndexProperty(
+                    knn=True
+                )
+            )
+        )
+
+        # Add dependencies
+        oss_index.node.add_dependency(self.opensearch_collection)
+        oss_index.node.add_dependency(self.data_access_policy)
+
+        return oss_index
+
+    def _create_knowledge_base(self) -> bedrock.CfnKnowledgeBase:
+        """
+        Create Bedrock Knowledge Base with vector embeddings using Titan.
+
+        Returns:
+            The Bedrock Knowledge Base
+        """
+        # Add a wait condition to ensure index is created. Index creation is delayed a bit.
+        index_wait_condition = custom_resources.AwsCustomResource(
+            self,
+            "WaitForIndex",
+            on_create=custom_resources.AwsSdkCall(
+                service="OpenSearchServerless",
+                action="batchGetCollection",  # Use batchGetCollection instead
+                parameters={"ids": [self.opensearch_collection.attr_id]},
+                # physical_resource_id=custom_resources.PhysicalResourceId.from_response(
+                #     "collections.0.id"
+                # ),
+                physical_resource_id=custom_resources.PhysicalResourceId.of(
+                    "wait-for-index-creation"
+                ),
+            ),
+            policy=custom_resources.AwsCustomResourcePolicy.from_statements(
+                [
+                    iam.PolicyStatement(
+                        effect=iam.Effect.ALLOW,
+                        actions=["aoss:BatchGetCollection", "aoss:APIAccessAll"],
+                        resources=[f"arn:aws:aoss:{self.region}:{self.account_id}:collection/*"],
+                    )
+                ]
+            ),
+        )
+
+        index_wait_condition.node.add_dependency(self.opensearch_index)
+
+
+        # Create the Knowledge Base using existing service role
         knowledge_base = bedrock.CfnKnowledgeBase(
             self, "OscarKnowledgeBase",
             name=f"oscar-kb-cdk-{self.env_name}",
             description="OSCAR Knowledge Base for OpenSearch release management documentation",
-            role_arn=kb_service_role.role_arn,
+            role_arn=self.kb_service_role.role_arn,
             knowledge_base_configuration=bedrock.CfnKnowledgeBase.KnowledgeBaseConfigurationProperty(
                 type="VECTOR",
                 vector_knowledge_base_configuration=bedrock.CfnKnowledgeBase.VectorKnowledgeBaseConfigurationProperty(
-                    embedding_model_arn=f"arn:aws:bedrock:{self.aws_region}::foundation-model/amazon.titan-embed-text-v1"
+                    embedding_model_arn=f"arn:aws:bedrock:{self.aws_region}::foundation-model/amazon.titan-embed-text-v2:0"
                 )
             ),
             storage_configuration=bedrock.CfnKnowledgeBase.StorageConfigurationProperty(
@@ -318,23 +440,25 @@ class OscarKnowledgeBaseStack(Stack):
                 )
             )
         )
-        
+
         # Add dependencies
         knowledge_base.add_dependency(self.opensearch_collection)
-        knowledge_base.add_dependency(data_access_policy)
-        
+        knowledge_base.add_dependency(self.opensearch_index)
+        knowledge_base.add_dependency(self.data_access_policy)
+        knowledge_base.node.add_dependency(index_wait_condition)
+
         return knowledge_base
-    
+
     def _create_data_source(self) -> bedrock.CfnDataSource:
         """
         Create data source for document ingestion from S3.
-        
+
         Returns:
             The Bedrock data source
         """
         data_source = bedrock.CfnDataSource(
             self, "OscarKnowledgeBaseDataSource",
-            name=f"oscar-docs-data-source-cdk-created-{self.env_name}",
+            name=f"oscar-docs-data-source-{self.env_name}",
             description="Data source for OSCAR documentation ingestion",
             knowledge_base_id=self.knowledge_base.attr_knowledge_base_id,
             data_source_configuration=bedrock.CfnDataSource.DataSourceConfigurationProperty(
@@ -354,23 +478,22 @@ class OscarKnowledgeBaseStack(Stack):
                 )
             )
         )
-        
+
         # Add dependency on knowledge base
         data_source.add_dependency(self.knowledge_base)
-        
+
         return data_source
-    
+
     def _create_document_sync_lambda(self) -> lambda_.Function:
         """
         Create Lambda function for automatic document synchronization.
-        
+
         Returns:
             The Lambda function for document sync
         """
         # Create execution role for the Lambda function
         sync_lambda_role = iam.Role(
             self, "DocumentSyncLambdaRole",
-            role_name=f"oscar-document-sync-lambda-role-cdk-created-{self.env_name}",
             assumed_by=iam.ServicePrincipal("lambda.amazonaws.com"),
             managed_policies=[
                 iam.ManagedPolicy.from_aws_managed_policy_name(
@@ -379,7 +502,7 @@ class OscarKnowledgeBaseStack(Stack):
             ],
             description="Execution role for OSCAR document sync Lambda function"
         )
-        
+
         # Add permissions for Bedrock agent operations
         sync_lambda_role.add_to_policy(
             iam.PolicyStatement(
@@ -396,11 +519,10 @@ class OscarKnowledgeBaseStack(Stack):
                 ]
             )
         )
-        
+
         # Create the Lambda function
         sync_lambda = lambda_.Function(
             self, "DocumentSyncLambda",
-            function_name=f"oscar-document-sync-cdk-created-{self.env_name}",
             runtime=lambda_.Runtime.PYTHON_3_12,
             handler="document_sync_handler.lambda_handler",
             code=lambda_.Code.from_asset("lambda"),
@@ -414,14 +536,14 @@ class OscarKnowledgeBaseStack(Stack):
             },
             description="Handles automatic Knowledge Base synchronization when documents are updated"
         )
-        
+
         # Add dependency on data source
         sync_lambda.node.add_dependency(self.data_source)
-        
-        return sync_lambda
-    
 
-    
+        return sync_lambda
+
+
+
     def _configure_s3_notifications(self) -> None:
         """
         Configure S3 event notifications for automatic document synchronization.
@@ -432,13 +554,13 @@ class OscarKnowledgeBaseStack(Stack):
             s3n.LambdaDestination(self.sync_lambda),
             s3.NotificationKeyFilter(prefix="docs/")
         )
-        
+
         self.documents_bucket.add_event_notification(
             s3.EventType.OBJECT_REMOVED,
             s3n.LambdaDestination(self.sync_lambda),
             s3.NotificationKeyFilter(prefix="docs/")
         )
-    
+
     def _create_outputs(self) -> None:
         """Create CloudFormation outputs for the Knowledge Base resources."""
         # S3 bucket outputs
@@ -447,53 +569,53 @@ class OscarKnowledgeBaseStack(Stack):
             value=self.documents_bucket.bucket_name,
             description="Name of the S3 bucket for Knowledge Base documents"
         )
-        
+
         CfnOutput(
             self, "DocumentsBucketArn",
             value=self.documents_bucket.bucket_arn,
             description="ARN of the S3 bucket for Knowledge Base documents"
         )
-        
+
         # OpenSearch collection outputs
         CfnOutput(
             self, "OpenSearchCollectionArn",
             value=self.opensearch_collection.attr_arn,
             description="ARN of the OpenSearch Serverless collection"
         )
-        
+
         CfnOutput(
             self, "OpenSearchCollectionEndpoint",
             value=self.opensearch_collection.attr_collection_endpoint,
             description="Endpoint of the OpenSearch Serverless collection"
         )
-        
+
         # Knowledge Base outputs
         CfnOutput(
             self, "KnowledgeBaseId",
             value=self.knowledge_base.attr_knowledge_base_id,
             description="ID of the Bedrock Knowledge Base"
         )
-        
+
         CfnOutput(
             self, "KnowledgeBaseArn",
             value=self.knowledge_base.attr_knowledge_base_arn,
             description="ARN of the Bedrock Knowledge Base"
         )
-        
+
         # Data source outputs
         CfnOutput(
             self, "DataSourceId",
             value=self.data_source.attr_data_source_id,
             description="ID of the Knowledge Base data source"
         )
-        
+
         # Lambda function outputs
         CfnOutput(
             self, "DocumentSyncLambdaArn",
             value=self.sync_lambda.function_arn,
             description="ARN of the document synchronization Lambda function"
         )
-        
+
         CfnOutput(
             self, "DocumentSyncLambdaName",
             value=self.sync_lambda.function_name,
