@@ -294,8 +294,7 @@ class OscarKnowledgeBaseStack(Stack):
                             "aoss:UpdateIndex",
                             "aoss:DescribeIndex",
                             "aoss:ReadDocument",
-                            "aoss:WriteDocument",
-                            "aoss:*"
+                            "aoss:WriteDocument"
                         ]
                     }}
                 ],
