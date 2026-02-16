@@ -16,7 +16,6 @@ from typing import Any
 
 from aws_cdk import CfnOutput, RemovalPolicy, Stack
 from aws_cdk import aws_apigateway as apigateway
-from aws_cdk import aws_iam as iam
 from aws_cdk import aws_logs as logs
 from constructs import Construct
 
@@ -24,14 +23,13 @@ from constructs import Construct
 class OscarApiGatewayStack(Stack):
     """
     API Gateway stack for OSCAR Slack Bot.
-    
     This stack creates and configures the REST API Gateway with Slack webhook
     endpoints, security features, and monitoring capabilities.
     """
-    
+
     def __init__(
-        self, 
-        scope: Construct, 
+        self,
+        scope: Construct,
         construct_id: str,
         lambda_stack: Any,
         permissions_stack: Any,
@@ -40,7 +38,6 @@ class OscarApiGatewayStack(Stack):
     ) -> None:
         """
         Initialize API Gateway stack.
-        
         Args:
             scope: The CDK construct scope
             construct_id: The ID of the construct
@@ -49,31 +46,29 @@ class OscarApiGatewayStack(Stack):
             **kwargs: Additional keyword arguments for Stack
         """
         super().__init__(scope, construct_id, **kwargs)
-        
+
         self.lambda_stack = lambda_stack
         self.permissions_stack = permissions_stack
         self.env_name = environment
         # Get the main Lambda function and API Gateway role
         self.lambda_function = lambda_stack.lambda_functions[lambda_stack.get_supervisor_agent_function_name(self.env_name)]
         self.api_gateway_role = permissions_stack.api_gateway_role
-        
+
         # Create CloudWatch log group for API Gateway
         self.log_group = self._create_log_group()
-        
+
         # Create the REST API Gateway
         self.api = self._create_rest_api()
-        
+
         # Configure Slack webhook endpoints
         self._configure_slack_endpoints()
-        
+
         # Add outputs for important resources
         self._add_outputs()
 
-    
     def _create_log_group(self) -> logs.LogGroup:
         """
         Create CloudWatch log group for API Gateway access logs.
-        
         Returns:
             The created CloudWatch log group
         """
@@ -83,11 +78,10 @@ class OscarApiGatewayStack(Stack):
             retention=logs.RetentionDays.ONE_YEAR,
             removal_policy=RemovalPolicy.DESTROY
         )
-    
+
     def _create_rest_api(self) -> apigateway.RestApi:
         """
         Create the REST API Gateway with security and monitoring configuration.
-        
         Returns:
             The created REST API Gateway
         """
@@ -102,38 +96,38 @@ class OscarApiGatewayStack(Stack):
                 access_log_destination=apigateway.LogGroupLogDestination(self.log_group),
                 access_log_format=apigateway.AccessLogFormat.clf()
             ),
-            
+
             # CORS disabled for Slack webhook compatibility
-            
+
             # Security configuration
             endpoint_configuration=apigateway.EndpointConfiguration(
                 types=[apigateway.EndpointType.REGIONAL]
             ),
-            
+
             # Enable execute API endpoint for Slack webhook access
             disable_execute_api_endpoint=False
         )
-        
+
         # Keep it simple - no additional security or monitoring features
-        
+
         return api
-    
+
     def _configure_slack_endpoints(self) -> None:
         """
         Configure Slack webhook endpoints with proper methods and integration.
         """
         # Create /slack resource
         slack_resource = self.api.root.add_resource("slack")
-        
+
         # No request validator to ensure Slack compatibility
-        
+
         # Create Lambda proxy integration (required for Slack challenge handling)
         lambda_integration = apigateway.LambdaIntegration(
             self.lambda_function,
             proxy=True,  # Enable proxy integration for proper request/response handling
             allow_test_invoke=True
         )
-        
+
         # Create /slack/events endpoint with proxy integration (only endpoint needed)
         events_resource = slack_resource.add_resource("events")
         events_resource.add_method(
@@ -141,9 +135,6 @@ class OscarApiGatewayStack(Stack):
             lambda_integration,
             authorization_type=apigateway.AuthorizationType.NONE
         )
-    
-
-
 
     def _add_outputs(self) -> None:
         """
@@ -154,13 +145,13 @@ class OscarApiGatewayStack(Stack):
             value=self.api.url,
             description="Base URL of the API Gateway"
         )
-        
+
         CfnOutput(
-            self, "SlackEventsUrl", 
+            self, "SlackEventsUrl",
             value=f"{self.api.url}slack/events",
             description="URL for Slack Events API webhook"
         )
-        
+
         CfnOutput(
             self, "ApiGatewayId",
             value=self.api.rest_api_id,

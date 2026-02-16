@@ -12,12 +12,10 @@ This module defines granular IAM policies with resource-specific access
 and principle of least privilege for all OSCAR components.
 """
 
-import os
-from typing import Dict, List
+from typing import List
 
 from aws_cdk import aws_iam as iam
 
-from .knowledge_base_stack import OscarKnowledgeBaseStack
 from .lambda_stack import OscarLambdaStack
 from .secrets_stack import OscarSecretsStack
 from .storage_stack import OscarStorageStack
@@ -26,15 +24,13 @@ from .storage_stack import OscarStorageStack
 class OscarPolicyDefinitions:
     """
     Centralized policy definitions for OSCAR components.
-    
     This class provides least-privilege IAM policy statements for different
     OSCAR components with resource-specific access controls.
     """
-    
+
     def __init__(self, account_id: str, region: str, env_name: str) -> None:
         """
         Initialize policy definitions.
-        
         Args:
             account_id: AWS account ID
             region: AWS region
@@ -46,7 +42,6 @@ class OscarPolicyDefinitions:
     def get_bedrock_agent_policies(self) -> List[iam.PolicyStatement]:
         """
         Get least-privilege policies for Bedrock agents.
-        
         Returns:
             List of IAM policy statements for Bedrock agents
         """
@@ -60,7 +55,7 @@ class OscarPolicyDefinitions:
                     f"arn:aws:lambda:{self.region}:{self.account_id}:function:*oscar*{self.env_name}"
                 ]
             ),
-            
+
             # Knowledge Base retrieval
             iam.PolicyStatement(
                 sid="KnowledgeBaseRetrieval",
@@ -71,7 +66,7 @@ class OscarPolicyDefinitions:
                 ],
                 resources=["*"]
             ),
-            
+
             # Foundation model access
             iam.PolicyStatement(
                 sid="FoundationModelAccess",
@@ -116,11 +111,10 @@ class OscarPolicyDefinitions:
                 ]
             )
         ]
-    
+
     def get_lambda_base_policies(self) -> List[iam.PolicyStatement]:
         """
         Get base policies for Lambda functions.
-        
         Returns:
             List of IAM policy statements for base Lambda functions
         """
@@ -139,7 +133,7 @@ class OscarPolicyDefinitions:
                     f"arn:aws:dynamodb:{self.region}:{self.account_id}:table/oscar-*"
                 ]
             ),
-            
+
             iam.PolicyStatement(
                 sid="DynamoDBContextAccess",
                 effect=iam.Effect.ALLOW,
@@ -154,7 +148,7 @@ class OscarPolicyDefinitions:
                     f"arn:aws:dynamodb:{self.region}:{self.account_id}:table/{OscarStorageStack.get_dynamodb_table_name(self.env_name)}"
                 ]
             ),
-            
+
             # Secrets Manager access for central environment
             iam.PolicyStatement(
                 sid="CentralSecretsAccess",
@@ -164,7 +158,7 @@ class OscarPolicyDefinitions:
                     f"arn:aws:secretsmanager:{self.region}:{self.account_id}:secret:{OscarSecretsStack.get_central_env_secret_name(self.env_name)}"
                 ]
             ),
-            
+
             # Bedrock agent invocation
             iam.PolicyStatement(
                 sid="BedrockAgentInvocation",
@@ -179,7 +173,7 @@ class OscarPolicyDefinitions:
                 ],
                 resources=["*"]
             ),
-            
+
             # Bedrock model access for direct invocation
             iam.PolicyStatement(
                 sid="BedrockModelInvocation",
@@ -192,7 +186,7 @@ class OscarPolicyDefinitions:
                     f"arn:aws:bedrock:{self.region}:{self.account_id}:inference-profile/*"
                 ]
             ),
-            
+
             # Lambda self-invocation for async processing
             iam.PolicyStatement(
                 sid="LambdaSelfInvocation",
@@ -202,7 +196,7 @@ class OscarPolicyDefinitions:
                     f"arn:aws:lambda:{self.region}:{self.account_id}:function:oscar*{self.env_name}"
                 ]
             ),
-            
+
             # SSM Parameter Store access for agent configuration
             iam.PolicyStatement(
                 sid="SSMParameterAccess",
@@ -213,50 +207,10 @@ class OscarPolicyDefinitions:
                 ]
             )
         ]
-    
-    def get_metrics_lambda_policies(self, metrics_account_role: str = None) -> List[iam.PolicyStatement]:
-        """
-        Get policies for Metrics Lambda functions.
 
-        Returns:
-            List of IAM policy statements for VPC Lambda functions
-        """
-        policies = [
-            iam.PolicyStatement(
-            sid="MetricsSecretsAccess",
-            effect=iam.Effect.ALLOW,
-            actions=["secretsmanager:GetSecretValue"],
-            resources=[
-                f"arn:aws:secretsmanager:{self.region}:{self.account_id}:secret:{OscarSecretsStack.get_central_env_secret_name(self.env_name)}"
-            ]),
-            iam.PolicyStatement(
-            sid="VPCEndpointAccess",
-            effect=iam.Effect.ALLOW,
-            actions=[
-                "s3:GetObject",
-                "s3:PutObject"
-            ],
-            resources=[
-                f"arn:aws:s3:::oscar-metrics-cache-{self.account_id}/*"
-            ]
-        )]
-
-        # VPC endpoint access for S3 and DynamoDB
-        if metrics_account_role:
-            policies.append(
-                # Cross-account OpenSearch access
-                iam.PolicyStatement(
-                    sid="CrossAccountOpenSearchAssumeRole",
-                    effect=iam.Effect.ALLOW,
-                    actions=["sts:AssumeRole"],
-                    resources=[metrics_account_role]
-                ))
-        return policies
-    
     def get_communication_handler_policies(self) -> List[iam.PolicyStatement]:
         """
         Get policies for communication handler Lambda.
-        
         Returns:
             List of IAM policy statements for communication handler
         """
@@ -276,7 +230,7 @@ class OscarPolicyDefinitions:
                     f"arn:aws:dynamodb:{self.region}:{self.account_id}:table/{OscarStorageStack.get_dynamodb_table_name(self.env_name)}"
                 ]
             ),
-            
+
             # Secrets Manager access for Slack credentials
             iam.PolicyStatement(
                 sid="SlackSecretsAccess",
@@ -286,7 +240,7 @@ class OscarPolicyDefinitions:
                     f"arn:aws:secretsmanager:{self.region}:{self.account_id}:secret:{OscarSecretsStack.get_central_env_secret_name(self.env_name)}"
                 ]
             ),
-            
+
             # Lambda invocation for other OSCAR functions
             iam.PolicyStatement(
                 sid="InvokeOscarLambdas",
@@ -297,44 +251,10 @@ class OscarPolicyDefinitions:
                 ]
             )
         ]
-    
-    def get_jenkins_lambda_policies(self) -> List[iam.PolicyStatement]:
-        """
-        Get policies for Jenkins Lambda function.
-        
-        Returns:
-            List of IAM policy statements for Jenkins Lambda
-        """
-        return [
-            # Secrets Manager access for Jenkins API token
-            iam.PolicyStatement(
-                sid="JenkinsSecretsAccess",
-                effect=iam.Effect.ALLOW,
-                actions=["secretsmanager:GetSecretValue"],
-                resources=[
-                    f"arn:aws:secretsmanager:{self.region}:{self.account_id}:secret:{OscarSecretsStack.get_central_env_secret_name(self.env_name)}"
-                ]
-            ),
-            
-            # CloudWatch Logs for Jenkins job monitoring
-            iam.PolicyStatement(
-                sid="JenkinsLogsAccess",
-                effect=iam.Effect.ALLOW,
-                actions=[
-                    "logs:CreateLogGroup",
-                    "logs:CreateLogStream",
-                    "logs:PutLogEvents"
-                ],
-                resources=[
-                    f"arn:aws:logs:{self.region}:{self.account_id}:log-group:/aws/lambda/oscar-jenkins-*"
-                ]
-            )
-        ]
 
     def get_api_gateway_policies(self) -> List[iam.PolicyStatement]:
         """
         Get policies for API Gateway.
-        
         Returns:
             List of IAM policy statements for API Gateway
         """
@@ -348,7 +268,7 @@ class OscarPolicyDefinitions:
                     f"arn:aws:lambda:{self.region}:{self.account_id}:function:*oscar*{self.env_name}"
                 ]
             ),
-            
+
             # CloudWatch Logs for API Gateway
             iam.PolicyStatement(
                 sid="ApiGatewayLogsAccess",
@@ -362,133 +282,6 @@ class OscarPolicyDefinitions:
                 ],
                 resources=[
                     f"arn:aws:logs:{self.region}:{self.account_id}:log-group:/aws/apigateway/oscar-*"
-                ]
-            )
-        ]
-    
-    def get_secrets_manager_policies(self) -> Dict[str, List[iam.PolicyStatement]]:
-        """
-        Get resource-specific Secrets Manager policies.
-        
-        Returns:
-            Dictionary of Secrets Manager policies by resource type
-        """
-        return {
-            "central_env": [
-                iam.PolicyStatement(
-                    sid="CentralEnvironmentSecretAccess",
-                    effect=iam.Effect.ALLOW,
-                    actions=[
-                        "secretsmanager:GetSecretValue",
-                        "secretsmanager:DescribeSecret"
-                    ],
-                    resources=[
-                        f"arn:aws:secretsmanager:{self.region}:{self.account_id}:secret:{OscarSecretsStack.get_central_env_secret_name(self.env_name)}"
-                    ]
-                )
-            ],
-            
-
-        }
-    
-    def get_dynamodb_resource_policies(self) -> Dict[str, List[iam.PolicyStatement]]:
-        """
-        Get resource-specific DynamoDB policies.
-        
-        Returns:
-            Dictionary of DynamoDB policies by table type
-        """
-        return {
-            "sessions_table": [
-                iam.PolicyStatement(
-                    sid="SessionsTableAccess",
-                    effect=iam.Effect.ALLOW,
-                    actions=[
-                        "dynamodb:GetItem",
-                        "dynamodb:PutItem",
-                        "dynamodb:UpdateItem",
-                        "dynamodb:DeleteItem"
-                    ],
-                    resources=[
-                        f"arn:aws:dynamodb:{self.region}:{self.account_id}:table/oscar-sessions*"
-                    ],
-                    conditions={
-                        "ForAllValues:StringEquals": {
-                            "dynamodb:Attributes": ["event_id", "ttl", "session_data", "user_id"]
-                        }
-                    }
-                )
-            ],
-            
-            "context_table": [
-                iam.PolicyStatement(
-                    sid="ContextTableAccess",
-                    effect=iam.Effect.ALLOW,
-                    actions=[
-                        "dynamodb:GetItem",
-                        "dynamodb:PutItem",
-                        "dynamodb:UpdateItem",
-                        "dynamodb:Query"
-                    ],
-                    resources=[
-                        f"arn:aws:dynamodb:{self.region}:{self.account_id}:table/{OscarStorageStack.get_dynamodb_table_name(self.env_name)}"
-                    ],
-                    conditions={
-                        "ForAllValues:StringEquals": {
-                            "dynamodb:Attributes": ["thread_key", "ttl", "context_data", "message_history"]
-                        }
-                    }
-                )
-            ]
-        }
-    
-    def get_bedrock_service_policies(self) -> List[iam.PolicyStatement]:
-        """
-        Get Bedrock service policies with resource constraints.
-        
-        Returns:
-            List of IAM policy statements for Bedrock services
-        """
-        return [
-            # Agent management (read-only for monitoring)
-            iam.PolicyStatement(
-                sid="BedrockAgentReadAccess",
-                effect=iam.Effect.ALLOW,
-                actions=[
-                    "bedrock:GetAgent",
-                    "bedrock:ListAgents",
-                    "bedrock:GetAgentAlias"
-                ],
-                resources=[
-                    f"arn:aws:bedrock:{self.region}:{self.account_id}:agent/oscar-*-{self.env_name}",
-                    f"arn:aws:bedrock:{self.region}:{self.account_id}:agent-alias/oscar-*"
-                ]
-            ),
-            
-            # Knowledge Base access (read-only for monitoring)
-            iam.PolicyStatement(
-                sid="BedrockKnowledgeBaseReadAccess",
-                effect=iam.Effect.ALLOW,
-                actions=[
-                    "bedrock:GetKnowledgeBase",
-                    "bedrock:ListKnowledgeBases"
-                ],
-                resources=[
-                    f"arn:aws:bedrock:{self.region}:{self.account_id}:knowledge-base/{OscarKnowledgeBaseStack.get_knowledge_base_name(self.env_name)}"
-                ]
-            ),
-            
-            # Model invocation with specific models only
-            iam.PolicyStatement(
-                sid="BedrockModelInvocationRestricted",
-                effect=iam.Effect.ALLOW,
-                actions=[
-                    "bedrock:InvokeModel",
-                    "bedrock:InvokeModelWithResponseStream"
-                ],
-                resources=[
-                    f"arn:aws:bedrock:{self.region}::foundation-model/*",
-                    f"arn:aws:bedrock:{self.region}:{self.account_id}:inference-profile/*"
                 ]
             )
         ]

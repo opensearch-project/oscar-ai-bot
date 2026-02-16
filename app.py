@@ -13,14 +13,16 @@ import logging
 import os
 from typing import Optional
 
-from aws_cdk import App, Environment, Tags
-from dotenv import load_dotenv
+from aws_cdk import App, Environment
 
+from plugins.jenkins import JenkinsPlugin
+from plugins.metrics.build import MetricsBuildPlugin
+from plugins.metrics.release import MetricsReleasePlugin
+from plugins.metrics.test import MetricsTestPlugin
 from stacks.api_gateway_stack import OscarApiGatewayStack
 from stacks.bedrock_agents_stack import OscarAgentsStack
 from stacks.knowledge_base_stack import OscarKnowledgeBaseStack
 from stacks.lambda_stack import OscarLambdaStack
-# Import working stacks
 from stacks.permissions_stack import OscarPermissionsStack
 from stacks.secrets_stack import OscarSecretsStack
 from stacks.storage_stack import OscarStorageStack
@@ -30,7 +32,6 @@ from stacks.vpc_stack import OscarVpcStack
 # load_dotenv()
 
 
-
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,
@@ -38,10 +39,10 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+
 def main() -> None:
     """
     Deploy the complete OSCAR infrastructure.
-    
     This function initializes the CDK app, creates all required stacks in dependency order,
     and synthesizes the CloudFormation templates.
     """
@@ -60,16 +61,24 @@ def main() -> None:
 
     env = Environment(account=account, region=region)
 
+    # Register plugins
+    plugins = [
+        JenkinsPlugin(),
+        MetricsBuildPlugin(),
+        MetricsTestPlugin(),
+        MetricsReleasePlugin(),
+    ]
+
     # Deploy stacks in dependency order
-    
     # 1. Permissions (IAM roles and policies)
     permissions_stack = OscarPermissionsStack(
         app, f"OscarPermissionsStack-{environment}",
         env=env,
         description="OSCAR IAM permissions and roles",
-        environment=environment
+        environment=environment,
+        plugins=plugins
     )
-    
+
     # 2. Secrets (AWS Secrets Manager)
     secrets_stack = OscarSecretsStack(
         app, f"OscarSecretsStack-{environment}",
@@ -77,7 +86,7 @@ def main() -> None:
         description="OSCAR secrets management",
         environment=environment
     )
-    
+
     # 3. Storage (DynamoDB tables)
     storage_stack = OscarStorageStack(
         app, f"OscarStorageStack-{environment}",
@@ -85,13 +94,13 @@ def main() -> None:
         description="OSCAR DynamoDB storage",
         environment=environment
     )
-    
+
     # 4. VPC
     vpc_stack = OscarVpcStack(
-            app, f"OscarVpcStack-{environment}",
-            env=env,
-            description="OSCAR VPC configuration"
-        )
+        app, f"OscarVpcStack-{environment}",
+        env=env,
+        description="OSCAR VPC configuration"
+    )
 
     # 5. Knowledge Base
     knowledge_base_stack = OscarKnowledgeBaseStack(
@@ -100,11 +109,11 @@ def main() -> None:
         description="OSCAR Bedrock Knowledge Base",
         environment=environment,
         github_repositories=[
-        "opensearch-project/opensearch-build",
-        "opensearch-project/opensearch-build-libraries"
+            "opensearch-project/opensearch-build",
+            "opensearch-project/opensearch-build-libraries"
         ]
     )
-    
+
     # 6. Lambda Functions
     lambda_stack = OscarLambdaStack(
         app, f"OscarLambdaStack-{environment}",
@@ -114,6 +123,7 @@ def main() -> None:
         storage_stack=storage_stack,
         env=env,
         environment=environment,
+        plugins=plugins,
         description="OSCAR Lambda functions"
     )
     lambda_stack.add_dependency(permissions_stack)
@@ -133,21 +143,23 @@ def main() -> None:
     api_gateway_stack.add_dependency(permissions_stack)
     api_gateway_stack.add_dependency(lambda_stack)
 
-    # 8. Bedrock Agents (will be deployed manually after CDK stacks)
+    # 8. Bedrock Agents
     agents_stack = OscarAgentsStack(
         app, f"OscarAgentsStack-{environment}",
         permissions_stack=permissions_stack,
         lambda_stack=lambda_stack,
         env=env,
         environment=environment,
+        plugins=plugins,
         description="OSCAR Bedrock agents"
     )
     agents_stack.add_dependency(permissions_stack)
     agents_stack.add_dependency(knowledge_base_stack)
     agents_stack.add_dependency(lambda_stack)
-    
+
     # Synthesize the CloudFormation templates
     app.synth()
+
 
 if __name__ == "__main__":
     main()

@@ -23,29 +23,29 @@ logger = logging.getLogger(__name__)
 
 class BedrockAgentCore:
     """Core Bedrock agent invocation and session management."""
-    
+
     def __init__(self, region: Optional[str] = None) -> None:
         """
         Initialize the Bedrock agent core.
-        
+
         Args:
             region: AWS region for Bedrock service, defaults to config value
         """
         self.region = region or config.region
         self.client = boto3.client('bedrock-agent-runtime', region_name=self.region)
-        
+
         # Privileged supervisor agent configuration (current full-featured agent)
         self.privileged_agent_id = config.oscar_privileged_bedrock_agent_id
         self.privileged_agent_alias_id = config.oscar_privileged_bedrock_agent_alias_id
-        
+
         # Limited supervisor agent configuration (restricted capabilities)
         self.limited_agent_id = config.oscar_limited_bedrock_agent_id
         self.limited_agent_alias_id = config.oscar_limited_bedrock_agent_alias_id
-        
+
         # Timeout and retry settings
         self.timeout = config.agent_timeout
         self.max_retries = config.agent_max_retries
-        
+
         logger.info(
             f"Initialized BedrockAgentCore - Privileged ID: {self.privileged_agent_id}, "
             f"Privileged Alias: {self.privileged_agent_alias_id}, "
@@ -53,15 +53,15 @@ class BedrockAgentCore:
             f"Limited Alias: {self.limited_agent_alias_id}, "
             f"Region: {self.region}"
         )
-    
+
     def create_agent_request(self, query: str, privilege: bool, session_id: Optional[str] = None) -> Dict[str, Any]:
         """
         Create a request for the Bedrock agent.
-        
+
         Args:
             query: The user's query
             session_id: Optional session ID for maintaining conversation context
-            
+
         Returns:
             A dictionary containing the request parameters
         """
@@ -77,21 +77,21 @@ class BedrockAgentCore:
             'sessionId': session_id or f"session-{int(time.time())}",
             'enableTrace': True  # Enable trace to see raw model output
         }
-        
+
         return request
-    
+
     def invoke_agent(self, query: str, privilege: bool, session_id: Optional[str] = None) -> Tuple[str, Optional[str]]:
         """
         Invoke the Bedrock agent with the given query.
-        
+
         Args:
             query: The user's query
             privilege: Whether to use privileged or limited agent
             session_id: Optional session ID for maintaining conversation context
-            
+
         Returns:
             A tuple containing (response_text, session_id)
-            
+
         Raises:
             Exception: If the agent invocation fails after all retries
         """

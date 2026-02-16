@@ -13,16 +13,14 @@ OpenSearch Serverless collection for vector search, and Bedrock Knowledge Base w
 ingestion pipeline and vector embeddings using Titan.
 """
 
-import os
-from typing import Any, Dict, List, Optional
+from typing import List
 
-from aws_cdk import CfnOutput, CustomResource, Duration, RemovalPolicy, Stack
+from aws_cdk import CfnOutput, Duration, RemovalPolicy, Stack
 from aws_cdk import aws_bedrock as bedrock
 from aws_cdk import aws_events as events
 from aws_cdk import aws_events_targets as targets
 from aws_cdk import aws_iam as iam
 from aws_cdk import aws_lambda as lambda_
-from aws_cdk import aws_logs as logs
 from aws_cdk import aws_opensearchserverless as opensearchserverless
 from aws_cdk import aws_s3 as s3
 from aws_cdk import aws_s3_notifications as s3n
@@ -50,7 +48,7 @@ class OscarKnowledgeBaseStack(Stack):
     def get_knowledge_base_name(cls, environment: str) -> str:
         return f"{cls.KNOWLEDGE_BASE_NAME_BASE}-{environment}"
 
-    def __init__(self, scope: Construct, construct_id: str, environment: str, 
+    def __init__(self, scope: Construct, construct_id: str, environment: str,
                  github_repositories: List[str], **kwargs) -> None:
         """
         Initialize Knowledge Base stack.
@@ -63,7 +61,7 @@ class OscarKnowledgeBaseStack(Stack):
             **kwargs: Additional keyword arguments
         """
         super().__init__(scope, construct_id, **kwargs)
-        
+
         self.github_repositories = github_repositories
 
         # Get configuration from environment
@@ -105,7 +103,7 @@ class OscarKnowledgeBaseStack(Stack):
 
         # Add S3 event notification for automatic sync
         self._configure_s3_notifications()
-        
+
         # Add EventBridge schedule for docs uploader
         self._configure_docs_uploader_schedule()
 
@@ -115,7 +113,6 @@ class OscarKnowledgeBaseStack(Stack):
     def _create_documents_bucket(self) -> s3.Bucket:
         """
         Create S3 bucket for document storage with versioning and lifecycle policies.
-        
         Returns:
             The S3 bucket for document storage
         """
@@ -151,7 +148,7 @@ class OscarKnowledgeBaseStack(Stack):
                 )
             ]
         )
-        
+
         # We'll add the S3 event notification after creating the Lambda function
 
         return bucket
@@ -159,7 +156,6 @@ class OscarKnowledgeBaseStack(Stack):
     def _create_opensearch_collection(self) -> opensearchserverless.CfnCollection:
         """
         Create OpenSearch Serverless collection with vector search capabilities.
-
         Returns:
             The OpenSearch Serverless collection
         """
@@ -201,7 +197,7 @@ class OscarKnowledgeBaseStack(Stack):
 
         # Create data access policy (shortened name to fit 32 char limit)
         # Note: We'll create this after the KB service role is created
-        data_access_policy = None
+        data_access_policy = None  # noqa: F841
 
         # Create the collection
         collection = opensearchserverless.CfnCollection(
@@ -221,7 +217,6 @@ class OscarKnowledgeBaseStack(Stack):
     def _create_kb_service_role(self) -> iam.Role:
         """
         Create service role for Knowledge Base.
-
         Returns:
             The IAM role for Knowledge Base
         """
@@ -280,7 +275,6 @@ class OscarKnowledgeBaseStack(Stack):
     def _create_data_access_policy(self) -> opensearchserverless.CfnAccessPolicy:
         """
         Create data access policy for OpenSearch Serverless.
-
         Returns:
             The data access policy
         """
@@ -328,7 +322,6 @@ class OscarKnowledgeBaseStack(Stack):
     def _create_opensearch_index(self) -> opensearchserverless.CfnIndex:
         """
         Create OpenSearch index with proper vector mappings for Bedrock Knowledge Base.
-
         Returns:
             The OpenSearch Serverless index
         """
@@ -396,7 +389,6 @@ class OscarKnowledgeBaseStack(Stack):
     def _create_knowledge_base(self) -> bedrock.CfnKnowledgeBase:
         """
         Create Bedrock Knowledge Base with vector embeddings using Titan.
-
         Returns:
             The Bedrock Knowledge Base
         """
@@ -427,7 +419,6 @@ class OscarKnowledgeBaseStack(Stack):
         )
 
         index_wait_condition.node.add_dependency(self.opensearch_index)
-
 
         # Create the Knowledge Base using existing service role
         knowledge_base = bedrock.CfnKnowledgeBase(
@@ -466,7 +457,6 @@ class OscarKnowledgeBaseStack(Stack):
     def _create_data_source(self) -> bedrock.CfnDataSource:
         """
         Create data source for document ingestion from S3.
-
         Returns:
             The Bedrock data source
         """
@@ -500,12 +490,9 @@ class OscarKnowledgeBaseStack(Stack):
     def _create_document_sync_lambda(self) -> lambda_.Function:
         """
         Create Lambda function for automatic document synchronization.
-
         Returns:
             The Lambda function for document sync
         """
-        from aws_cdk.aws_lambda_python_alpha import PythonFunction
-
         # Create execution role for the Lambda function
         sync_lambda_role = iam.Role(
             self, "DocumentSyncLambdaRole",
@@ -559,8 +546,6 @@ class OscarKnowledgeBaseStack(Stack):
 
         return sync_lambda
 
-
-
     def _configure_s3_notifications(self) -> None:
         """
         Configure S3 event notifications for automatic document synchronization.
@@ -579,7 +564,6 @@ class OscarKnowledgeBaseStack(Stack):
     def _create_docs_uploader_lambda(self) -> lambda_.Function:
         """
         Create Lambda function for uploading GitHub documentation to S3.
-        
         Returns:
             The docs uploader Lambda function
         """
@@ -587,7 +571,7 @@ class OscarKnowledgeBaseStack(Stack):
             self, "DocsUploaderLambda",
             function_name=f"DocsUploaderLambda-{self.env_name}",
             code=lambda_.DockerImageCode.from_image_asset("lambda/knowledge-base"),
-            architecture=lambda_.Architecture.ARM_64,
+            architecture=lambda_.Architecture.X86_64,
             timeout=Duration.minutes(15),
             memory_size=512,
             description="Upload markdown files from GitHub repos to S3",
@@ -596,7 +580,7 @@ class OscarKnowledgeBaseStack(Stack):
                 "BUCKET_NAME": self.documents_bucket.bucket_name
             }
         )
-        
+
         # Grant S3 write permissions
         self.documents_bucket.grant_write(function)
         self.documents_bucket.grant_read(function)
@@ -612,7 +596,7 @@ class OscarKnowledgeBaseStack(Stack):
             schedule=events.Schedule.cron(hour="0", minute="0"),
             description="Daily GitHub documentation sync to S3"
         )
-        
+
         rule.add_target(targets.LambdaFunction(
             self.docs_uploader_lambda,
             event=events.RuleTargetInput.from_object({

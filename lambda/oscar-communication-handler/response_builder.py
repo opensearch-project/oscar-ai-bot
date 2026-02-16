@@ -13,15 +13,15 @@ from config import config
 
 class ResponseBuilder:
     """Builds standardized responses for Bedrock agent."""
-    
+
     @staticmethod
     def create_success_response(action_group: str, function_name: str, message: str) -> Dict[str, Any]:
         """Create a success response for Bedrock agent.
-        
+
         Args:
             function_name: Name of the function that succeeded
             message: Success message
-            
+
         Returns:
             Success response dictionary
         """
@@ -39,15 +39,15 @@ class ResponseBuilder:
                 }
             }
         }
-    
+
     @staticmethod
     def create_error_response(action_group: str, function_name: str, error_message: str) -> Dict[str, Any]:
         """Create an error response for Bedrock agent.
-        
+
         Args:
             function_name: Name of the function that failed
             error_message: Error message
-            
+
         Returns:
             Error response dictionary
         """

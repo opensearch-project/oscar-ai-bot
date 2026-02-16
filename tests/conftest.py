@@ -31,7 +31,7 @@ def mock_env_vars():
         'OSCAR_BEDROCK_AGENT_ID': 'test-agent-id',
         'OSCAR_BEDROCK_AGENT_ALIAS_ID': 'test-alias-id'
     }
-    
+
     with patch.dict(os.environ, env_vars):
         yield env_vars
 

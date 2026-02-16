@@ -33,7 +33,7 @@ logger = logging.getLogger(__name__)
 
 class SlackHandler:
     """Comprehensive Slack event handler with OSCAR agent integration.
-    
+
     This class manages all Slack interactions including:
     - Event registration and processing
     - Message parsing and query extraction
@@ -41,15 +41,15 @@ class SlackHandler:
     - Reaction management for user feedback
     - Context preservation across conversations
     """
-    
+
     def __init__(
-        self, 
-        app: App, 
-        storage: StorageInterface, 
+        self,
+        app: App,
+        storage: StorageInterface,
         oscar_agent: OSCARAgentInterface
     ) -> None:
         """Initialize Slack handler with required dependencies.
-        
+
         Args:
             app: Slack Bolt app instance
             storage: Storage implementation for conversation context
@@ -59,39 +59,39 @@ class SlackHandler:
         self.storage = storage
         self.oscar_agent = oscar_agent
         self.client = app.client
-        
+
         # Thread pool for better scaling
         self.executor = ThreadPoolExecutor(
-            max_workers=config.max_workers, 
+            max_workers=config.max_workers,
             thread_name_prefix=config.slack_handler_thread_prefix
         )
-        
+
         # Initialize components
         self.reaction_manager = ReactionManager(self.client)
         self.timeout_handler = TimeoutHandler(self.reaction_manager)
         self.message_processor = MessageProcessor(
-            self.storage, 
-            self.oscar_agent, 
-            self.reaction_manager, 
+            self.storage,
+            self.oscar_agent,
+            self.reaction_manager,
             self.timeout_handler
         )
         self.event_handlers = EventHandlers(self.message_processor)
         self.slash_commands = SlashCommandHandlers(self.message_processor, self.storage)
         self.slack_messaging = SlackMessaging(self.client, self.storage)
-    
+
     def register_handlers(self) -> App:
         """Register event handlers with the Slack app.
-        
+
         Returns:
             The Slack Bolt app instance with handlers registered
         """
         # Register app_mention handler
         self.app.event("app_mention")(self.event_handlers.handle_app_mention)
-        
+
         # Register message handler for DMs if enabled
         if config.enable_dm:
             self.app.message()(self.event_handlers.handle_message)
-        
+
         # Register slash command handlers for message orchestration
         self.app.command("/oscar-announce")(self.slash_commands.handle_announce_command)
         self.app.command("/oscar-assign-owner")(self.slash_commands.handle_assign_owner_command)
@@ -100,19 +100,19 @@ class SlackHandler:
         self.app.command("/oscar-missing-notes")(self.slash_commands.handle_missing_notes_command)
         self.app.command("/oscar-integration-test")(self.slash_commands.handle_integration_test_command)
         self.app.command("/oscar-broadcast")(self.slash_commands.handle_broadcast_command)
-        
+
         logger.info("Registered Slack event handlers and slash commands for OSCAR agent")
         return self.app
-    
+
     def send_slack_message(self, channel: str, message: str) -> Dict[str, Any]:
         """Send a message to a Slack channel.
-        
+
         This method is called by the supervisor agent's action group function.
-        
+
         Args:
             channel: Target Slack channel ID or name
             message: Message content to send
-            
+
         Returns:
             Dictionary with send result
         """

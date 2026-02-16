@@ -19,8 +19,6 @@ Functions:
 
 import json
 import logging
-import os
-from typing import Any, Dict, Optional
 
 import boto3
 import requests
@@ -38,7 +36,7 @@ def get_opensearch_session():
         RoleArn=config.metrics_cross_account_role_arn,
         RoleSessionName='oscar-metrics-session'
     )
-    
+
     return boto3.Session(
         aws_access_key_id=response['Credentials']['AccessKeyId'],
         aws_secret_access_key=response['Credentials']['SecretAccessKey'],
@@ -51,10 +49,10 @@ def opensearch_request(method, path, body=None):
     opensearch_host = config.get_opensearch_host_clean()
     if not opensearch_host:
         raise ValueError("OPENSEARCH_HOST not configured")
-    
+
     url = f'https://{opensearch_host}{path}'
     session = get_opensearch_session()
-    
+
     # Create signed request
     request = AWSRequest(
         method=method,
@@ -62,11 +60,11 @@ def opensearch_request(method, path, body=None):
         data=json.dumps(body) if body else None,
         headers={'Content-Type': 'application/json'} if body else {}
     )
-    
+
     # Sign the request
     credentials = session.get_credentials()
     SigV4Auth(credentials, config.opensearch_service, config.opensearch_region).add_auth(request)
-    
+
     # Make the request
     response = requests.request(
         method=request.method,
@@ -75,7 +73,7 @@ def opensearch_request(method, path, body=None):
         headers=dict(request.headers),
         timeout=config.opensearch_request_timeout
     )
-    
+
     if response.status_code in [200, 201]:
         return response.json()
     else:

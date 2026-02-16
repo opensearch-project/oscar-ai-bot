@@ -12,7 +12,6 @@ This module defines the DynamoDB tables used by the OSCAR Slack Bot.
 """
 
 import os
-from typing import Optional
 
 from aws_cdk import CfnOutput, Duration, RemovalPolicy, Stack
 from aws_cdk import aws_cloudwatch as cloudwatch
@@ -25,7 +24,6 @@ from constructs import Construct
 class OscarStorageStack(Stack):
     """
     Storage resources for OSCAR Slack Bot.
-    
     This construct creates and configures the DynamoDB tables used by the
     OSCAR Slack Bot for storing session data and conversation context.
     Includes production-ready configurations with monitoring and alerting.
@@ -36,11 +34,10 @@ class OscarStorageStack(Stack):
     @classmethod
     def get_dynamodb_table_name(cls, environment: str) -> str:
         return f"{cls.CONTEXT_TABLE_NAME}-{environment}"
-    
+
     def __init__(self, scope: Construct, construct_id: str, environment: str, **kwargs) -> None:
         """
         Initialize storage resources.
-        
         Args:
             scope: The CDK construct scope
             construct_id: The ID of the construct
@@ -49,54 +46,50 @@ class OscarStorageStack(Stack):
         super().__init__(scope, construct_id, **kwargs)
 
         self.context_table_name: str = self.get_dynamodb_table_name(environment)
-        
+
         # Get TTL values from environment
         context_ttl: int = int(os.environ.get("CONTEXT_TTL", "604800"))  # 7 days default
-        
+
         # Determine removal policy based on environment
         removal_policy: RemovalPolicy = (
             RemovalPolicy.RETAIN if environment == "prod" else RemovalPolicy.DESTROY
         )
-        
+
         # Create only the context table (the only one actually used by the application)
         self.context_table = self._create_context_table(
             self.context_table_name,
             removal_policy,
             context_ttl
         )
-        
+
         # Create monitoring and alerting for context table only
         self._create_context_monitoring(environment)
-        
+
         # Outputs
         CfnOutput(
             self, "ContextTableName",
             value=self.context_table.table_name,
             description="Name of the DynamoDB table for context data"
         )
-        
+
         CfnOutput(
             self, "ContextTableArn",
             value=self.context_table.table_arn,
             description="ARN of the DynamoDB table for context data"
         )
-    
 
-    
     def _create_context_table(
-        self, 
-        table_name: str, 
+        self,
+        table_name: str,
         removal_policy: RemovalPolicy,
         ttl_seconds: int
     ) -> dynamodb.Table:
         """
         Create the context DynamoDB table with production configurations.
-        
         Args:
             table_name: Name of the DynamoDB table
             removal_policy: CDK removal policy for the table
             ttl_seconds: TTL value in seconds for automatic item expiration
-            
         Returns:
             The created DynamoDB table
         """
@@ -118,13 +111,10 @@ class OscarStorageStack(Stack):
             stream=dynamodb.StreamViewType.NEW_AND_OLD_IMAGES,
             contributor_insights_enabled=True
         )
-    
-
 
     def _create_context_monitoring(self, environment: str) -> None:
         """
         Create CloudWatch monitoring and alerting for the context table only.
-        
         This method creates CloudWatch alarms for monitoring table usage,
         throttling, and error rates with appropriate thresholds.
         """
@@ -135,32 +125,30 @@ class OscarStorageStack(Stack):
             display_name="OSCAR Storage Monitoring Alerts"
         )
 
-        
         # Context table monitoring only
         self._create_table_alarms(
             table=self.context_table,
-            table_type="Context", 
+            table_type="Context",
             alert_topic=alert_topic,
             environment=environment
         )
-        
+
         # Output SNS topic ARN for external configuration
         CfnOutput(
             self, "StorageAlertsTopicArn",
             value=alert_topic.topic_arn,
             description="SNS topic ARN for storage monitoring alerts"
         )
-    
+
     def _create_table_alarms(
-        self, 
-        table: dynamodb.Table, 
+        self,
+        table: dynamodb.Table,
         table_type: str,
         alert_topic: sns.Topic,
         environment: str
     ) -> None:
         """
         Create CloudWatch alarms for a DynamoDB table.
-        
         Args:
             table: The DynamoDB table to monitor
             table_type: Type identifier for the table (Sessions/Context)
@@ -182,7 +170,7 @@ class OscarStorageStack(Stack):
             treat_missing_data=cloudwatch.TreatMissingData.NOT_BREACHING
         )
         read_throttle_alarm.add_alarm_action(cw_actions.SnsAction(alert_topic))
-        
+
         # High write throttle alarm
         write_throttle_alarm = cloudwatch.Alarm(
             self, f"Oscar{table_type}WriteThrottleAlarm",
@@ -199,7 +187,7 @@ class OscarStorageStack(Stack):
             treat_missing_data=cloudwatch.TreatMissingData.NOT_BREACHING
         )
         write_throttle_alarm.add_alarm_action(cw_actions.SnsAction(alert_topic))
-        
+
         # High error rate alarm - using user errors metric instead
         error_alarm = cloudwatch.Alarm(
             self, f"Oscar{table_type}ErrorAlarm",
@@ -215,7 +203,7 @@ class OscarStorageStack(Stack):
             treat_missing_data=cloudwatch.TreatMissingData.NOT_BREACHING
         )
         error_alarm.add_alarm_action(cw_actions.SnsAction(alert_topic))
-        
+
         # High consumed read capacity alarm (for monitoring usage patterns)
         read_capacity_alarm = cloudwatch.Alarm(
             self, f"Oscar{table_type}ReadCapacityAlarm",
@@ -232,7 +220,7 @@ class OscarStorageStack(Stack):
             treat_missing_data=cloudwatch.TreatMissingData.NOT_BREACHING
         )
         read_capacity_alarm.add_alarm_action(cw_actions.SnsAction(alert_topic))
-        
+
         # High consumed write capacity alarm
         write_capacity_alarm = cloudwatch.Alarm(
             self, f"Oscar{table_type}WriteCapacityAlarm",

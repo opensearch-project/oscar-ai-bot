@@ -1,0 +1,6 @@
+[flake8]
+ignore = E722,E501
+exclude =
+    cdk.out
+    venv
+    tests

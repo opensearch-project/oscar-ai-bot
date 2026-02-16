@@ -12,7 +12,6 @@ Unit tests for Bedrock agent functionality.
 
 import os
 import sys
-from unittest.mock import MagicMock, Mock, patch
 
 import pytest
 
@@ -24,7 +23,7 @@ os.environ['DISABLE_CONFIG_VALIDATION'] = 'true'
 
 class TestBedrockAgent:
     """Test cases for Bedrock agent functionality."""
-    
+
     def test_bedrock_module_exists(self):
         """Test that bedrock modules exist."""
         try:
@@ -44,25 +43,25 @@ class TestBedrockAgent:
                     pytest.skip("Bedrock modules not available for testing")
             else:
                 pytest.skip("Bedrock directory not found")
-    
+
     def test_query_processing_logic(self):
         """Test query processing logic."""
         # Test query cleaning logic
         raw_query = '<@U987654> Hello OSCAR! Can you help me with OpenSearch?'
-        
+
         # Basic mention removal logic
         import re
         mention_pattern = r'<@[UW][A-Z0-9]+>'
         clean_query = re.sub(mention_pattern, '', raw_query).strip()
         assert clean_query == 'Hello OSCAR! Can you help me with OpenSearch?'
-        
+
         # Test query validation logic
         valid_query = 'What is OpenSearch?'
         assert len(valid_query.strip()) > 0
-        
+
         empty_query = ''
         assert len(empty_query.strip()) == 0
-    
+
     def test_bedrock_response_structure(self):
         """Test expected Bedrock response structure."""
         # Mock Bedrock response structure
@@ -72,14 +71,14 @@ class TestBedrockAgent:
             },
             'citations': []
         }
-        
+
         # Test response parsing
         assert 'output' in mock_response
         assert 'text' in mock_response['output']
         assert mock_response['output']['text'] == 'This is a test response from Bedrock'
         assert 'citations' in mock_response
         assert isinstance(mock_response['citations'], list)
-    
+
     def test_session_id_generation(self):
         """Test session ID generation logic."""
         import time
@@ -89,7 +88,7 @@ class TestBedrockAgent:
         session_id = str(uuid.uuid4())
         assert len(session_id) == 36  # Standard UUID length
         assert '-' in session_id
-        
+
         # Test timestamp-based session ID
         timestamp_id = f"session-{int(time.time())}"
         assert timestamp_id.startswith('session-')

@@ -2,7 +2,7 @@
 # This file contains all dependencies with security constraints applied
 
 # Core CDK dependencies
-aws-cdk-lib>=2.0.0
+aws-cdk-lib==2.235.0
 aws-cdk-aws-lambda-python-alpha==2.235.0a0
 constructs>=10.0.0
 

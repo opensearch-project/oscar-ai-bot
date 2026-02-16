@@ -67,6 +67,15 @@ Alternatively, run a command inside the virtualenv with pipenv run.
 Installing dependencies from Pipfile.lock (6657ff)...
 ```
 
+### Docker
+
+This project uses [`PythonFunction`](https://docs.aws.amazon.com/cdk/api/v2/python/aws_cdk.aws_lambda_python_alpha/PythonFunction.html) to deploy Lambda functions. `PythonFunction` builds Lambda packages inside a Docker container to ensure dependencies are compiled for the Lambda runtime environment. **Docker must be running** before executing `cdk synth` or `cdk deploy`.
+
+```bash
+# Verify Docker is running
+docker info
+```
+
 ## ⚙️ Configuration
 
 ### Slack App Configuration
@@ -104,9 +113,51 @@ CHANNEL_ALLOW_LIST=C12345678,C87654321
 | File | Purpose                         |
 |------|---------------------------------|
 | `app.py` | CDK application entry point     |
-| `.env` | Configuration and env variables | 
+| `.env` | Configuration and env variables |
 | `stacks/` | CDK stack definitions           |
-| `lambda/` | Lambda function source code     |
+| `plugins/` | Plugin modules (one per collaborator agent) |
+| `lambda/` | Core Lambda source code (supervisor, communication handler) |
+
+## 🎨 Code Style
+
+This project uses [flake8](https://flake8.pycqa.org/) for linting and [isort](https://pycqa.github.io/isort/) for import sorting. Configuration is in `.flake8`.
+
+```bash
+# Lint the entire project
+pipenv run flake8 .
+
+# Sort imports
+pipenv run isort .
+
+# Check imports without modifying
+pipenv run isort --check-only .
+```
+
+Key style rules (see `.flake8`):
+- Ignored: `E722` (bare except — intentional in VPC fallback logic), `E501` (line length — no limit enforced)
+- Excluded: `cdk.out`, `venv`, `tests`
+
+## 🔍 Type Checking
+
+This project uses [mypy](https://mypy.readthedocs.io/) for static type checking. Configuration is in `mypy.ini`.
+
+```bash
+# Type check the project
+pipenv run mypy .
+```
+
+Key mypy settings (see `mypy.ini`):
+- `ignore_missing_imports = true` — CDK and Slack libraries don't ship stubs
+- `explicit_package_bases = true` — required due to hyphenated directory names in `lambda/`
+- `exclude` — skips `cdk.out`, `venv`, `tests`, and `lambda`
+
+When adding new code, use type annotations:
+```python
+from typing import Any, Dict, List, Optional
+
+def my_function(plugins: Optional[List] = None) -> Dict[str, Any]:
+    ...
+```
 
 ## 🚀 Deployment
 

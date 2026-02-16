@@ -16,19 +16,19 @@ logger = logging.getLogger(__name__)
 
 class ReactionManager:
     """Manages Slack message reactions."""
-    
+
     def __init__(self, client) -> None:
         """Initialize with Slack client.
-        
+
         Args:
             client: Slack client instance
         """
         self.client = client
-    
-    def manage_reactions(self, channel: str, timestamp: str, add_reaction: Optional[str] = None, 
-                        remove_reaction: Optional[Union[str, List[str]]] = None) -> None:
+
+    def manage_reactions(self, channel: str, timestamp: str, add_reaction: Optional[str] = None,
+                         remove_reaction: Optional[Union[str, List[str]]] = None) -> None:
         """Add or remove reactions from a message.
-        
+
         Args:
             channel: The Slack channel ID
             timestamp: The message timestamp
@@ -40,7 +40,7 @@ class ReactionManager:
             if remove_reaction:
                 # Handle both single reaction and list of reactions
                 reactions_to_remove = [remove_reaction] if isinstance(remove_reaction, str) else remove_reaction
-                
+
                 for reaction in reactions_to_remove:
                     try:
                         self.client.reactions_remove(
@@ -55,7 +55,7 @@ class ReactionManager:
                             logger.debug(f"Reaction {reaction} not found on message {timestamp}")
                         else:
                             logger.warning(f"Error removing reaction {reaction}: {e}")
-            
+
             # Add reaction if specified
             if add_reaction:
                 try:

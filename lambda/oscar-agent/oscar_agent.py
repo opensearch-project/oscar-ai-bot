@@ -9,8 +9,8 @@
 """
 Enhanced OSCAR Agent Integration Module.
 
-This module provides the core Bedrock agent interface for OSCAR (OpenSearch 
-Conversational Automation for Release). It handles agent invocation, session 
+This module provides the core Bedrock agent interface for OSCAR (OpenSearch
+Conversational Automation for Release). It handles agent invocation, session
 management, error handling, response processing, and coordinates between
 knowledge base queries and metrics analysis.
 

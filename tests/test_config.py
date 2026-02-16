@@ -26,27 +26,27 @@ from config import Config
 
 class TestConfig:
     """Test cases for Config class."""
-    
+
     def test_config_initialization_with_defaults(self, mock_env_vars):
         """Test config initialization with default values."""
         config = Config(validate_required=False)
-        
+
         assert config.region == 'us-east-1'
         assert config.slack_bot_token == 'xoxb-test-token'
         assert config.slack_signing_secret == 'test-signing-secret'
-    
+
     def test_config_with_custom_region(self):
         """Test config with custom AWS region."""
         with patch.dict(os.environ, {'AWS_REGION': 'us-west-2'}):
             config = Config(validate_required=False)
             assert config.region == 'us-west-2'
-    
+
     def test_config_missing_required_vars(self):
         """Test config validation with missing required variables."""
         with patch.dict(os.environ, {}, clear=True):
             with pytest.raises(ValueError):
                 Config(validate_required=True)
-    
+
     def test_config_bedrock_settings(self, mock_env_vars):
         """Test Bedrock-specific configuration."""
         with patch.dict(os.environ, {
@@ -56,7 +56,7 @@ class TestConfig:
             config = Config(validate_required=False)
             assert config.oscar_bedrock_agent_id == 'test-agent-id'
             assert config.oscar_bedrock_agent_alias_id == 'test-alias-id'
-    
+
     def test_config_table_names(self, mock_env_vars):
         """Test DynamoDB table name configuration."""
         config = Config(validate_required=False)
