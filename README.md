@@ -73,13 +73,9 @@ oscar-ai-bot/
 └── CONTRIBUTING.md           # Contribution guidelines
 ```
 
-### Slack App Configuration
-- Go to https://api.slack.com/apps
-- Go to OAuth and Permissions. Get Bot OAuth Token
-- Next, select 'Event Subscriptions' on left panel
-- Set Request URL to your API Gateway endpoint (Example: https://api-gateway-url/prod/slack/events)
-- Subscribe to bot events (message.channels, app_mention)
-- Install app to workspace
+## Developer Guide
+
+Please refer to [DEVELOPER_GUIDE.md](./DEVELOPER_GUIDE.md) on how to start developing and deploy OSCAR.
 
 ## Key Components
 

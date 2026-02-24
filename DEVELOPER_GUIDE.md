@@ -71,12 +71,16 @@ Installing dependencies from Pipfile.lock (6657ff)...
 
 ### Slack App Configuration
 - Go to https://api.slack.com/apps
-- Go to OAuth and Permissions. Get Bot OAuth Token
 - Next, select 'Event Subscriptions' on left panel
-- Set Request URL to your API Gateway endpoint (Example: https://api-gateway-url/prod/slack/events)
+  - Set Request URL to your API Gateway endpoint (Example: https://api-gateway-url/prod/slack/events)
 - Subscribe to bot events (message.channels, app_mention)
 - Install app to workspace
-- 
+- Go to OAuth and Permissions.
+  - Get Bot OAuth Token
+  - Set Bot Token Scopes (app_mentions:read, channels:history, channels:read, chat:write, commands, im:history, im:read, im:write, reactions:write)
+- Go to your slack workspace and @bot_name in a channel to add the bot
+- Start testing interactions and functionalities with OSCAR
+
 ### Required Variables
 
 **Critical Configuration**: Deploy `OscarSecretsStack-{env}` stack and update the central secret with required values.
