@@ -1,16 +1,6 @@
 # Environment, secrets, and docs
 .env
-aws_id.txt
-DEPLOYMENT_GUIDE.md
-MIGRATION_GUIDE.md
-PHASE1_COMPLETE.md
-build_docs/
-metrics/docs/
 .kiro/
-lambda_update_scripts/
-instructions.md
-instructions.txt
-agent-configs
 cdk.context.json
 htmlcov
 # Build outputs
@@ -20,17 +10,12 @@ cdk.out/
 cdk-outputs.json
 oscar-agent-deploy/
 
-# Dependencies
-node_modules/
-.serverless/
-
 # Python
 __pycache__/
 *.py[cod]
 *$py.class
 *.so
 .Python
-build/
 dist/
 *.egg-info/
 .pytest_cache/
