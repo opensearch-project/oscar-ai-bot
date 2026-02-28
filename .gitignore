@@ -1,5 +1,6 @@
 # Environment, secrets, and docs
 .env
+aws_id.txt
 .kiro/
 cdk.context.json
 htmlcov
@@ -8,7 +9,6 @@ build_docs/
 cdk.out/
 .cdk.staging/
 cdk-outputs.json
-oscar-agent-deploy/
 
 # Python
 __pycache__/
