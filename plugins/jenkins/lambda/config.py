@@ -39,10 +39,6 @@ class JenkinsConfig:
         self.jenkins_agent_alias_id = os.getenv('JENKINS_AGENT_ALIAS_ID')
         self.jenkins_lambda_function_name = os.getenv('JENKINS_LAMBDA_FUNCTION_NAME', 'oscar-jenkins-agent')
 
-        # AWS Configuration
-        self.aws_region = os.getenv('AWS_REGION', 'us-east-1')
-        self.aws_account_id = os.getenv('AWS_ACCOUNT_ID')
-
         # Lambda Configuration
         self.lambda_timeout = int(os.getenv('LAMBDA_TIMEOUT', '180'))
         self.lambda_memory_size = int(os.getenv('LAMBDA_MEMORY_SIZE', '512'))

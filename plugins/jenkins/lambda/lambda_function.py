@@ -19,7 +19,7 @@ from typing import Any, Dict
 
 from config import config
 from jenkins_client import JenkinsClient
-from job_definitions import job_registry
+from jenkinsfile_fetcher import get_job_registry
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -52,8 +52,9 @@ def lambda_handler(event: Dict[str, Any], context) -> Dict[str, Any]:
             if isinstance(param, dict) and 'name' in param and 'value' in param:
                 params[param['name']] = param['value']
 
-        # Initialize Jenkins client
-        jenkins_client = JenkinsClient()
+        # Initialize Jenkins client with fetched job registry
+        job_registry = get_job_registry()
+        jenkins_client = JenkinsClient(job_registry)
 
         # Route to appropriate handler
         match function_name:
@@ -183,7 +184,7 @@ def handle_trigger_job(jenkins_client: JenkinsClient, params: Dict[str, Any]) ->
         return {
             'status': 'error',
             'message': 'job_name parameter is required for trigger_job function',
-            'available_jobs': job_registry.list_jobs()
+            'available_jobs': jenkins_client.job_registry.list_jobs()
         }
 
     # Extract job parameters (all params except job_name and confirmed)

@@ -2,6 +2,7 @@
 .env
 aws_id.txt
 .kiro/
+.claude/
 cdk.context.json
 htmlcov
 # Build outputs

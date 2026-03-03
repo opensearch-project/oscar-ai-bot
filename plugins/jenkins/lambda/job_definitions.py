@@ -9,13 +9,13 @@
 """
 Jenkins Job Definitions
 
-This module defines the structure and parameters for different Jenkins jobs,
-providing a modular system for adding new jobs with proper validation.
+Provides the data model and registry for Jenkins jobs. Job definitions
+are populated at runtime by parsing Jenkinsfiles fetched from GitHub
+(see jenkinsfile_fetcher.py), rather than being hand-coded here.
 """
 
 import logging
-from abc import ABC, abstractmethod
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
@@ -28,34 +28,23 @@ class JobParameter:
     description: str
     required: bool = True
     default_value: Optional[str] = None
-    parameter_type: str = "string"  # string, boolean, choice, etc.
+    parameter_type: str = "string"  # string, boolean, choice, activeChoice, reactiveChoice
     choices: Optional[List[str]] = None
     validation_pattern: Optional[str] = None
+    referenced_parameters: Optional[str] = None
+    choice_map: Optional[Dict[str, List[str]]] = field(default_factory=lambda: None)
 
 
-class BaseJobDefinition(ABC):
-    """Base class for Jenkins job definitions."""
+class JobDefinition:
+    """A job definition populated from parsed Jenkinsfile data."""
 
-    def __init__(self):
-        self.job_name = self.get_job_name()
-        self.parameters = self.get_parameters()
-        self.description = self.get_description()
-
-    @abstractmethod
-    def get_job_name(self) -> str:
-        """Return the Jenkins job name."""
-
-    @abstractmethod
-    def get_parameters(self) -> List[JobParameter]:
-        """Return the list of job parameters."""
-
-    @abstractmethod
-    def get_description(self) -> str:
-        """Return a description of what this job does."""
+    def __init__(self, job_name: str, description: str, parameters: List[JobParameter]):
+        self.job_name = job_name
+        self.description = description
+        self.parameters = parameters
 
     def validate_parameters(self, params: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Validate and normalize parameters for this job.
+        """Validate and normalize parameters for this job.
 
         Args:
             params: Dictionary of parameter name -> value
@@ -81,30 +70,46 @@ class BaseJobDefinition(ABC):
 
             # Skip None values for optional parameters
             if param_value is None:
-                continue
+                if param_def.default_value is not None:
+                    param_value = param_def.default_value
+                else:
+                    continue
 
-            # Validate choices
+            # Validate choices (flat list)
             if param_def.choices and param_value not in param_def.choices:
                 raise ValueError(
                     f"Parameter '{param_name}' must be one of {param_def.choices}, got '{param_value}'"
                 )
 
-            # Type conversion and validation
+            # Validate reactive choice against choice_map
+            if param_def.choice_map and param_def.referenced_parameters:
+                parent_value = params.get(param_def.referenced_parameters)
+                if parent_value and parent_value in param_def.choice_map:
+                    valid_choices = param_def.choice_map[parent_value]
+                    if param_value not in valid_choices:
+                        raise ValueError(
+                            f"Parameter '{param_name}' must be one of {valid_choices} "
+                            f"when {param_def.referenced_parameters}='{parent_value}', "
+                            f"got '{param_value}'"
+                        )
+
+            # Validate pattern before type conversion (needs string value)
+            if param_def.validation_pattern and param_def.parameter_type == "string":
+                import re
+                str_value = str(param_value)
+                if not re.match(param_def.validation_pattern, str_value):
+                    raise ValueError(
+                        f"Parameter '{param_name}' does not match required pattern. "
+                        f"Expected format for {param_def.description.lower()}"
+                    )
+
+            # Type conversion
             if param_def.parameter_type == "boolean":
                 if isinstance(param_value, str):
                     param_value = param_value.lower() in ('true', '1', 'yes', 'on')
                 param_value = bool(param_value)
             elif param_def.parameter_type == "string":
                 param_value = str(param_value)
-
-            # Validate pattern if specified
-            if param_def.validation_pattern and param_def.parameter_type == "string":
-                import re
-                if not re.match(param_def.validation_pattern, param_value):
-                    raise ValueError(
-                        f"Parameter '{param_name}' does not match required pattern. "
-                        f"Expected format for {param_def.description.lower()}"
-                    )
 
             validated[param_name] = param_value
 
@@ -114,270 +119,62 @@ class BaseJobDefinition(ABC):
         """Get information about all parameters for this job."""
         param_info = {}
         for param in self.parameters:
-            info = {
+            info: Dict[str, Any] = {
                 'description': param.description,
                 'required': param.required,
                 'type': param.parameter_type,
                 'default': param.default_value,
-                'choices': param.choices
+                'choices': param.choices,
             }
             if param.validation_pattern:
                 info['validation_pattern'] = param.validation_pattern
+            if param.referenced_parameters:
+                info['referenced_parameters'] = param.referenced_parameters
+            if param.choice_map:
+                info['choice_map'] = param.choice_map
             param_info[param.name] = info
         return param_info
-
-
-class DockerScanJob(BaseJobDefinition):
-    """Docker security scan job definition."""
-
-    def get_job_name(self) -> str:
-        return "docker-scan"
-
-    def get_description(self) -> str:
-        return "Triggers a Docker security scan for the specified image"
-
-    def get_parameters(self) -> List[JobParameter]:
-        return [
-            JobParameter(
-                name="IMAGE_FULL_NAME",
-                description="Full Docker image name including tag (e.g., alpine:3.19)",
-                required=True,
-                parameter_type="string"
-            )
-        ]
-
-
-class ReleaseChores(BaseJobDefinition):
-    """Release chore class definition."""
-
-    def get_job_name(self) -> str:
-        return "distribution-release-chores"
-
-    def get_description(self) -> str:
-        return "Does various chores for distribution release"
-
-    def get_parameters(self) -> List[JobParameter]:
-        return [
-            JobParameter(
-                name="RELEASE_CHORE",
-                description="Release chore to carry out",
-                required=True,
-                parameter_type="string",
-                choices=["checkReleaseOwners", "checkDocumentation", "checkCodeCoverage", "checkReleaseNotes", "checkReleaseIssues", "buildRC", "addRcDetailsComment", "checkDocumentationPullRequests", "checkIntegTestResultsOverview"]
-            ),
-            JobParameter(
-                name="ACTION",
-                description="Release chore action",
-                required=True,
-                parameter_type="string",
-                choices=["check", "create", "compile", "request", "assign", "notify", "add", "both", "opensearch", "opensearch-dashboards"]
-            ),
-            JobParameter(
-                name="RELEASE_VERSION",
-                description="Release version (e.g., 2.11.0, 3.0.0)",
-                required=True,
-                parameter_type="string",
-                validation_pattern=r"^\d+\.\d+\.\d+$"
-            ),
-            JobParameter(
-                name="GIT_LOG_DATE",
-                description="Enter data to check commits for release notes in format yyyy-mm-dd, example 2022-07-26.",
-                required=False,
-                parameter_type="string",
-                validation_pattern=r"^\d{4}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12]\d|3[01])$"
-            ),
-        ]
-
-
-class CentralReleasePromotionJob(BaseJobDefinition):
-    """Central release promotion pipeline job definition."""
-
-    def get_job_name(self) -> str:
-        return "central-release-promotion"
-
-    def get_description(self) -> str:
-        return "Promotes OpenSearch and OpenSearch Dashboards release candidates to final release. Requires release version and RC build numbers for both OpenSearch and OpenSearch Dashboards."
-
-    def get_parameters(self) -> List[JobParameter]:
-        return [
-            JobParameter(
-                name="RELEASE_VERSION",
-                description="Release version (e.g., 2.11.0, 3.0.0)",
-                required=True,
-                parameter_type="string",
-                validation_pattern=r"^\d+\.\d+\.\d+$"
-            ),
-            JobParameter(
-                name="OPENSEARCH_RC_BUILD_NUMBER",
-                description="OpenSearch Release Candidate Build Number",
-                required=True,
-                parameter_type="string"
-            ),
-            JobParameter(
-                name="OPENSEARCH_DASHBOARDS_RC_BUILD_NUMBER",
-                description="OpenSearch Dashboards Release Candidate Build Number",
-                required=True,
-                parameter_type="string"
-            ),
-            JobParameter(
-                name="TAG_DOCKER_LATEST",
-                description="Tag the images as latest",
-                required=False,
-                default_value='True',
-                parameter_type='boolean'
-            )
-        ]
-
-
-class DistributionBuildOpenSearchJob(BaseJobDefinition):
-    """OpenSearch distribution build job definition."""
-
-    def get_job_name(self) -> str:
-        return "distribution-build-opensearch"
-
-    def get_description(self) -> str:
-        return ("Workflow to build different OpenSearch distributions. "
-                "Success - Everything was built from given manifest. "
-                "Failure - Core engine, common-utils and/or job-scheduler failed to build or other infra related failures. "
-                "Unstable - Some components failed but a distribution was built with passing ones.")
-
-    def get_parameters(self) -> List[JobParameter]:
-        return [
-            JobParameter(
-                name="INPUT_MANIFEST",
-                description="Input manifest under the manifests folder, e.g. 2.0.0/opensearch-2.0.0.yml",
-                required=True,
-                parameter_type="string"
-            ),
-            JobParameter(
-                name="TEST_MANIFEST",
-                description="Test manifest under the manifests folder, e.g. 2.0.0/opensearch-2.0.0-test.yml",
-                required=False,
-                parameter_type="string"
-            ),
-            JobParameter(
-                name="BUILD_PLATFORM",
-                description="Build selected platform, choices include 'linux', 'windows'. Can combine multiple platforms separated by space (docker is only available on linux)",
-                required=True,
-                parameter_type="string",
-                choices=["linux", "windows", "linux windows"]
-            ),
-            JobParameter(
-                name="BUILD_DISTRIBUTION",
-                description="Build selected distribution, choices include 'tar', 'rpm', 'deb', 'zip'. Can combine multiple distributions separated by space (docker is only available on tar)",
-                required=True,
-                parameter_type="string",
-                choices=["tar", "rpm", "deb", "zip", "tar rpm", "tar deb", "tar zip", "rpm deb", "rpm zip", "deb zip", "tar rpm deb", "tar rpm zip", "tar deb zip", "rpm deb zip", "tar rpm deb zip"]
-            ),
-            JobParameter(
-                name="TEST_PLATFORM",
-                description="Test selected platform, choices include 'linux', 'windows'. Can combine multiple platforms separated by space",
-                required=False,
-                parameter_type="string",
-                choices=["linux", "windows", "linux windows"]
-            ),
-            JobParameter(
-                name="TEST_DISTRIBUTION",
-                description="Test selected distribution, choices include 'tar', 'rpm', 'deb', 'zip'. Can combine multiple distributions separated by space",
-                required=False,
-                parameter_type="string",
-                choices=["tar", "rpm", "deb", "zip", "tar rpm", "tar deb", "tar zip", "rpm deb", "rpm zip", "deb zip", "tar rpm deb", "tar rpm zip", "tar deb zip", "rpm deb zip", "tar rpm deb zip"]
-            ),
-            JobParameter(
-                name="UPDATE_GITHUB_ISSUE",
-                description="To create/close/update a github issue for all component or not",
-                required=False,
-                parameter_type="boolean",
-                default_value="false"
-            ),
-            JobParameter(
-                name="COMPONENT_NAME",
-                description="If this field contains one or more component names (e.g. OpenSearch common-utils ...), will build with \"--component COMPONENT_NAME_HERE ...\", else build everything in the INPUT_MANIFEST",
-                required=False,
-                parameter_type="string"
-            ),
-            JobParameter(
-                name="INTEG_TEST_JOB_NAME",
-                description="Name of integration test job that will be triggered, e.g. Playground/integ-test. A non-null empty value here will skip integration tests",
-                required=False,
-                parameter_type="string"
-            ),
-            JobParameter(
-                name="SMOKE_TEST_JOB_NAME",
-                description="Name of smoke test job that will be triggered, e.g. smoke-test. A non-null empty value here will skip smoke tests",
-                required=False,
-                parameter_type="string"
-            ),
-            JobParameter(
-                name="BWC_TEST_JOB_NAME",
-                description="Name of backwards compatibility test job that will be triggered, e.g. Playground/bwc-test. A non-null empty value here will skip BWC tests",
-                required=False,
-                parameter_type="string"
-            ),
-            JobParameter(
-                name="RC_NUMBER",
-                description="The RC build count. Default is 0 which means its not a Release Candidate",
-                required=False,
-                parameter_type="string",
-                default_value="0"
-            ),
-            JobParameter(
-                name="BUILD_DOCKER",
-                description="Build docker image or not with options: build_docker, do_not_build_docker, etc.",
-                required=True,
-                parameter_type="string"
-            ),
-            JobParameter(
-                name="UPDATE_LATEST_URL",
-                description="Update latest url so /latest/ is pointed to this build",
-                required=False,
-                parameter_type="boolean",
-                default_value="false"
-            ),
-            JobParameter(
-                name="CONTINUE_ON_ERROR",
-                description="Continue building the distribution even if a one or more component fails",
-                required=False,
-                parameter_type="boolean",
-                default_value="true"
-            ),
-            JobParameter(
-                name="INCREMENTAL",
-                description="Whether to trigger incremental build. Defaults to false",
-                required=False,
-                parameter_type="boolean",
-                default_value="false"
-            ),
-            JobParameter(
-                name="PREVIOUS_BUILD_ID",
-                description="The build ID used to download previous build artifacts. Defaults to latest",
-                required=False,
-                parameter_type="string",
-                default_value="latest"
-            )
-        ]
 
 
 class JobRegistry:
     """Registry for managing available Jenkins jobs."""
 
-    def __init__(self):
-        self._jobs: Dict[str, BaseJobDefinition] = {}
-        self._register_default_jobs()
+    def __init__(self) -> None:
+        self._jobs: Dict[str, JobDefinition] = {}
 
-    def _register_default_jobs(self):
-        """Register the default set of Jenkins jobs."""
-        self.register_job(DockerScanJob())
-        self.register_job(CentralReleasePromotionJob())
-        self.register_job(DistributionBuildOpenSearchJob())
-        self.register_job(ReleaseChores())
+    def load_parsed_job(self, parsed_job: Any) -> None:
+        """Load a job from a ParsedJob (from jenkinsfile_parser).
 
-    def register_job(self, job_definition: BaseJobDefinition):
-        """Register a new job definition."""
+        Args:
+            parsed_job: A ParsedJob dataclass instance.
+        """
+        parameters = [
+            JobParameter(
+                name=p.name,
+                description=p.description,
+                required=p.required,
+                default_value=p.default_value,
+                parameter_type=p.parameter_type,
+                choices=p.choices,
+                referenced_parameters=p.referenced_parameters,
+                choice_map=p.choice_map,
+            )
+            for p in parsed_job.parameters
+        ]
+
+        job_def = JobDefinition(
+            job_name=parsed_job.job_name,
+            description=parsed_job.description,
+            parameters=parameters,
+        )
+        self.register_job(job_def)
+
+    def register_job(self, job_definition: JobDefinition) -> None:
+        """Register a job definition."""
         self._jobs[job_definition.job_name] = job_definition
         logger.info(f"Registered Jenkins job: {job_definition.job_name}")
 
-    def get_job(self, job_name: str) -> Optional[BaseJobDefinition]:
+    def get_job(self, job_name: str) -> Optional[JobDefinition]:
         """Get a job definition by name."""
         return self._jobs.get(job_name)
 
@@ -404,7 +201,3 @@ class JobRegistry:
             raise ValueError(f"Unknown job: {job_name}")
 
         return job.validate_parameters(params)
-
-
-# Global job registry
-job_registry = JobRegistry()
