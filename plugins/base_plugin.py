@@ -14,6 +14,17 @@ from utils.foundation_models import FoundationModels
 
 
 @dataclass
+class SecretConfig:
+    """A secret that a plugin needs created in AWS Secrets Manager.
+
+    The full secret name is derived as: oscar-{plugin.name}-{name_suffix}-{env}
+    """
+    name_suffix: str
+    description: str
+    env_var: str
+
+
+@dataclass
 class LambdaConfig:
     """Configuration for a plugin's Lambda function."""
     entry: str
@@ -82,6 +93,11 @@ class OscarPlugin(ABC):
     def uses_knowledge_base(self) -> bool:
         """Whether to attach the knowledge base to this agent."""
         return True
+
+    def get_secrets(self) -> List[SecretConfig]:
+        """Secrets this plugin needs in AWS Secrets Manager.
+        Override to declare plugin-specific secrets. Default: none."""
+        return []
 
     def get_foundation_model(self) -> str:
         """Foundation model ID."""

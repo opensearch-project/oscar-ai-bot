@@ -84,7 +84,8 @@ def main() -> None:
         app, f"OscarSecretsStack-{environment}",
         env=env,
         description="OSCAR secrets management",
-        environment=environment
+        environment=environment,
+        plugins=plugins
     )
 
     # 3. Storage (DynamoDB tables)

@@ -145,6 +145,16 @@ class OscarLambdaStack(Stack):
             role = self.permissions_stack.plugin_roles[plugin.name]
             self.secrets_stack.grant_read_access(role)
 
+            # Merge plugin secret names into Lambda environment variables
+            env_vars = dict(config.environment_variables)
+            for secret_config in plugin.get_secrets():
+                secret = self.secrets_stack.get_plugin_secret(
+                    plugin.name, secret_config.name_suffix
+                )
+                if secret:
+                    env_vars[secret_config.env_var] = secret.secret_name
+                    secret.grant_read(role)
+
             kwargs = dict(
                 function_name=fn_name,
                 runtime=aws_lambda.Runtime.PYTHON_3_12,
@@ -153,7 +163,7 @@ class OscarLambdaStack(Stack):
                 index=config.index,
                 timeout=Duration.seconds(config.timeout_seconds),
                 memory_size=config.memory_size,
-                environment=config.environment_variables,
+                environment=env_vars,
                 role=role,
                 description=f"OSCAR {plugin.name} agent lambda function",
                 reserved_concurrent_executions=config.reserved_concurrency,
