@@ -11,14 +11,6 @@ from aws_cdk import aws_iam as iam
 def get_policies(account_id: str, region: str, env: str) -> List[iam.PolicyStatement]:
     return [
         iam.PolicyStatement(
-            sid="JenkinsCentralSecretsAccess",
-            effect=iam.Effect.ALLOW,
-            actions=["secretsmanager:GetSecretValue"],
-            resources=[
-                f"arn:aws:secretsmanager:{region}:{account_id}:secret:oscar-central-env-{env}*"
-            ],
-        ),
-        iam.PolicyStatement(
             sid="JenkinsPluginSecretsAccess",
             effect=iam.Effect.ALLOW,
             actions=["secretsmanager:GetSecretValue"],

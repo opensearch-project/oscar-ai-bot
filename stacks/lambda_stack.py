@@ -143,7 +143,6 @@ class OscarLambdaStack(Stack):
 
             fn_name = f"oscar-{plugin.name}-{self.env_name}"
             role = self.permissions_stack.plugin_roles[plugin.name]
-            self.secrets_stack.grant_read_access(role)
 
             # Merge plugin secret names into Lambda environment variables
             env_vars = dict(config.environment_variables)
