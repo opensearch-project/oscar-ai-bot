@@ -36,7 +36,7 @@ class JenkinsConfig:
 
         # Request Configuration
         self.request_timeout = int(os.getenv('JENKINS_REQUEST_TIMEOUT', '30'))
-        self.verify_ssl = os.getenv('JENKINS_VERIFY_SSL', 'false').lower() != 'false'
+        self.verify_ssl = os.getenv('JENKINS_VERIFY_SSL', 'true').lower() != 'false'
 
         # Validate required configuration
         self._validate_config()
