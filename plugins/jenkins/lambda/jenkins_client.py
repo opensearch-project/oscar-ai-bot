@@ -24,6 +24,7 @@ from job_definitions import JobRegistry
 from requests.auth import HTTPBasicAuth
 
 logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
 
 
 class JenkinsCredentials:
@@ -80,6 +81,7 @@ class JenkinsClient:
         self.credentials = JenkinsCredentials()
         self.session = requests.Session()
         self.session.timeout = config.request_timeout
+        self.session.verify = config.verify_ssl
         self.job_registry = job_registry
 
     def _get_build_number_from_queue(self, queue_location: str, auth: HTTPBasicAuth, max_attempts: int = 15) -> Optional[int]:

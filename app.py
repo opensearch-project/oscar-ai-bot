@@ -28,8 +28,8 @@ from stacks.secrets_stack import OscarSecretsStack
 from stacks.storage_stack import OscarStorageStack
 from stacks.vpc_stack import OscarVpcStack
 
-# Load environment variables from .env file
-# load_dotenv()
+from dotenv import load_dotenv
+load_dotenv()
 
 
 # Configure logging

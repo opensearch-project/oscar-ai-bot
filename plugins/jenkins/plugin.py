@@ -3,6 +3,8 @@
 
 """Jenkins plugin for OSCAR."""
 
+import os
+
 from plugins.base_plugin import LambdaConfig, OscarPlugin, SecretConfig
 from plugins.jenkins.action_groups import get_action_groups
 from plugins.jenkins.iam_policies import get_policies
@@ -22,6 +24,9 @@ class JenkinsPlugin(OscarPlugin):
             timeout_seconds=120,
             memory_size=512,
             reserved_concurrency=5,
+            environment_variables={
+                "JENKINS_URL": os.environ.get("JENKINS_URL", "https://build.ci.opensearch.org"),
+            },
         )
 
     def get_iam_policies(self, account_id, region, env):

@@ -22,8 +22,8 @@ from jenkins_client import JenkinsClient
 from jenkinsfile_fetcher import get_job_registry
 
 # Configure logging
-logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
 
 
 def lambda_handler(event: Dict[str, Any], context) -> Dict[str, Any]:

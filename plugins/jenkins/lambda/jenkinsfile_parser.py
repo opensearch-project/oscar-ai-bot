@@ -16,6 +16,7 @@ from dataclasses import dataclass, field
 from typing import Dict, List, Optional
 
 logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
 
 
 @dataclass
@@ -43,8 +44,10 @@ class ParsedJob:
 # Map Groovy DSL function names to a normalized type string.
 _TYPE_MAP = {
     'string': 'string',
+    'text': 'text',
     'booleanParam': 'boolean',
     'choice': 'choice',
+    'password': 'password',
     'activeChoice': 'activeChoice',
     'reactiveChoice': 'reactiveChoice',
 }
@@ -296,14 +299,16 @@ class JenkinsfileParser:
     def _apply_required_rules(parameters: List[ParsedParameter]) -> None:
         """Determine required/optional from description text and defaultValue.
 
-        Case-insensitive check. Rules in priority order:
-        1. Description starts with "Required" -> required
-        2. Description starts with "Optional" -> optional
+        Case-insensitive check. Handles formats like "Required:", "<Required>",
+        "Optional:", "<Optional>". Rules in priority order:
+        1. Description contains "required" tag/prefix -> required
+        2. Description contains "optional" tag/prefix -> optional
         3. Has a defaultValue -> optional
         4. No indicator and no default -> required (conservative)
         """
         for p in parameters:
-            desc_lower = p.description.lower().strip()
+            # Strip angle brackets and whitespace: handles "Required:", "<Required>", etc.
+            desc_lower = p.description.lower().strip().replace('<', '').replace('>', '').strip()
             if desc_lower.startswith("required"):
                 p.required = True
             elif desc_lower.startswith("optional"):
