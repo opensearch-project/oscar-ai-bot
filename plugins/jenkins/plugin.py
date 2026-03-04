@@ -26,6 +26,8 @@ class JenkinsPlugin(OscarPlugin):
             reserved_concurrency=5,
             environment_variables={
                 "JENKINS_URL": os.environ.get("JENKINS_URL", "https://build.ci.opensearch.org"),
+                "JENKINSFILE_GITHUB_REPO": os.environ.get("JENKINSFILE_GITHUB_REPO", "opensearch-project/opensearch-build"),
+                "JENKINSFILE_GITHUB_BRANCH": os.environ.get("JENKINSFILE_GITHUB_BRANCH", "main"),
             },
         )
 

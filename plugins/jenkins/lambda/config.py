@@ -32,7 +32,7 @@ class JenkinsConfig:
         self.jenkins_api_token = self._load_jenkins_secret()
 
         # Jenkins Server Configuration
-        self.jenkins_url = os.getenv('JENKINS_URL', 'https://build.ci.opensearch.org')
+        self.jenkins_url = os.environ['JENKINS_URL']
 
         # Request Configuration
         self.request_timeout = int(os.getenv('JENKINS_REQUEST_TIMEOUT', '30'))

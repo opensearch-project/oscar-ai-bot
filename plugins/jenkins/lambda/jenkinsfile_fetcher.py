@@ -22,11 +22,11 @@ from job_definitions import JobRegistry
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
-GITHUB_REPO = os.environ.get("JENKINSFILE_GITHUB_REPO", "gaiksaya/opensearch-build")
-GITHUB_BRANCH = os.environ.get("JENKINSFILE_GITHUB_BRANCH", "test-oscar")
+GITHUB_REPO = os.environ["JENKINSFILE_GITHUB_REPO"]
+GITHUB_BRANCH = os.environ["JENKINSFILE_GITHUB_BRANCH"]
 JENKINS_DIR = "jenkins"
-FETCH_TIMEOUT = int(os.environ.get("JENKINSFILE_FETCH_TIMEOUT", "5"))
-CACHE_TTL = int(os.environ.get("JENKINSFILE_CACHE_TTL", "3600"))
+FETCH_TIMEOUT = 5
+CACHE_TTL = 3600
 
 # Files to skip even if they contain @job-name annotations.
 # Comma-separated via env var, or hardcoded defaults.
