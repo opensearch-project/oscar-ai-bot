@@ -14,6 +14,7 @@ import os
 from typing import Optional
 
 from aws_cdk import App, Environment
+from dotenv import load_dotenv
 
 from plugins.jenkins import JenkinsPlugin
 from plugins.metrics.build import MetricsBuildPlugin
@@ -28,7 +29,6 @@ from stacks.secrets_stack import OscarSecretsStack
 from stacks.storage_stack import OscarStorageStack
 from stacks.vpc_stack import OscarVpcStack
 
-from dotenv import load_dotenv
 load_dotenv()
 
 
