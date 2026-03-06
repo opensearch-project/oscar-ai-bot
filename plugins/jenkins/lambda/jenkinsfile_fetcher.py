@@ -41,6 +41,7 @@ def _is_ignored(path: str) -> bool:
             return True
     return False
 
+
 # Module-level cache
 _cached_registry: Optional[JobRegistry] = None
 _cache_timestamp: float = 0.0
