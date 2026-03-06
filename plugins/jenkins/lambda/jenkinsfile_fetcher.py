@@ -13,7 +13,7 @@ JenkinsfileParser, builds a JobRegistry, and caches the result.
 import logging
 import os
 import time
-from typing import List, Optional, Set
+from typing import List, Optional
 
 import requests
 from jenkinsfile_parser import JenkinsfileParser, ParsedJob
@@ -28,10 +28,18 @@ JENKINS_DIR = "jenkins"
 FETCH_TIMEOUT = 5
 CACHE_TTL = 3600
 
-# Files to skip even if they contain @job-name annotations.
-# Comma-separated via env var, or hardcoded defaults.
+# Paths to skip: can be directories (jenkins/legacy) or files (jenkins/foo/bar.jenkinsfile).
+# Comma-separated via env var. Matches by prefix so "jenkins/legacy" skips everything under it.
 _ignore_raw = os.environ.get("JENKINSFILE_IGNORE_LIST", "")
-IGNORE_LIST: Set[str] = {p.strip() for p in _ignore_raw.split(",") if p.strip()}
+IGNORE_LIST: List[str] = [p.strip() for p in _ignore_raw.split(",") if p.strip()]
+
+
+def _is_ignored(path: str) -> bool:
+    """Check if a path matches any entry in the ignore list (exact or prefix)."""
+    for ignored in IGNORE_LIST:
+        if path == ignored or path.startswith(ignored.rstrip("/") + "/"):
+            return True
+    return False
 
 # Module-level cache
 _cached_registry: Optional[JobRegistry] = None
@@ -64,13 +72,13 @@ def _discover_jenkinsfiles(directory: str = JENKINS_DIR) -> List[str]:
 
             for item in resp.json():
                 item_path = item.get("path", "")
+                if _is_ignored(item_path):
+                    logger.info(f"Ignoring {item_path} (in ignore list)")
+                    continue
                 if item.get("type") == "dir":
                     dirs_to_visit.append(item_path)
                 elif item.get("type") == "file" and item_path.endswith(".jenkinsfile"):
-                    if item_path not in IGNORE_LIST:
-                        paths.append(item_path)
-                    else:
-                        logger.info(f"Ignoring {item_path} (in ignore list)")
+                    paths.append(item_path)
 
         except requests.RequestException as e:
             logger.error(f"Failed to list {current_dir}: {e}")
