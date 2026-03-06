@@ -52,10 +52,20 @@ parameters {
 
 **Required/Optional detection rules (in priority order):**
 
-1. Description starts with `Required` or `<Required>` → required
-2. Description starts with `Optional` or `<Optional>` → optional
-3. Has a `defaultValue` → optional
-4. No indicator and no default → required (conservative)
+1. Description starts with `Conditionally-Required` or `<Conditionally-Required>` → treated as optional (the description explains when it's needed, Jenkins validates server-side)
+2. Description starts with `Required` or `<Required>` → required
+3. Description starts with `Optional` or `<Optional>` → optional
+4. Has a `defaultValue` → optional
+5. No indicator and no default → required (conservative)
+
+Use `<Conditionally-Required>` for "either A or B" scenarios:
+```groovy
+string(
+    name: 'BUNDLE_MANIFEST_URL',
+    description: '<Conditionally-Required> Either this or DISTRIBUTION_URL must be provided.',
+    trim: true
+)
+```
 
 ### 3. Deploy OSCAR
 

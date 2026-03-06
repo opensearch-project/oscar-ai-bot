@@ -56,6 +56,22 @@ def get_action_groups(lambda_arn: str) -> List[bedrock.CfnAgent.AgentActionGroup
                             ),
                         },
                     ),
+                    bedrock.CfnAgent.FunctionProperty(
+                        name="get_build_status",
+                        description="Get the current status of a Jenkins build. Returns the build state (SUCCESS, FAILURE, ABORTED, UNSTABLE, IN_PROGRESS), duration, and build URL. Use when users ask about the status or result of a specific build.",
+                        parameters={
+                            "job_name": bedrock.CfnAgent.ParameterDetailProperty(
+                                type="string",
+                                description="Name of the Jenkins job",
+                                required=True,
+                            ),
+                            "build_number": bedrock.CfnAgent.ParameterDetailProperty(
+                                type="string",
+                                description="Build number to check status for",
+                                required=True,
+                            ),
+                        },
+                    ),
                 ]
             ),
         )

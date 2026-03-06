@@ -34,6 +34,7 @@ If the user declines, respond "Job execution cancelled." and stop.
 | `get_job_info(job_name)` | Returns job description, required/optional parameters, and Jenkins URL | Always first, before any execution |
 | `trigger_job(job_name, confirmed, ...params)` | Executes the job on Jenkins | Only after user confirms |
 | `list_jobs()` | Lists all available jobs with parameter counts | When user asks what jobs exist |
+| `get_build_status(job_name, build_number)` | Returns build state (SUCCESS, FAILURE, ABORTED, IN_PROGRESS), duration, and URL | When user asks about a build's status |
 | `test_connection()` | Tests Jenkins server connectivity | For troubleshooting |
 
 ## CRITICAL: Only Use Registered Jobs

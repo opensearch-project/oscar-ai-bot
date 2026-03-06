@@ -15,6 +15,7 @@ This module defines the Bedrock agents infrastructure including:
 - Action groups with proper Lambda function associations
 """
 import logging
+from datetime import datetime, timezone
 from typing import Any, List, Optional
 
 from aws_cdk import Fn, Stack
@@ -49,6 +50,7 @@ class OscarAgentsStack(Stack):
         self.agent_role_arn = self.permissions_stack.bedrock_agent_role.role_arn
         self.knowledge_base_id = Fn.import_value("OscarKnowledgeBaseId")
         self.env_name = environment
+        self._deploy_ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
 
         # Create plugin collaborator agents, then supervisors
         privileged_collaborators, limited_collaborators = self._create_plugin_agents(plugins or [])
@@ -92,7 +94,7 @@ class OscarAgentsStack(Stack):
                 self, f"Oscar{construct_name}Alias",
                 agent_alias_name="LIVE",
                 agent_id=agent.attr_agent_id,
-                description=f"Live alias for OSCAR {plugin.name} agent",
+                description=f"Live alias for OSCAR {plugin.name} agent (deployed {self._deploy_ts})",
             )
             alias.node.add_dependency(agent)
 
@@ -206,7 +208,7 @@ class OscarAgentsStack(Stack):
             self, "OscarPrivilegedAgentAlias",
             agent_alias_name="LIVE",
             agent_id=privileged_agent.attr_agent_id,
-            description="Live alias for OSCAR privileged agent",
+            description=f"Live alias for OSCAR privileged agent (deployed {self._deploy_ts})",
         )
         privileged_alias.node.add_dependency(privileged_agent)
 
@@ -278,7 +280,7 @@ class OscarAgentsStack(Stack):
             self, "OscarLimitedAgentAlias",
             agent_alias_name="LIVE",
             agent_id=limited_agent.attr_agent_id,
-            description="Live alias for OSCAR limited agent",
+            description=f"Live alias for OSCAR limited agent (deployed {self._deploy_ts})",
         )
         limited_alias.node.add_dependency(limited_agent)
 

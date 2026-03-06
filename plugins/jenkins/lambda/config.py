@@ -77,6 +77,10 @@ class JenkinsConfig:
         """Get the buildWithParameters URL for a Jenkins job."""
         return f"{self.jenkins_url}/job/{job_name}/buildWithParameters"
 
+    def get_build_api_url(self, job_name: str, build_number: int) -> str:
+        """Get the API URL for a specific build."""
+        return f"{self.jenkins_url}/job/{job_name}/{build_number}/api/json"
+
     def get_workflow_url(self, job_name: str, build_number: int) -> str:
         """Get the workflow URL for a specific build."""
         return f"{self.jenkins_url}/job/{job_name}/{build_number}/"

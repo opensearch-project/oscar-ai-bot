@@ -309,7 +309,9 @@ class JenkinsfileParser:
         for p in parameters:
             # Strip angle brackets and whitespace: handles "Required:", "<Required>", etc.
             desc_lower = p.description.lower().strip().replace('<', '').replace('>', '').strip()
-            if desc_lower.startswith("required"):
+            if desc_lower.startswith("conditionally-required") or desc_lower.startswith("conditionally required"):
+                p.required = False
+            elif desc_lower.startswith("required"):
                 p.required = True
             elif desc_lower.startswith("optional"):
                 p.required = False
