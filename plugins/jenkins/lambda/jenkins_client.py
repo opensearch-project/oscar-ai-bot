@@ -591,7 +591,7 @@ class JenkinsClient:
             'status': 'error',
             'message': 'Failed to get console output',
             'build_url': config.get_workflow_url(job_name, build_number),
-            }
+        }
 
     def get_job_info(self, job_name: str) -> Dict[str, Any]:
         """
