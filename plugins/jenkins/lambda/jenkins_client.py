@@ -386,6 +386,213 @@ class JenkinsClient:
                 'error': str(e),
             }
 
+    def get_build_failure_details(self, job_name: str, build_number: int) -> Dict[str, Any]:
+        """Get failure details using the Pipeline Stage API.
+
+        Identifies FAILED and UNSTABLE stages and fetches their logs.
+        Falls back to console tail for non-pipeline jobs.
+        """
+        max_log_lines = 100
+
+        try:
+            url = config.get_pipeline_describe_url(job_name, build_number)
+            auth = self.credentials.get_auth()
+
+            logger.info(f"Getting pipeline details for {job_name} #{build_number}")
+            response = self.session.get(url, auth=auth)
+
+            if response.status_code == 404:
+                return self._get_console_tail(job_name, build_number, auth, max_log_lines)
+
+            if response.status_code != 200:
+                return {
+                    'status': 'error',
+                    'message': f'Failed to get pipeline details: HTTP {response.status_code}',
+                    'build_url': config.get_workflow_url(job_name, build_number),
+                }
+
+            pipeline_info = response.json()
+            stages = pipeline_info.get('stages', [])
+
+            problem_stages = [
+                s for s in stages
+                if s.get('status') in ('FAILED', 'UNSTABLE')
+            ]
+            skipped_stages = [
+                s.get('name') for s in stages
+                if s.get('status') == 'NOT_EXECUTED'
+            ]
+
+            if not problem_stages:
+                return {
+                    'status': 'success',
+                    'job_name': job_name,
+                    'build_number': build_number,
+                    'build_status': pipeline_info.get('status', 'UNKNOWN'),
+                    'message': 'No failed or unstable stages found',
+                    'total_stages': len(stages),
+                    'build_url': config.get_workflow_url(job_name, build_number),
+                }
+
+            failed_stage_details = []
+            for stage in problem_stages:
+                node_id = str(stage.get('id', ''))
+                stage_name = stage.get('name', 'unknown')
+                duration_ms = stage.get('durationMillis', 0)
+                duration_str = f"{duration_ms // 60000}m {(duration_ms % 60000) // 1000}s" if duration_ms else "N/A"
+
+                # Error info from the describe response (always available for Groovy/pipeline errors)
+                error_info = stage.get('error', {})
+                error_message = error_info.get('message', '')
+                error_type = error_info.get('type', '')
+
+                # Get the actual error log by drilling into child step nodes
+                log_excerpt = ''
+                log_node_id = node_id
+                if node_id:
+                    log_excerpt, log_node_id = self._get_stage_error_log(
+                        job_name, build_number, node_id, auth, max_log_lines
+                    )
+
+                # If still empty, fall back to full console tail
+                if not log_excerpt and not error_message:
+                    log_excerpt = self._get_console_tail_text(job_name, build_number, auth, max_log_lines)
+
+                # Build the log URL pointing to the specific step node
+                step_log_url = f"{config.jenkins_url}/job/{job_name}/{build_number}/execution/node/{log_node_id}/log/" if log_node_id else ''
+
+                failed_stage_details.append({
+                    'name': stage_name,
+                    'stage_status': stage.get('status'),
+                    'duration': duration_str,
+                    'error_message': error_message,
+                    'error_type': error_type,
+                    'stage_log_url': step_log_url,
+                    'log_excerpt': log_excerpt,
+                })
+
+            return {
+                'status': 'success',
+                'job_name': job_name,
+                'build_number': build_number,
+                'build_status': pipeline_info.get('status', 'UNKNOWN'),
+                'total_stages': len(stages),
+                'failed_stages': failed_stage_details,
+                'skipped_stages': skipped_stages,
+                'build_url': config.get_workflow_url(job_name, build_number),
+            }
+
+        except requests.exceptions.Timeout:
+            return {
+                'status': 'error',
+                'message': f'Request timed out after {config.request_timeout} seconds',
+                'job_name': job_name,
+                'build_number': build_number,
+            }
+        except requests.exceptions.ConnectionError as e:
+            return {
+                'status': 'error',
+                'message': 'Failed to connect to Jenkins server',
+                'error': f'Connection error: {str(e)}',
+            }
+        except Exception as e:
+            logger.error(f"Error getting failure details for {job_name} #{build_number}: {e}", exc_info=True)
+            return {
+                'status': 'error',
+                'message': 'Unexpected error getting build failure details',
+                'error': str(e),
+            }
+
+    def _get_stage_error_log(
+        self, job_name: str, build_number: int, stage_node_id: str,
+        auth: HTTPBasicAuth, max_lines: int
+    ) -> tuple:
+        """Get error log for a stage by drilling into its child step nodes.
+
+        The stage-level wfapi/log is often empty. The actual error is in the
+        child stageFlowNodes — find the failed step and fetch its log.
+
+        Returns:
+            Tuple of (log_text, node_id_for_url). node_id is the specific step
+            node whose /execution/node/{id}/log/ URL shows the error.
+        """
+        try:
+            # First try the stage-level log
+            log_url = config.get_stage_log_url(job_name, build_number, stage_node_id)
+            log_resp = self.session.get(log_url, auth=auth)
+            if log_resp.status_code == 200:
+                content_type = log_resp.headers.get('content-type', '')
+                if content_type.startswith('application/json'):
+                    raw_text = log_resp.json().get('text', '')
+                else:
+                    raw_text = log_resp.text
+                if raw_text:
+                    return self._truncate(raw_text, max_lines), stage_node_id
+
+            # Stage log empty — drill into child step nodes
+            describe_url = f"{config.jenkins_url}/job/{job_name}/{build_number}/execution/node/{stage_node_id}/wfapi/describe"
+            desc_resp = self.session.get(describe_url, auth=auth)
+            if desc_resp.status_code == 200:
+                stage_detail = desc_resp.json()
+                for step_node in stage_detail.get('stageFlowNodes', []):
+                    if step_node.get('status') in ('FAILED', 'UNSTABLE'):
+                        step_id = str(step_node.get('id', ''))
+                        if step_id:
+                            step_log_url = config.get_stage_log_url(job_name, build_number, step_id)
+                            step_log_resp = self.session.get(step_log_url, auth=auth)
+                            if step_log_resp.status_code == 200:
+                                content_type = step_log_resp.headers.get('content-type', '')
+                                if content_type.startswith('application/json'):
+                                    raw_text = step_log_resp.json().get('text', '')
+                                else:
+                                    raw_text = step_log_resp.text
+                                if raw_text:
+                                    return self._truncate(raw_text, max_lines), step_id
+        except Exception as e:
+            logger.warning(f"Failed to get stage error log for node {stage_node_id}: {e}")
+
+        return '', stage_node_id
+
+    @staticmethod
+    def _truncate(text: str, max_lines: int) -> str:
+        """Truncate text to the last max_lines lines."""
+        lines = text.splitlines()
+        if len(lines) > max_lines:
+            return f"... (truncated, showing last {max_lines} lines)\n" + '\n'.join(lines[-max_lines:])
+        return text
+
+    def _get_console_tail_text(self, job_name: str, build_number: int, auth: HTTPBasicAuth, max_lines: int) -> str:
+        """Fetch last N lines of console output as plain text."""
+        try:
+            url = f"{config.jenkins_url}/job/{job_name}/{build_number}/consoleText"
+            response = self.session.get(url, auth=auth)
+            if response.status_code == 200:
+                lines = response.text.splitlines()
+                if len(lines) > max_lines:
+                    return f"... (truncated, showing last {max_lines} lines)\n" + '\n'.join(lines[-max_lines:])
+                return response.text
+        except Exception as e:
+            logger.warning(f"Failed to fetch console text: {e}")
+        return ''
+
+    def _get_console_tail(self, job_name: str, build_number: int, auth: HTTPBasicAuth, max_lines: int) -> Dict[str, Any]:
+        """Fallback: fetch last N lines of console output for non-pipeline jobs."""
+        excerpt = self._get_console_tail_text(job_name, build_number, auth, max_lines)
+        if excerpt:
+            return {
+                'status': 'success',
+                'job_name': job_name,
+                'build_number': build_number,
+                'message': 'Pipeline stage API not available, showing console tail',
+                'log_excerpt': excerpt,
+                'build_url': config.get_workflow_url(job_name, build_number),
+            }
+        return {
+            'status': 'error',
+            'message': 'Failed to get console output',
+            'build_url': config.get_workflow_url(job_name, build_number),
+            }
+
     def get_job_info(self, job_name: str) -> Dict[str, Any]:
         """
         Get information about a Jenkins job.

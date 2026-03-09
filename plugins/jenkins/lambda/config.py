@@ -81,6 +81,14 @@ class JenkinsConfig:
         """Get the API URL for a specific build."""
         return f"{self.jenkins_url}/job/{job_name}/{build_number}/api/json"
 
+    def get_pipeline_describe_url(self, job_name: str, build_number: int) -> str:
+        """Get the Pipeline Stage API URL for a build."""
+        return f"{self.jenkins_url}/job/{job_name}/{build_number}/wfapi/describe"
+
+    def get_stage_log_url(self, job_name: str, build_number: int, node_id: str) -> str:
+        """Get the log URL for a specific pipeline stage."""
+        return f"{self.jenkins_url}/job/{job_name}/{build_number}/execution/node/{node_id}/wfapi/log"
+
     def get_workflow_url(self, job_name: str, build_number: int) -> str:
         """Get the workflow URL for a specific build."""
         return f"{self.jenkins_url}/job/{job_name}/{build_number}/"

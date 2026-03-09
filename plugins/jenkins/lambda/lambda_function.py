@@ -68,13 +68,16 @@ def lambda_handler(event: Dict[str, Any], context) -> Dict[str, Any]:
                 result = handle_list_jobs(jenkins_client)
             case 'get_build_status':
                 result = handle_get_build_status(jenkins_client, params)
+            case 'get_build_failure_details':
+                result = handle_get_build_failure_details(jenkins_client, params)
             case _:
                 result = {
                     'status': 'error',
                     'message': f'Unknown function: {function_name}',
                     'available_functions': [
                         'trigger_job', 'test_connection',
-                        'get_job_info', 'list_jobs', 'get_build_status'
+                        'get_job_info', 'list_jobs',
+                        'get_build_status', 'get_build_failure_details'
                     ]
                 }
 
@@ -321,32 +324,40 @@ def handle_list_jobs(jenkins_client: JenkinsClient) -> Dict[str, Any]:
     return result
 
 
-def handle_get_build_status(jenkins_client: JenkinsClient, params: Dict[str, Any]) -> Dict[str, Any]:
-    """Handle getting build status for a specific job and build number."""
+def _validate_build_params(params: Dict[str, Any]) -> tuple:
+    """Validate and extract job_name and build_number from params.
+
+    Returns:
+        (job_name, build_number, None) on success, or (None, None, error_dict) on failure.
+    """
     job_name = params.get('job_name')
-    build_number_str = params.get('build_number')
-
     if not job_name:
-        return {
-            'status': 'error',
-            'message': 'job_name parameter is required',
-        }
+        return None, None, {'status': 'error', 'message': 'job_name parameter is required'}
 
+    build_number_str = params.get('build_number')
     if not build_number_str:
-        return {
-            'status': 'error',
-            'message': 'build_number parameter is required',
-        }
+        return None, None, {'status': 'error', 'message': 'build_number parameter is required'}
 
     try:
-        build_number = int(build_number_str)
+        return job_name, int(build_number_str), None
     except (ValueError, TypeError):
-        return {
-            'status': 'error',
-            'message': f'build_number must be an integer, got: {build_number_str}',
-        }
+        return None, None, {'status': 'error', 'message': f'build_number must be an integer, got: {build_number_str}'}
 
+
+def handle_get_build_status(jenkins_client: JenkinsClient, params: Dict[str, Any]) -> Dict[str, Any]:
+    """Handle getting build status for a specific job and build number."""
+    job_name, build_number, error = _validate_build_params(params)
+    if error:
+        return error
     return jenkins_client.get_build_status(job_name, build_number)
+
+
+def handle_get_build_failure_details(jenkins_client: JenkinsClient, params: Dict[str, Any]) -> Dict[str, Any]:
+    """Handle getting failure details for a specific build."""
+    job_name, build_number, error = _validate_build_params(params)
+    if error:
+        return error
+    return jenkins_client.get_build_failure_details(job_name, build_number)
 
 
 def create_response(event: Dict[str, Any], result: Dict[str, Any]) -> Dict[str, Any]:
@@ -366,7 +377,6 @@ def create_response(event: Dict[str, Any], result: Dict[str, Any]) -> Dict[str, 
     # Serialize result to JSON string as required by Bedrock
     response_body_string = json.dumps(result, default=str)
 
-    # Create the proper Bedrock action group response format
     return {
         "messageVersion": "1.0",
         "response": {

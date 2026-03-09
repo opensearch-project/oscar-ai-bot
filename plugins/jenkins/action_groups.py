@@ -72,6 +72,22 @@ def get_action_groups(lambda_arn: str) -> List[bedrock.CfnAgent.AgentActionGroup
                             ),
                         },
                     ),
+                    bedrock.CfnAgent.FunctionProperty(
+                        name="get_build_failure_details",
+                        description="Get failure details for a Jenkins build. Returns which pipeline stages failed or are unstable, their log output, and direct URLs to the failed stage logs. Use when a build has failed or is unstable and the user wants to know why.",
+                        parameters={
+                            "job_name": bedrock.CfnAgent.ParameterDetailProperty(
+                                type="string",
+                                description="Name of the Jenkins job",
+                                required=True,
+                            ),
+                            "build_number": bedrock.CfnAgent.ParameterDetailProperty(
+                                type="string",
+                                description="Build number to get failure details for",
+                                required=True,
+                            ),
+                        },
+                    ),
                 ]
             ),
         )
