@@ -33,9 +33,16 @@ class Config:
         self.slack_signing_secret = secrets.get('SLACK_SIGNING_SECRET', '')
         self.channel_allow_list = [c.strip() for c in secrets.get('CHANNEL_ALLOW_LIST', '').split(',') if c.strip()]
 
+        if not self.slack_bot_token:
+            raise ValueError("SLACK_BOT_TOKEN not found in central secret")
+        if not self.channel_allow_list:
+            raise ValueError("CHANNEL_ALLOW_LIST not found in central secret")
+
         # Infrastructure (set by CDK)
         self.region = os.environ.get('AWS_REGION', 'us-east-1')
-        self.context_table_name = os.environ.get('CONTEXT_TABLE_NAME', '')
+        self.context_table_name = os.environ.get('CONTEXT_TABLE_NAME')
+        if not self.context_table_name:
+            raise ValueError("CONTEXT_TABLE_NAME is required")
         self.context_ttl = int(os.environ.get('CONTEXT_TTL', 604800))
 
         # Config (set by CDK)
@@ -54,7 +61,7 @@ class Config:
         }
 
     def _load_from_central_secret(self) -> Dict[str, str]:
-        """Selectively read credentials and auth config from the central secret."""
+        """Selectively read credentials and auth config from the central secret (JSON format)."""
         keys_to_extract = {'SLACK_BOT_TOKEN', 'SLACK_SIGNING_SECRET', 'CHANNEL_ALLOW_LIST'}
         result: Dict[str, str] = {}
 
@@ -69,16 +76,11 @@ class Config:
                 region_name=os.getenv('AWS_REGION', 'us-east-1')
             )
             response = client.get_secret_value(SecretId=secret_name)
-            content = response['SecretString']
+            secret_data = json.loads(response['SecretString'])
 
-            for line in content.splitlines():
-                line = line.strip()
-                if not line or line.startswith('#') or '=' not in line:
-                    continue
-                key, _, value = line.partition('=')
-                key = key.strip()
-                if key in keys_to_extract:
-                    result[key] = value.strip()
+            for key in keys_to_extract:
+                if key in secret_data:
+                    result[key] = str(secret_data[key])
 
             logger.info(f"Loaded {len(result)} keys from central secret")
         except Exception as e:

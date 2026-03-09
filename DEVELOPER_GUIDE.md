@@ -79,42 +79,64 @@ docker info
 ## ⚙️ Configuration
 
 ### Slack App Configuration
-- Go to https://api.slack.com/apps
-- Next, select 'Event Subscriptions' on left panel
-  - Set Request URL to your API Gateway endpoint (Example: https://api-gateway-url/prod/slack/events)
-- Subscribe to bot events (message.channels, app_mention)
-- Install app to workspace
-- Go to OAuth and Permissions.
-  - Get Bot OAuth Token
-  - Set Bot Token Scopes (app_mentions:read, channels:history, channels:read, chat:write, commands, im:history, im:read, im:write, reactions:write)
-- Go to your slack workspace and @bot_name in a channel to add the bot
-- Start testing interactions and functionalities with OSCAR
 
-### Required Variables
+1. Go to https://api.slack.com/apps
+2. Select **Event Subscriptions** → Set Request URL to your API Gateway endpoint
+3. Subscribe to bot events (`message.channels`, `app_mention`)
+4. Install app to workspace
+5. Go to **OAuth and Permissions**
+   - Get Bot OAuth Token (store in Secrets Manager as `SLACK_BOT_TOKEN`)
+   - Set Bot Token Scopes: `app_mentions:read`, `channels:history`, `channels:read`, `chat:write`, `commands`, `im:history`, `im:read`, `im:write`, `reactions:write`
+6. `@bot_name` in a channel to add the bot
 
-**Critical Configuration**: Deploy `OscarSecretsStack-{env}` stack and update the central secret with required values.
+Configuration is split into two categories:
+
+### Secrets Manager (Sensitive Values)
+
+Sensitive values are stored in AWS Secrets Manager in **JSON format** — never in `.env` or Lambda environment variables.
+
+After deploying `OscarSecretsStack`, populate the central secret:
 
 ```bash
-# Slack Integration
-SLACK_BOT_TOKEN=xoxb-your-bot-token
-SLACK_SIGNING_SECRET=your-signing-secret
-
-# Authorization (comma-separated Slack user IDs)
-FULLY_AUTHORIZED_USERS=U12345678,U87654321
-DM_AUTHORIZED_USERS=U12345678
-CHANNEL_ALLOW_LIST=C12345678,C87654321
+aws secretsmanager put-secret-value \
+  --secret-id oscar-central-env-dev \
+  --secret-string '{
+    "SLACK_BOT_TOKEN": "xoxb-your-bot-token",
+    "SLACK_SIGNING_SECRET": "your-signing-secret",
+    "DM_AUTHORIZED_USERS": "U12345678,U87654321",
+    "FULLY_AUTHORIZED_USERS": "U12345678",
+    "CHANNEL_ALLOW_LIST": "C12345678,C87654321"
+  }'
 ```
 
-**See `.env.example`** for the complete list of 135+ optional configuration variables.
+| Key | Description |
+|-----|-------------|
+| `SLACK_BOT_TOKEN` | Bot OAuth token from Slack app settings |
+| `SLACK_SIGNING_SECRET` | Signing secret for verifying Slack webhooks |
+| `DM_AUTHORIZED_USERS` | Comma-separated Slack user IDs allowed to DM the bot |
+| `FULLY_AUTHORIZED_USERS` | Comma-separated user IDs with full access (Jenkins, communication) |
+| `CHANNEL_ALLOW_LIST` | Comma-separated channel IDs the bot responds in |
 
+Plugin-specific secrets (e.g., Jenkins API token) are documented in each plugin's README.
+
+### Non-Sensitive Configuration (`.env`)
+
+Non-sensitive config is set via `.env` file (loaded by CDK at deploy time). All values have sensible defaults — override only what you need.
+
+```bash
+cp .env.example .env
+```
+
+See `.env.example` for the full list of configurable values with defaults.
 
 ## 🔧 Key Files
 
-| File | Purpose                         |
-|------|---------------------------------|
-| `app.py` | CDK application entry point     |
-| `.env` | Configuration and env variables |
-| `stacks/` | CDK stack definitions           |
+| File | Purpose |
+|------|---------|
+| `app.py` | CDK application entry point |
+| `.env` | Non-sensitive config (loaded by CDK at deploy time) |
+| `.env.example` | Reference for all configurable values |
+| `stacks/` | CDK stack definitions |
 | `plugins/` | Plugin modules (one per collaborator agent) |
 | `lambda/` | Core Lambda source code (supervisor, communication handler) |
 

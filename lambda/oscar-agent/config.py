@@ -16,6 +16,7 @@ Classes:
     Config: Main configuration class with validation and environment variable handling
 """
 
+import json
 import logging
 import os
 from typing import Dict
@@ -127,10 +128,9 @@ class Config:
         self.log_query_preview_length = int(os.environ.get('LOG_QUERY_PREVIEW_LENGTH', 100))
 
     def _load_from_central_secret(self) -> Dict[str, str]:
-        """Load credentials and auth config from the central secret.
+        """Load credentials and auth config from the central secret (JSON format).
 
-        Parses the .env-formatted secret and returns only the keys we need.
-        Does NOT inject anything into os.environ.
+        Returns only the keys we need. Does NOT inject anything into os.environ.
         """
         keys_to_extract = {
             'SLACK_BOT_TOKEN', 'SLACK_SIGNING_SECRET',
@@ -149,16 +149,11 @@ class Config:
                 region_name=os.getenv('AWS_REGION', 'us-east-1')
             )
             response = client.get_secret_value(SecretId=secret_name)
-            content = response['SecretString']
+            secret_data = json.loads(response['SecretString'])
 
-            for line in content.splitlines():
-                line = line.strip()
-                if not line or line.startswith('#') or '=' not in line:
-                    continue
-                key, _, value = line.partition('=')
-                key = key.strip()
-                if key in keys_to_extract:
-                    result[key] = value.strip()
+            for key in keys_to_extract:
+                if key in secret_data:
+                    result[key] = str(secret_data[key])
 
             logger.info(f"Loaded {len(result)} keys from central secret")
         except Exception as e:
