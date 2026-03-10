@@ -1,0 +1,15 @@
+---
+codecov:
+  require_ci_to_pass: yes
+  disable_default_path_fixes: true
+
+coverage:
+  status:
+    project:
+      default:
+        target: 75%
+        threshold: 2%
+
+ignore:
+  - 'tests/**'
+  - 'cdk.out/**'

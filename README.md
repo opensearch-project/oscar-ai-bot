@@ -49,28 +49,32 @@ OSCAR uses a modular, event-driven architecture:
 
 ```
 oscar-ai-bot/
-├── app.py                    # CDK application entry point
-├── stacks/                   # CDK stack definitions
-│   ├── permissions_stack.py     # IAM roles and policies
-│   ├── secrets_stack.py         # Secrets Manager configuration
-│   ├── storage_stack.py         # DynamoDB tables
-│   ├── vpc_stack.py             # VPC and networking
-│   ├── knowledge_base_stack.py  # Bedrock Knowledge Base
-│   ├── lambda_stack.py          # Lambda functions
-│   ├── api_gateway_stack.py     # REST API for Slack
-│   └── bedrock_agents_stack.py  # Bedrock agents (supervisor + collaborators)
-├── lambda/                   # Lambda function source code
-│   ├── oscar-agent/             # Main Slack bot handler
-│   ├── jenkins/                 # Jenkins operations
-│   ├── metrics/                 # Metrics analysis
-│   └── knowledge-base/          # Upload and sync docs
-├── utils/                    # Shared utilities
-├── Pipfile                   # Python dependencies (pipenv)
-├── Pipfile.lock              # Locked dependency versions
-├── .env.example              # Environment variables template (135+ vars)
-├── README.md                 # Project overview and architecture
-├── DEVELOPER_GUIDE.md        # Development and deployment guide
-└── CONTRIBUTING.md           # Contribution guidelines
+├── app.py                       # CDK application entry point
+├── stacks/                      # CDK stack definitions
+│   ├── permissions_stack.py        # IAM roles and policies
+│   ├── secrets_stack.py            # Secrets Manager configuration
+│   ├── storage_stack.py            # DynamoDB tables
+│   ├── vpc_stack.py                # VPC and networking
+│   ├── knowledge_base_stack.py     # Bedrock Knowledge Base
+│   ├── lambda_stack.py             # Lambda functions
+│   ├── api_gateway_stack.py        # REST API for Slack
+│   └── bedrock_agents_stack.py     # Bedrock agents (supervisor + collaborators)
+├── lambda/                      # Lambda function source code
+│   ├── oscar-agent/                # Main Slack bot handler
+│   ├── oscar-communication-handler/ # Bedrock action group for messaging
+│   └── knowledge-base/             # Upload and sync docs
+├── plugins/                     # Plugin-based collaborator agents
+│   ├── base_plugin.py              # Abstract plugin interface
+│   ├── jenkins/                    # Jenkins job operations
+│   └── metrics/                    # Build, test, and release metrics
+│       ├── build/                  # Build metrics plugin
+│       ├── test/                   # Integration test metrics plugin
+│       ├── release/                # Release readiness plugin
+│       └── lambda/                 # Shared metrics Lambda code
+├── tests/                       # Test suite (see Testing section)
+├── utils/                       # Shared utilities
+├── Pipfile                      # Python dependencies (pipenv)
+└── Pipfile.lock                 # Locked dependency versions
 ```
 
 ## Developer Guide
@@ -90,9 +94,9 @@ Please refer to [DEVELOPER_GUIDE.md](./DEVELOPER_GUIDE.md) on how to start devel
 - Real-time progress monitoring with workflow URLs
 
 ### Metrics System
-- Performance tracking and analytics
-- Usage patterns and error monitoring
-- Custom dashboards and alerting
+- Build, integration test, and release readiness metrics from OpenSearch
+- Deduplication and filtering of test results across platforms and architectures
+- Summary generation for release decision-making
 
 ### Infrastructure
 - CDK-based AWS resource management

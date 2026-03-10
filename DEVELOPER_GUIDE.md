@@ -140,6 +140,30 @@ See `.env.example` for the full list of configurable values with defaults.
 | `plugins/` | Plugin modules (one per collaborator agent) |
 | `lambda/` | Core Lambda source code (supervisor, communication handler) |
 
+## 🧪 Testing
+
+```bash
+# Run all tests
+pipenv run python -m pytest
+
+# Run a specific test area
+pipenv run python -m pytest tests/stacks/
+pipenv run python -m pytest tests/plugins/
+pipenv run python -m pytest tests/lambda/
+
+# Run with coverage
+pipenv run coverage run -m pytest
+pipenv run coverage report --show-missing
+```
+
+Tests are organized to mirror the source tree.
+
+Key conventions:
+- CDK tests use `Template.from_stack()` with `resource_count_is()` and `has_resource_properties()`
+- Lambda tests mock the `config` module at `sys.modules` level to prevent AWS calls during import
+- DynamoDB/Secrets Manager/SSM tests use `moto` (`@mock_aws`)
+- Every test imports and calls real production code — no reimplementing logic in tests
+
 ## 🎨 Code Style
 
 This project uses [flake8](https://flake8.pycqa.org/) for linting and [isort](https://pycqa.github.io/isort/) for import sorting. Configuration is in `.flake8`.

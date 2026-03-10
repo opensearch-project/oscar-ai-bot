@@ -31,3 +31,14 @@ jobs:
       - name: Run Type Checker
         run: pipenv run mypy .
 
+      - name: Run Tests with Coverage
+        run: |
+          pipenv run coverage run -m pytest
+          pipenv run coverage xml
+          sed -i 's|<source>.*</source>|<source>oscar-ai-bot</source>|' coverage.xml
+
+      - name: Upload Coverage Report
+        uses: actions/upload-artifact@v5
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          path: ./coverage.xml

@@ -4,12 +4,14 @@ aws_id.txt
 .kiro/
 .claude/
 cdk.context.json
-htmlcov
+htmlcov/
+coverage.xml
 # Build outputs
 build_docs/
 cdk.out/
 .cdk.staging/
 cdk-outputs.json
+.coverage
 
 # Python
 __pycache__/
