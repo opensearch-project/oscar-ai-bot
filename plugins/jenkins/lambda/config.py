@@ -38,6 +38,13 @@ class JenkinsConfig:
         self.request_timeout = int(os.getenv('JENKINS_REQUEST_TIMEOUT', '30'))
         self.verify_ssl = os.getenv('JENKINS_VERIFY_SSL', 'true').lower() != 'false'
 
+        # GitHub Configuration (for Jenkinsfile discovery)
+        self.github_repo = os.getenv('JENKINSFILE_GITHUB_REPO', 'opensearch-project/opensearch-build')
+        self.github_branch = os.getenv('JENKINSFILE_GITHUB_BRANCH', 'main')
+        self.jenkins_dir = os.getenv('JENKINSFILE_JENKINS_DIR', 'jenkins')
+        _ignore_raw = os.getenv('JENKINSFILE_IGNORE_LIST', '')
+        self.jenkinsfile_ignore_list = [p.strip() for p in _ignore_raw.split(',') if p.strip()]
+
         # Validate required configuration
         self._validate_config()
 

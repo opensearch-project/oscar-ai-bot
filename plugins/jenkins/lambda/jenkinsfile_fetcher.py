@@ -11,32 +11,23 @@ JenkinsfileParser, builds a JobRegistry, and caches the result.
 """
 
 import logging
-import os
 import time
 from typing import List, Optional
 
 import requests
+from config import config
 from jenkinsfile_parser import JenkinsfileParser, ParsedJob
 from job_definitions import JobRegistry
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
-
-GITHUB_REPO = os.environ["JENKINSFILE_GITHUB_REPO"]
-GITHUB_BRANCH = os.environ["JENKINSFILE_GITHUB_BRANCH"]
-JENKINS_DIR = "jenkins"
 FETCH_TIMEOUT = 5
 CACHE_TTL = 3600
-
-# Paths to skip: can be directories (jenkins/legacy) or files (jenkins/foo/bar.jenkinsfile).
-# Comma-separated via env var. Matches by prefix so "jenkins/legacy" skips everything under it.
-_ignore_raw = os.environ.get("JENKINSFILE_IGNORE_LIST", "")
-IGNORE_LIST: List[str] = [p.strip() for p in _ignore_raw.split(",") if p.strip()]
 
 
 def _is_ignored(path: str) -> bool:
     """Check if a path matches any entry in the ignore list (exact or prefix)."""
-    for ignored in IGNORE_LIST:
+    for ignored in config.jenkinsfile_ignore_list:
         if path == ignored or path.startswith(ignored.rstrip("/") + "/"):
             return True
     return False
@@ -49,16 +40,18 @@ _cache_timestamp: float = 0.0
 
 def _github_api_url(path: str) -> str:
     """Build a GitHub API URL for listing directory contents."""
-    return f"https://api.github.com/repos/{GITHUB_REPO}/contents/{path}?ref={GITHUB_BRANCH}"
+    return f"https://api.github.com/repos/{config.github_repo}/contents/{path}?ref={config.github_branch}"
 
 
 def _build_raw_url(path: str) -> str:
     """Build a raw.githubusercontent.com URL for a file."""
-    return f"https://raw.githubusercontent.com/{GITHUB_REPO}/{GITHUB_BRANCH}/{path}"
+    return f"https://raw.githubusercontent.com/{config.github_repo}/{config.github_branch}/{path}"
 
 
-def _discover_jenkinsfiles(directory: str = JENKINS_DIR) -> List[str]:
+def _discover_jenkinsfiles(directory: str = None) -> List[str]:
     """Recursively discover all .jenkinsfile files under the given directory using the GitHub API."""
+    if directory is None:
+        directory = config.jenkins_dir
     paths: List[str] = []
     dirs_to_visit = [directory]
 
