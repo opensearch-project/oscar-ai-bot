@@ -38,7 +38,7 @@ jobs:
           sed -i 's|<source>.*</source>|<source>oscar-ai-bot</source>|' coverage.xml
 
       - name: Upload Coverage Report
-        uses: actions/upload-artifact@v5
+        uses: codecov/codecov-action@v5
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
-          path: ./coverage.xml
+          files: ./coverage.xml
