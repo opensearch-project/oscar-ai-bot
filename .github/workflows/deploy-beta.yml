@@ -1,4 +1,4 @@
-name: deploy-stacks.yml
+name: deploy-beta.yml
 on:
   push:
     branches:
@@ -56,6 +56,7 @@ jobs:
       - name: Create beta change-set for approval
         id: beta_stack_diff
         run: |
+          cp deployment/beta.env .env
           pipenv run cdk diff -c ENVIRONMENT=dev | sed -E 's/[0-9]{12}/[MASKED]/g' > beta_diff.txt
 
           DIFF_SIZE=$(wc -c < beta_diff.txt)
@@ -98,4 +99,6 @@ jobs:
             </details>
 
       - name: Deploy beta stacks
-        run: pipenv run cdk deploy "*" --require-approval=never -c ENVIRONMENT=dev
+        run: |
+          cp deployment/beta.env .env
+          pipenv run cdk deploy "*" --require-approval=never -c ENVIRONMENT=dev

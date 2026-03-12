@@ -94,9 +94,3 @@ class TestApiGatewayStack:
         template.has_resource_properties("AWS::Logs::LogGroup", {
             "LogGroupName": "/aws/apigateway/oscar-slack-bot-dev",
         })
-
-    def test_outputs_created(self, template):
-        """Expected CloudFormation outputs should exist."""
-        template.has_output("ApiGatewayUrl", {})
-        template.has_output("SlackEventsUrl", {})
-        template.has_output("ApiGatewayId", {})

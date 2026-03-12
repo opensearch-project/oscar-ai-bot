@@ -11,7 +11,7 @@ Creates the central environment secret that contains all OSCAR configuration.
 
 from typing import Any, Dict, List, Optional
 
-from aws_cdk import CfnOutput, RemovalPolicy, Stack
+from aws_cdk import RemovalPolicy, Stack
 from aws_cdk import aws_iam as iam
 from aws_cdk import aws_secretsmanager as secretsmanager
 from constructs import Construct
@@ -53,13 +53,6 @@ class OscarSecretsStack(Stack):
                 generate_string_key="INITIAL_VALUE",
                 password_length=32
             )
-        )
-
-        # Output for other stacks
-        CfnOutput(
-            self, "CentralEnvSecretArn",
-            value=self.central_env_secret.secret_arn,
-            export_name="OscarCentralEnvSecretArn"
         )
 
         # Create plugin-declared secrets

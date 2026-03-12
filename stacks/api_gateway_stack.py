@@ -14,7 +14,7 @@ and monitoring for the OSCAR Slack Bot infrastructure.
 
 from typing import Any
 
-from aws_cdk import CfnOutput, RemovalPolicy, Stack
+from aws_cdk import RemovalPolicy, Stack
 from aws_cdk import aws_apigateway as apigateway
 from aws_cdk import aws_logs as logs
 from constructs import Construct
@@ -63,9 +63,6 @@ class OscarApiGatewayStack(Stack):
         # Configure Slack webhook endpoints
         self._configure_slack_endpoints()
 
-        # Add outputs for important resources
-        self._add_outputs()
-
     def _create_log_group(self) -> logs.LogGroup:
         """
         Create CloudWatch log group for API Gateway access logs.
@@ -108,7 +105,8 @@ class OscarApiGatewayStack(Stack):
             disable_execute_api_endpoint=False
         )
 
-        # Keep it simple - no additional security or monitoring features
+        # Remove CDK's auto-generated Endpoint output to avoid exposing the URL in deploy logs
+        api.node.try_remove_child("Endpoint")
 
         return api
 
@@ -134,26 +132,4 @@ class OscarApiGatewayStack(Stack):
             "POST",
             lambda_integration,
             authorization_type=apigateway.AuthorizationType.NONE
-        )
-
-    def _add_outputs(self) -> None:
-        """
-        Add CloudFormation outputs for important resources.
-        """
-        CfnOutput(
-            self, "ApiGatewayUrl",
-            value=self.api.url,
-            description="Base URL of the API Gateway"
-        )
-
-        CfnOutput(
-            self, "SlackEventsUrl",
-            value=f"{self.api.url}slack/events",
-            description="URL for Slack Events API webhook"
-        )
-
-        CfnOutput(
-            self, "ApiGatewayId",
-            value=self.api.rest_api_id,
-            description="ID of the API Gateway"
         )

@@ -124,12 +124,6 @@ class TestStorageStack:
             "TopicName": "oscar-storage-alerts-dev",
         })
 
-    def test_outputs_created(self, template):
-        """Expected CloudFormation outputs should exist."""
-        template.has_output("ContextTableName", {})
-        template.has_output("ContextTableArn", {})
-        template.has_output("StorageAlertsTopicArn", {})
-
     def test_table_name_includes_environment(self, template):
         """Table name should include the environment suffix."""
         template.has_resource_properties("AWS::DynamoDB::Table", {

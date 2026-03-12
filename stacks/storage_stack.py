@@ -13,7 +13,7 @@ This module defines the DynamoDB tables used by the OSCAR Slack Bot.
 
 import os
 
-from aws_cdk import CfnOutput, Duration, RemovalPolicy, Stack
+from aws_cdk import Duration, RemovalPolicy, Stack
 from aws_cdk import aws_cloudwatch as cloudwatch
 from aws_cdk import aws_cloudwatch_actions as cw_actions
 from aws_cdk import aws_dynamodb as dynamodb
@@ -64,19 +64,6 @@ class OscarStorageStack(Stack):
 
         # Create monitoring and alerting for context table only
         self._create_context_monitoring(environment)
-
-        # Outputs
-        CfnOutput(
-            self, "ContextTableName",
-            value=self.context_table.table_name,
-            description="Name of the DynamoDB table for context data"
-        )
-
-        CfnOutput(
-            self, "ContextTableArn",
-            value=self.context_table.table_arn,
-            description="ARN of the DynamoDB table for context data"
-        )
 
     def _create_context_table(
         self,
@@ -131,13 +118,6 @@ class OscarStorageStack(Stack):
             table_type="Context",
             alert_topic=alert_topic,
             environment=environment
-        )
-
-        # Output SNS topic ARN for external configuration
-        CfnOutput(
-            self, "StorageAlertsTopicArn",
-            value=alert_topic.topic_arn,
-            description="SNS topic ARN for storage monitoring alerts"
         )
 
     def _create_table_alarms(

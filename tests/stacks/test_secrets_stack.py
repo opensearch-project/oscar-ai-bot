@@ -59,7 +59,3 @@ class TestSecretsStack:
     def test_two_secrets_with_jenkins_plugin(self, template_with_plugins):
         """Central secret + Jenkins api-token secret = 2."""
         template_with_plugins.resource_count_is("AWS::SecretsManager::Secret", 2)
-
-    def test_central_secret_output(self, template_no_plugins):
-        """CentralEnvSecretArn output should exist."""
-        template_no_plugins.has_output("CentralEnvSecretArn", {})
