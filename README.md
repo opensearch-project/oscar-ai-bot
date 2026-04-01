@@ -2,7 +2,7 @@
 
 # OSCAR - AI-Powered Operations Assistant
 
-OSCAR is a serverless AI assistant that brings intelligent automation to Slack workspaces. Built on AWS Bedrock and Lambda, it provides conversational interfaces for complex operations like Jenkins job management, system monitoring, and team collaboration.
+OSCAR is a serverless multi-agent conversational AI assistant that brings intelligent automation to Slack workspaces. Built on AWS Bedrock and Lambda, it provides conversational interfaces for complex operations like Jenkins job management, system monitoring, and team collaboration.
 
 ## Features
 
@@ -63,14 +63,11 @@ oscar-ai-bot/
 │   ├── oscar-agent/                # Main Slack bot handler
 │   ├── oscar-communication-handler/ # Bedrock action group for messaging
 │   └── knowledge-base/             # Upload and sync docs
-├── plugins/                     # Plugin-based collaborator agents
-│   ├── base_plugin.py              # Abstract plugin interface
+├── agents/                      # Collaborator agent modules
+│   ├── base_agent.py               # Abstract agent interface
 │   ├── jenkins/                    # Jenkins job operations
 │   └── metrics/                    # Build, test, and release metrics
-│       ├── build/                  # Build metrics plugin
-│       ├── test/                   # Integration test metrics plugin
-│       ├── release/                # Release readiness plugin
-│       └── lambda/                 # Shared metrics Lambda code
+│       └── lambda/                 # Metrics Lambda code
 ├── tests/                       # Test suite (see Testing section)
 ├── utils/                       # Shared utilities
 ├── Pipfile                      # Python dependencies (pipenv)

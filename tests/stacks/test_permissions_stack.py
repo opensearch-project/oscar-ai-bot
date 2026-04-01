@@ -8,8 +8,8 @@ import pytest
 from aws_cdk import App, Environment
 from aws_cdk.assertions import Template
 
-from plugins.jenkins import JenkinsPlugin
-from plugins.metrics import MetricsPlugin
+from agents.jenkins import JenkinsAgent
+from agents.metrics import MetricsAgent
 from stacks.permissions_stack import OscarPermissionsStack
 
 
@@ -20,12 +20,12 @@ def template():
     os.environ["CDK_DEFAULT_REGION"] = "us-east-1"
 
     app = App()
-    plugins = [JenkinsPlugin(), MetricsPlugin()]
+    agents_list = [JenkinsAgent(), MetricsAgent()]
     stack = OscarPermissionsStack(
         app,
         "TestOscarPermissionsStack",
         environment="dev",
-        plugins=plugins,
+        agents=agents_list,
         env=Environment(account="123456789012", region="us-east-1"),
     )
     return Template.from_stack(stack)
@@ -65,12 +65,12 @@ class TestOscarPermissionsStack:
             "Description": "Execution role for OSCAR communication handler Lambda",
         })
 
-    def test_plugin_roles_creation(self, template):
-        """Test that plugin Lambda roles are created (deduplicated by entry path)."""
+    def test_agent_roles_creation(self, template):
+        """Test that agent Lambda roles are created (deduplicated by entry path)."""
         template.has_resource_properties("AWS::IAM::Role", {
             "Description": "Execution role for OSCAR jenkins Lambda",
         })
-        # All metrics plugins share the same Lambda entry, so they share one role
+        # All metrics agents share the same Lambda entry, so they share one role
         template.has_resource_properties("AWS::IAM::Role", {
             "Description": "Execution role for OSCAR metrics Lambda",
         })

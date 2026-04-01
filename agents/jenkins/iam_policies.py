@@ -1,7 +1,7 @@
 # Copyright OpenSearch Contributors
 # SPDX-License-Identifier: Apache-2.0
 
-"""IAM policies for Jenkins plugin."""
+"""IAM policies for Jenkins agent."""
 
 from typing import List
 
@@ -11,7 +11,7 @@ from aws_cdk import aws_iam as iam
 def get_policies(account_id: str, region: str, env: str) -> List[iam.PolicyStatement]:
     return [
         iam.PolicyStatement(
-            sid="JenkinsPluginSecretsAccess",
+            sid="JenkinsAgentSecretsAccess",
             effect=iam.Effect.ALLOW,
             actions=["secretsmanager:GetSecretValue"],
             resources=[

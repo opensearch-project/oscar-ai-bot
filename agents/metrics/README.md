@@ -1,6 +1,6 @@
-# Metrics Plugin
+# Metrics Agent
 
-The Metrics plugin gives OSCAR the ability to query OpenSearch metrics data — integration test results, build results, and release readiness — through Slack. It connects to a cross-account OpenSearch cluster via STS AssumeRole and AWS SigV4 authentication, using OpenSearch Agentic Search to translate natural language queries into DSL.
+The Metrics agent gives OSCAR the ability to query OpenSearch metrics data — integration test results, build results, and release readiness — through Slack. It connects to a cross-account OpenSearch cluster via STS AssumeRole and AWS SigV4 authentication, using OpenSearch Agentic Search to translate natural language queries into DSL.
 
 ## Architecture
 
@@ -39,7 +39,7 @@ Metrics Lambda
 
 ## Agentic Pipeline Prerequisites
 
-Before the Metrics plugin can use agentic search, the OpenSearch cluster must have the following configured:
+Before the Metrics agent can use agentic search, the OpenSearch cluster must have the following configured:
 
 ### 1. ML Model Registration
 

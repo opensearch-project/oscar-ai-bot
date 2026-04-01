@@ -20,7 +20,7 @@ from constructs import Construct
 class OscarSecretsStack(Stack):
     """
     Creates the central environment secret for OSCAR configuration
-    and any plugin-declared secrets.
+    and any agent-declared secrets.
     """
 
     CENTRAL_ENV_SECRET_NAME = "oscar-central-env"
@@ -35,7 +35,7 @@ class OscarSecretsStack(Stack):
         scope: Construct,
         construct_id: str,
         environment: str,
-        plugins: Optional[List[Any]] = None,
+        agents: Optional[List[Any]] = None,
         **kwargs: Any,
     ) -> None:
         super().__init__(scope, construct_id, **kwargs)
@@ -55,23 +55,23 @@ class OscarSecretsStack(Stack):
             )
         )
 
-        # Create plugin-declared secrets
-        # Maps "plugin_name/secret_suffix" -> secretsmanager.Secret
-        self.plugin_secrets: Dict[str, secretsmanager.Secret] = {}
-        if plugins:
-            self._create_plugin_secrets(plugins, environment, removal_policy)
+        # Create agent-declared secrets
+        # Maps "agent_name/secret_suffix" -> secretsmanager.Secret
+        self.agent_secrets: Dict[str, secretsmanager.Secret] = {}
+        if agents:
+            self._create_agent_secrets(agents, environment, removal_policy)
 
-    def _create_plugin_secrets(
+    def _create_agent_secrets(
         self,
-        plugins: List[Any],
+        agents: List[Any],
         environment: str,
         removal_policy: RemovalPolicy,
     ) -> None:
-        """Create secrets declared by plugins via get_secrets()."""
-        for plugin in plugins:
-            for secret_config in plugin.get_secrets():
-                secret_name = f"oscar-{plugin.name}-{secret_config.name_suffix}-{environment}"
-                construct_name = plugin.name.replace("-", " ").title().replace(" ", "")
+        """Create secrets declared by agents via get_secrets()."""
+        for agent in agents:
+            for secret_config in agent.get_secrets():
+                secret_name = f"oscar-{agent.name}-{secret_config.name_suffix}-{environment}"
+                construct_name = agent.name.replace("-", " ").title().replace(" ", "")
                 suffix_name = secret_config.name_suffix.replace("-", " ").title().replace(" ", "")
                 construct_id = f"{construct_name}{suffix_name}Secret"
 
@@ -82,12 +82,12 @@ class OscarSecretsStack(Stack):
                     removal_policy=removal_policy,
                 )
 
-                key = f"{plugin.name}/{secret_config.name_suffix}"
-                self.plugin_secrets[key] = secret
+                key = f"{agent.name}/{secret_config.name_suffix}"
+                self.agent_secrets[key] = secret
 
-    def get_plugin_secret(self, plugin_name: str, name_suffix: str) -> Optional[secretsmanager.Secret]:
-        """Get a plugin secret by plugin name and suffix."""
-        return self.plugin_secrets.get(f"{plugin_name}/{name_suffix}")
+    def get_agent_secret(self, agent_name: str, name_suffix: str) -> Optional[secretsmanager.Secret]:
+        """Get an agent secret by agent name and suffix."""
+        return self.agent_secrets.get(f"{agent_name}/{name_suffix}")
 
     def grant_read_access(self, grantee: iam.IGrantable) -> iam.Grant:
         """Grant read access to the central environment secret."""

@@ -1,7 +1,7 @@
 # Copyright OpenSearch Contributors
 # SPDX-License-Identifier: Apache-2.0
 
-"""Base plugin definition for OSCAR modules."""
+"""Base agent definition for OSCAR modules."""
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
@@ -15,9 +15,9 @@ from utils.foundation_models import FoundationModels
 
 @dataclass
 class SecretConfig:
-    """A secret that a plugin needs created in AWS Secrets Manager.
+    """A secret that an agent needs created in AWS Secrets Manager.
 
-    The full secret name is derived as: oscar-{plugin.name}-{name_suffix}-{env}
+    The full secret name is derived as: oscar-{agent.name}-{name_suffix}-{env}
     """
     name_suffix: str
     description: str
@@ -26,7 +26,7 @@ class SecretConfig:
 
 @dataclass
 class LambdaConfig:
-    """Configuration for a plugin's Lambda function."""
+    """Configuration for an agent's Lambda function."""
     entry: str
     index: str = "lambda_function.py"
     handler: str = "lambda_handler"
@@ -37,10 +37,10 @@ class LambdaConfig:
     needs_vpc: bool = False
 
 
-class OscarPlugin(ABC):
-    """Base class for all OSCAR plugin modules.
+class OscarAgent(ABC):
+    """Base class for all OSCAR agent modules.
 
-    Each plugin encapsulates everything needed for a Bedrock collaborator agent:
+    Each agent encapsulates everything needed for a Bedrock collaborator agent:
     IAM policies, Lambda config, action groups, and agent instructions.
     """
 
@@ -95,8 +95,8 @@ class OscarPlugin(ABC):
         return True
 
     def get_secrets(self) -> List[SecretConfig]:
-        """Secrets this plugin needs in AWS Secrets Manager.
-        Override to declare plugin-specific secrets. Default: none."""
+        """Secrets this agent needs in AWS Secrets Manager.
+        Override to declare agent-specific secrets. Default: none."""
         return []
 
     def get_foundation_model(self) -> str:

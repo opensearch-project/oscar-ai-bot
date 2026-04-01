@@ -1,7 +1,7 @@
 # Copyright OpenSearch Contributors
 # SPDX-License-Identifier: Apache-2.0
 
-"""Bedrock action group definitions for Jenkins plugin."""
+"""Bedrock action group definitions for Jenkins agent."""
 
 from typing import List
 

@@ -7,7 +7,7 @@ Lambda stack for OSCAR infrastructure.
 This module defines all Lambda functions used by OSCAR including:
 - Main OSCAR agent with Slack event processing
 - Communication handler for Bedrock action groups
-- Plugin-based Lambda functions for collaborator agents
+- Agent-based Lambda functions for collaborator agents
 """
 
 import logging
@@ -47,7 +47,7 @@ class OscarLambdaStack(Stack):
         secrets_stack: Any,
         storage_stack: Any,
         environment: str,
-        plugins: Optional[List] = None,
+        agents: Optional[List] = None,
         vpc_stack: Optional[Any] = None,
         **kwargs,
     ) -> None:
@@ -65,9 +65,9 @@ class OscarLambdaStack(Stack):
         self._create_supervisor_agent_lambda()
         self._create_communication_handler_lambda()
 
-        # Plugin lambdas
-        if plugins:
-            self._create_plugin_lambdas(plugins)
+        # Agent lambdas
+        if agents:
+            self._create_agent_lambdas(agents)
 
     # ------------------------------------------------------------------ core
     def _create_supervisor_agent_lambda(self) -> None:
@@ -128,27 +128,27 @@ class OscarLambdaStack(Stack):
         )
         self.lambda_functions[self.get_communication_handler_lambda_function_name(self.env_name)] = function
 
-    # --------------------------------------------------------------- plugins
-    def _create_plugin_lambdas(self, plugins) -> None:
-        """Create Lambda functions for plugins, deduplicating shared entry paths."""
+    # ------------------------------------------------------------ agents
+    def _create_agent_lambdas(self, agents) -> None:
+        """Create Lambda functions for agents, deduplicating shared entry paths."""
         created_entries: Dict[str, PythonFunction] = {}
 
-        for plugin in plugins:
-            config = plugin.get_lambda_config()
+        for agent in agents:
+            config = agent.get_lambda_config()
 
-            # Reuse Lambda if another plugin already created one for this entry
+            # Reuse Lambda if another agent already created one for this entry
             if config.entry in created_entries:
-                self.lambda_functions[plugin.name] = created_entries[config.entry]
+                self.lambda_functions[agent.name] = created_entries[config.entry]
                 continue
 
-            fn_name = f"oscar-{plugin.name}-{self.env_name}"
-            role = self.permissions_stack.plugin_roles[plugin.name]
+            fn_name = f"oscar-{agent.name}-{self.env_name}"
+            role = self.permissions_stack.agent_roles[agent.name]
 
-            # Merge plugin secret names into Lambda environment variables
+            # Merge agent secret names into Lambda environment variables
             env_vars = dict(config.environment_variables)
-            for secret_config in plugin.get_secrets():
-                secret = self.secrets_stack.get_plugin_secret(
-                    plugin.name, secret_config.name_suffix
+            for secret_config in agent.get_secrets():
+                secret = self.secrets_stack.get_agent_secret(
+                    agent.name, secret_config.name_suffix
                 )
                 if secret:
                     env_vars[secret_config.env_var] = secret.secret_name
@@ -164,7 +164,7 @@ class OscarLambdaStack(Stack):
                 memory_size=config.memory_size,
                 environment=env_vars,
                 role=role,
-                description=f"OSCAR {plugin.name} agent lambda function",
+                description=f"OSCAR {agent.name} agent lambda function",
                 reserved_concurrent_executions=config.reserved_concurrency,
             )
 
@@ -173,7 +173,7 @@ class OscarLambdaStack(Stack):
                 kwargs["security_groups"] = [self.vpc_stack.lambda_security_group]
                 kwargs["allow_public_subnet"] = True
 
-            construct_id = plugin.name.replace("-", " ").title().replace(" ", "") + "Lambda"
+            construct_id = agent.name.replace("-", " ").title().replace(" ", "") + "Lambda"
             function = PythonFunction(self, construct_id, **kwargs)
             function.add_permission(
                 "AllowBedrockInvoke",
@@ -182,7 +182,7 @@ class OscarLambdaStack(Stack):
                 source_account=self.account,
             )
 
-            self.lambda_functions[plugin.name] = function
+            self.lambda_functions[agent.name] = function
             created_entries[config.entry] = function
 
     # ------------------------------------------------------------- env vars

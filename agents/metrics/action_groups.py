@@ -1,7 +1,7 @@
 # Copyright OpenSearch Contributors
 # SPDX-License-Identifier: Apache-2.0
 
-"""Bedrock action group definitions for metrics plugin."""
+"""Bedrock action group definitions for metrics agent."""
 
 from typing import List
 

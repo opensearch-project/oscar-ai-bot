@@ -1,14 +1,14 @@
-# Jenkins Plugin
+# Jenkins Agent
 
-The Jenkins plugin gives OSCAR the ability to list, inspect, and trigger Jenkins jobs through Slack. It auto-discovers jobs by parsing Jenkinsfiles directly from the GitHub repository, making the Jenkinsfiles the single source of truth for job names, parameters, and descriptions.
+The Jenkins agent gives OSCAR the ability to list, inspect, and trigger Jenkins jobs through Slack. It auto-discovers jobs by parsing Jenkinsfiles directly from the GitHub repository, making the Jenkinsfiles the single source of truth for job names, parameters, and descriptions.
 
 ## How It Works
 
-1. **Discovery** — At Lambda cold start, the plugin fetches all `*.jenkinsfile` files under the `jenkins/` directory of the configured GitHub repository using the GitHub API.
+1. **Discovery** — At Lambda cold start, the agent fetches all `*.jenkinsfile` files under the `jenkins/` directory of the configured GitHub repository using the GitHub API.
 2. **Parsing** — Each file is parsed for a `parameters {}` block. The parser extracts parameter names, types, descriptions, defaults, and choices.
 3. **Filtering** — Only files with a `@job-name` annotation are registered. Files without it are silently skipped. Files in the ignore list are skipped entirely.
 4. **Caching** — The parsed job registry is cached in memory for 1 hour (configurable). Warm Lambda invocations reuse the cache.
-5. **Execution** — When a user triggers a job, the plugin validates parameters against the parsed definitions and calls the Jenkins REST API.
+5. **Execution** — When a user triggers a job, the agent validates parameters against the parsed definitions and calls the Jenkins REST API.
 
 ## Onboarding a New Jenkins Job
 
@@ -105,7 +105,7 @@ OR use export key=value: export JENKINS_VERIFY_SSL=true
 
 ## Jenkins API Token Setup
 
-The plugin authenticates with Jenkins using an API token stored in AWS Secrets Manager.
+The agent authenticates with Jenkins using an API token stored in AWS Secrets Manager.
 
 ### 1. Generate an API token in Jenkins
 

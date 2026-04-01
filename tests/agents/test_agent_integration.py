@@ -1,6 +1,6 @@
 # Copyright OpenSearch Contributors
 # SPDX-License-Identifier: Apache-2.0
-"""Integration tests validating plugins conform to the OscarPlugin interface
+"""Integration tests validating agents conform to the OscarAgent interface
 and are wired correctly into CDK stacks."""
 
 import ast
@@ -11,98 +11,98 @@ import pytest
 from aws_cdk import App, Environment
 from aws_cdk.assertions import Template
 
-from plugins.base_plugin import LambdaConfig, OscarPlugin
-from plugins.jenkins import JenkinsPlugin
-from plugins.metrics import MetricsPlugin
+from agents.base_agent import LambdaConfig, OscarAgent
+from agents.jenkins import JenkinsAgent
+from agents.metrics import MetricsAgent
 from stacks.lambda_stack import OscarLambdaStack
 from stacks.permissions_stack import OscarPermissionsStack
 from stacks.secrets_stack import OscarSecretsStack
 from stacks.storage_stack import OscarStorageStack
 from stacks.vpc_stack import OscarVpcStack
 
-ALL_PLUGINS = [JenkinsPlugin(), MetricsPlugin()]
-PLUGIN_IDS = [p.name for p in ALL_PLUGINS]
+ALL_AGENTS = [JenkinsAgent(), MetricsAgent()]
+AGENT_IDS = [a.name for a in ALL_AGENTS]
 ENV = Environment(account="123456789012", region="us-east-1")
 
 
 # ---------------------------------------------------------------------------
-# Plugin contract tests (parametrized over every plugin)
+# Agent contract tests (parametrized over every agent)
 # ---------------------------------------------------------------------------
 
-@pytest.mark.parametrize("plugin", ALL_PLUGINS, ids=PLUGIN_IDS)
-class TestPluginContract:
-    """Every plugin must satisfy the OscarPlugin interface."""
+@pytest.mark.parametrize("agent", ALL_AGENTS, ids=AGENT_IDS)
+class TestAgentContract:
+    """Every agent must satisfy the OscarAgent interface."""
 
-    def test_is_oscar_plugin_subclass(self, plugin):
-        assert isinstance(plugin, OscarPlugin)
+    def test_is_oscar_agent_subclass(self, agent):
+        assert isinstance(agent, OscarAgent)
 
-    def test_name_is_non_empty_string(self, plugin):
-        assert isinstance(plugin.name, str)
-        assert len(plugin.name) > 0
+    def test_name_is_non_empty_string(self, agent):
+        assert isinstance(agent.name, str)
+        assert len(agent.name) > 0
 
-    def test_get_lambda_config_returns_lambda_config(self, plugin):
-        config = plugin.get_lambda_config()
+    def test_get_lambda_config_returns_lambda_config(self, agent):
+        config = agent.get_lambda_config()
         assert isinstance(config, LambdaConfig)
 
-    def test_lambda_entry_path_exists(self, plugin):
-        config = plugin.get_lambda_config()
+    def test_lambda_entry_path_exists(self, agent):
+        config = agent.get_lambda_config()
         assert os.path.isdir(config.entry), f"Entry path {config.entry} does not exist"
 
-    def test_lambda_index_file_exists(self, plugin):
-        config = plugin.get_lambda_config()
+    def test_lambda_index_file_exists(self, agent):
+        config = agent.get_lambda_config()
         index_path = os.path.join(config.entry, config.index)
         assert os.path.isfile(index_path), f"Index file {index_path} does not exist"
 
-    def test_get_iam_policies_returns_list(self, plugin):
-        policies = plugin.get_iam_policies("123456789012", "us-east-1", "dev")
+    def test_get_iam_policies_returns_list(self, agent):
+        policies = agent.get_iam_policies("123456789012", "us-east-1", "dev")
         assert isinstance(policies, list)
 
-    def test_get_action_groups_returns_list(self, plugin):
+    def test_get_action_groups_returns_list(self, agent):
         # Action groups need a Lambda ARN; use a placeholder
-        groups = plugin.get_action_groups("arn:aws:lambda:us-east-1:123456789012:function:placeholder")
+        groups = agent.get_action_groups("arn:aws:lambda:us-east-1:123456789012:function:placeholder")
         assert isinstance(groups, list)
-        assert len(groups) >= 1, "Plugin must define at least one action group"
+        assert len(groups) >= 1, "Agent must define at least one action group"
 
-    def test_get_agent_instruction_non_empty(self, plugin):
-        instruction = plugin.get_agent_instruction()
+    def test_get_agent_instruction_non_empty(self, agent):
+        instruction = agent.get_agent_instruction()
         assert isinstance(instruction, str)
         assert len(instruction) > 0
 
-    def test_get_collaborator_instruction_non_empty(self, plugin):
-        instruction = plugin.get_collaborator_instruction()
+    def test_get_collaborator_instruction_non_empty(self, agent):
+        instruction = agent.get_collaborator_instruction()
         assert isinstance(instruction, str)
         assert len(instruction) > 0
 
-    def test_get_collaborator_name_non_empty(self, plugin):
-        name = plugin.get_collaborator_name()
+    def test_get_collaborator_name_non_empty(self, agent):
+        name = agent.get_collaborator_name()
         assert isinstance(name, str)
         assert len(name) > 0
 
-    def test_access_level_valid(self, plugin):
-        level = plugin.get_access_level()
+    def test_access_level_valid(self, agent):
+        level = agent.get_access_level()
         assert level in ("privileged", "limited", "both"), \
             f"Invalid access level: {level}"
 
 
 # ---------------------------------------------------------------------------
-# Plugin registration tests
+# Agent registration tests
 # ---------------------------------------------------------------------------
 
-class TestPluginRegistration:
-    """Validate the specific plugin set and their access levels."""
+class TestAgentRegistration:
+    """Validate the specific agent set and their access levels."""
 
-    def test_two_plugins_registered(self):
-        assert len(ALL_PLUGINS) == 2
+    def test_two_agents_registered(self):
+        assert len(ALL_AGENTS) == 2
 
-    def test_plugin_names_are_unique(self):
-        names = [p.name for p in ALL_PLUGINS]
-        assert len(names) == len(set(names)), f"Duplicate plugin names: {names}"
+    def test_agent_names_are_unique(self):
+        names = [p.name for p in ALL_AGENTS]
+        assert len(names) == len(set(names)), f"Duplicate agent names: {names}"
 
     def test_jenkins_is_privileged_only(self):
-        assert JenkinsPlugin().get_access_level() == "privileged"
+        assert JenkinsAgent().get_access_level() == "privileged"
 
     def test_metrics_access_level(self):
-        assert MetricsPlugin().get_access_level() == "both"
+        assert MetricsAgent().get_access_level() == "both"
 
 
 # ---------------------------------------------------------------------------
@@ -111,17 +111,17 @@ class TestPluginRegistration:
 
 @pytest.fixture(scope="module")
 def stacks():
-    """Synthesise the Lambda stack with all plugins (no Docker bundling)."""
+    """Synthesise the Lambda stack with all agents (no Docker bundling)."""
     os.environ["CDK_DEFAULT_ACCOUNT"] = "123456789012"
     os.environ["CDK_DEFAULT_REGION"] = "us-east-1"
 
     app = App(context={"aws:cdk:bundling-stacks": []})
 
     permissions = OscarPermissionsStack(
-        app, "Perms", environment="dev", plugins=ALL_PLUGINS, env=ENV,
+        app, "Perms", environment="dev", agents=ALL_AGENTS, env=ENV,
     )
     secrets = OscarSecretsStack(
-        app, "Secrets", environment="dev", plugins=ALL_PLUGINS, env=ENV,
+        app, "Secrets", environment="dev", agents=ALL_AGENTS, env=ENV,
     )
     storage = OscarStorageStack(app, "Storage", environment="dev", env=ENV)
     vpc = OscarVpcStack(app, "Vpc", env=ENV)
@@ -133,20 +133,20 @@ def stacks():
         storage_stack=storage,
         vpc_stack=vpc,
         environment="dev",
-        plugins=ALL_PLUGINS,
+        agents=ALL_AGENTS,
         env=ENV,
     )
     return lambda_stack
 
 
-class TestPluginStackWiring:
-    """Verify plugins are wired into the Lambda stack correctly."""
+class TestAgentStackWiring:
+    """Verify agents are wired into the Lambda stack correctly."""
 
-    def test_each_plugin_has_lambda_function(self, stacks):
-        """Every plugin name should have an entry in lambda_functions."""
-        for plugin in ALL_PLUGINS:
-            assert plugin.name in stacks.lambda_functions, \
-                f"Plugin '{plugin.name}' missing from lambda_functions"
+    def test_each_agent_has_lambda_function(self, stacks):
+        """Every agent name should have an entry in lambda_functions."""
+        for agent in ALL_AGENTS:
+            assert agent.name in stacks.lambda_functions, \
+                f"Agent '{agent.name}' missing from lambda_functions"
 
     def test_jenkins_has_own_lambda(self, stacks):
         """Jenkins should have a separate Lambda from metrics."""
@@ -155,8 +155,8 @@ class TestPluginStackWiring:
         assert jenkins_fn is not metrics_fn
 
     def test_lambda_function_count(self, stacks):
-        """Should be 2 plugin entries + 2 core = 4 keys in lambda_functions dict."""
-        # 2 plugins + supervisor-agent + communication-handler = 4 entries
+        """Should be 2 agent entries + 2 core = 4 keys in lambda_functions dict."""
+        # 2 agents + supervisor-agent + communication-handler = 4 entries
         assert len(stacks.lambda_functions) == 4
 
     def test_lambda_template_function_count(self, stacks):
@@ -167,11 +167,11 @@ class TestPluginStackWiring:
 
 
 # ---------------------------------------------------------------------------
-# Metrics plugin — no-write guardrail tests
+# Metrics agent — no-write guardrail tests
 # ---------------------------------------------------------------------------
 
 class TestMetricsNoWriteGuardrail:
-    """Ensure the metrics plugin never makes mutating requests to OpenSearch.
+    """Ensure the metrics agent never makes mutating requests to OpenSearch.
 
     All OpenSearch calls from the metrics Lambda must be read-only (GET).
     These tests statically verify that no code path can issue POST, PUT,
@@ -180,8 +180,8 @@ class TestMetricsNoWriteGuardrail:
 
     def test_iam_policies_exclude_write_actions(self):
         """IAM policies must not grant es:ESHttpPost, es:ESHttpPut, or es:ESHttpDelete."""
-        plugin = MetricsPlugin()
-        policies = plugin.get_iam_policies("123456789012", "us-east-1", "dev")
+        metrics_agent = MetricsAgent()
+        policies = agent.get_iam_policies("123456789012", "us-east-1", "dev")
         forbidden_actions = {"es:ESHttpPost", "es:ESHttpPut", "es:ESHttpDelete"}
         for stmt in policies:
             stmt_json = stmt.to_json()
@@ -191,13 +191,13 @@ class TestMetricsNoWriteGuardrail:
             overlap = forbidden_actions & set(actions)
             assert not overlap, (
                 f"Metrics IAM policy grants forbidden actions: {overlap}. "
-                f"This plugin must be read-only — no POST/PUT/DELETE on OpenSearch."
+                f"This agent must be read-only — no POST/PUT/DELETE on OpenSearch."
             )
 
     def test_iam_policies_exclude_wildcard_es_actions(self):
         """IAM policies must not grant es:* (blanket OpenSearch access)."""
-        plugin = MetricsPlugin()
-        policies = plugin.get_iam_policies("123456789012", "us-east-1", "dev")
+        metrics_agent = MetricsAgent()
+        policies = agent.get_iam_policies("123456789012", "us-east-1", "dev")
         for stmt in policies:
             stmt_json = stmt.to_json()
             actions = stmt_json.get("Action", [])
@@ -209,7 +209,7 @@ class TestMetricsNoWriteGuardrail:
 
     def test_no_post_calls_in_metrics_lambda(self):
         """No code in the metrics Lambda may invoke _make_request or opensearch_request with POST."""
-        lambda_dir = os.path.join("plugins", "metrics", "lambda")
+        lambda_dir = os.path.join("agents", "metrics", "lambda")
         violations = []
 
         for py_file in glob.glob(os.path.join(lambda_dir, "*.py")):
@@ -247,7 +247,7 @@ class TestMetricsNoWriteGuardrail:
 
     def test_no_direct_post_put_delete_requests_in_metrics_lambda(self):
         """Metrics Lambda must not call requests.post(), requests.put(), or requests.delete()."""
-        lambda_dir = os.path.join("plugins", "metrics", "lambda")
+        lambda_dir = os.path.join("agents", "metrics", "lambda")
         forbidden = {"post", "put", "delete"}
         violations = []
 
@@ -279,7 +279,7 @@ class TestMetricsNoWriteGuardrail:
 
     def test_make_request_only_called_with_get(self):
         """_make_request() and opensearch_request() must only be invoked with GET."""
-        lambda_dir = os.path.join("plugins", "metrics", "lambda")
+        lambda_dir = os.path.join("agents", "metrics", "lambda")
         violations = []
 
         for py_file in glob.glob(os.path.join(lambda_dir, "*.py")):

@@ -8,15 +8,15 @@ import pytest
 from aws_cdk import App, Environment
 from aws_cdk.assertions import Match, Template
 
-from plugins.jenkins import JenkinsPlugin
-from plugins.metrics import MetricsPlugin
+from agents.jenkins import JenkinsAgent
+from agents.metrics import MetricsAgent
 from stacks.lambda_stack import OscarLambdaStack
 from stacks.permissions_stack import OscarPermissionsStack
 from stacks.secrets_stack import OscarSecretsStack
 from stacks.storage_stack import OscarStorageStack
 from stacks.vpc_stack import OscarVpcStack
 
-PLUGINS = [JenkinsPlugin(), MetricsPlugin()]
+AGENTS = [JenkinsAgent(), MetricsAgent()]
 ENV = Environment(account="123456789012", region="us-east-1")
 
 
@@ -30,10 +30,10 @@ def template():
     app = App(context={"aws:cdk:bundling-stacks": []})
 
     permissions = OscarPermissionsStack(
-        app, "Perms", environment="dev", plugins=PLUGINS, env=ENV,
+        app, "Perms", environment="dev", agents=AGENTS, env=ENV,
     )
     secrets = OscarSecretsStack(
-        app, "Secrets", environment="dev", plugins=PLUGINS, env=ENV,
+        app, "Secrets", environment="dev", agents=AGENTS, env=ENV,
     )
     storage = OscarStorageStack(
         app, "Storage", environment="dev", env=ENV,
@@ -47,7 +47,7 @@ def template():
         storage_stack=storage,
         vpc_stack=vpc,
         environment="dev",
-        plugins=PLUGINS,
+        agents=AGENTS,
         env=ENV,
     )
     return Template.from_stack(stack)
@@ -76,15 +76,15 @@ class TestLambdaStack:
             "MemorySize": 512,
         })
 
-    def test_jenkins_plugin_lambda_created(self, template):
-        """Jenkins plugin Lambda should exist."""
+    def test_jenkins_agent_lambda_created(self, template):
+        """Jenkins agent Lambda should exist."""
         template.has_resource_properties("AWS::Lambda::Function", {
             "FunctionName": "oscar-jenkins-dev",
             "Runtime": "python3.12",
         })
 
-    def test_metrics_plugin_lambda_created(self, template):
-        """Unified metrics plugin Lambda should exist."""
+    def test_metrics_agent_lambda_created(self, template):
+        """Unified metrics agent Lambda should exist."""
         template.has_resource_properties("AWS::Lambda::Function", {
             "FunctionName": "oscar-metrics-dev",
             "Runtime": "python3.12",

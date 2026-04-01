@@ -16,8 +16,8 @@ from typing import Optional
 from aws_cdk import App, Environment
 from dotenv import load_dotenv
 
-from plugins.jenkins import JenkinsPlugin
-from plugins.metrics import MetricsPlugin
+from agents.jenkins import JenkinsAgent
+from agents.metrics import MetricsAgent
 from stacks.api_gateway_stack import OscarApiGatewayStack
 from stacks.bedrock_agents_stack import OscarAgentsStack
 from stacks.knowledge_base_stack import OscarKnowledgeBaseStack
@@ -59,10 +59,10 @@ def main() -> None:
 
     env = Environment(account=account, region=region)
 
-    # Register plugins
-    plugins = [
-        JenkinsPlugin(),
-        MetricsPlugin(),
+    # Register agents
+    agents = [
+        JenkinsAgent(),
+        MetricsAgent(),
     ]
 
     # Deploy stacks in dependency order
@@ -72,7 +72,7 @@ def main() -> None:
         env=env,
         description="OSCAR IAM permissions and roles",
         environment=environment,
-        plugins=plugins
+        agents=agents
     )
 
     # 2. Secrets (AWS Secrets Manager)
@@ -81,7 +81,7 @@ def main() -> None:
         env=env,
         description="OSCAR secrets management",
         environment=environment,
-        plugins=plugins
+        agents=agents
     )
 
     # 3. Storage (DynamoDB tables)
@@ -120,7 +120,7 @@ def main() -> None:
         storage_stack=storage_stack,
         env=env,
         environment=environment,
-        plugins=plugins,
+        agents=agents,
         description="OSCAR Lambda functions"
     )
     lambda_stack.add_dependency(permissions_stack)
@@ -147,7 +147,7 @@ def main() -> None:
         lambda_stack=lambda_stack,
         env=env,
         environment=environment,
-        plugins=plugins,
+        agents=agents,
         description="OSCAR Bedrock agents"
     )
     agents_stack.add_dependency(permissions_stack)

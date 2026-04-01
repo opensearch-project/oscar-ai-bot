@@ -1,18 +1,18 @@
 # Copyright OpenSearch Contributors
 # SPDX-License-Identifier: Apache-2.0
 
-"""Jenkins plugin for OSCAR."""
+"""Jenkins agent for OSCAR."""
 
 import os
 
-from plugins.base_plugin import LambdaConfig, OscarPlugin, SecretConfig
-from plugins.jenkins.action_groups import get_action_groups
-from plugins.jenkins.iam_policies import get_policies
-from plugins.jenkins.instructions import (AGENT_INSTRUCTION,
+from agents.base_agent import LambdaConfig, OscarAgent, SecretConfig
+from agents.jenkins.action_groups import get_action_groups
+from agents.jenkins.iam_policies import get_policies
+from agents.jenkins.instructions import (AGENT_INSTRUCTION,
                                           COLLABORATOR_INSTRUCTION)
 
 
-class JenkinsPlugin(OscarPlugin):
+class JenkinsAgent(OscarAgent):
 
     @property
     def name(self):
@@ -20,7 +20,7 @@ class JenkinsPlugin(OscarPlugin):
 
     def get_lambda_config(self):
         return LambdaConfig(
-            entry="plugins/jenkins/lambda",
+            entry="agents/jenkins/lambda",
             timeout_seconds=120,
             memory_size=512,
             reserved_concurrency=5,

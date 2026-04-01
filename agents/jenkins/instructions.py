@@ -1,7 +1,7 @@
 # Copyright OpenSearch Contributors
 # SPDX-License-Identifier: Apache-2.0
 
-"""Bedrock agent instructions for Jenkins plugin."""
+"""Bedrock agent instructions for Jenkins agent."""
 
 AGENT_INSTRUCTION = """You are the Jenkins Operations Agent for OSCAR.
 

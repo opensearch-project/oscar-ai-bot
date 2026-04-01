@@ -117,7 +117,7 @@ aws secretsmanager put-secret-value \
 | `FULLY_AUTHORIZED_USERS` | Comma-separated user IDs with full access (Jenkins, communication) |
 | `CHANNEL_ALLOW_LIST` | Comma-separated channel IDs the bot responds in |
 
-Plugin-specific secrets (e.g., Jenkins API token) are documented in each plugin's README.
+Agent-specific secrets (e.g., Jenkins API token) are documented in each agent's README.
 
 ### Non-Sensitive Configuration (`.env`)
 
@@ -137,7 +137,7 @@ See `.env.example` for the full list of configurable values with defaults.
 | `.env` | Non-sensitive config (loaded by CDK at deploy time) |
 | `.env.example` | Reference for all configurable values |
 | `stacks/` | CDK stack definitions |
-| `plugins/` | Plugin modules (one per collaborator agent) |
+| `agents/` | Agent modules (one per collaborator agent) |
 | `lambda/` | Core Lambda source code (supervisor, communication handler) |
 
 ## 🧪 Testing
@@ -148,7 +148,7 @@ pipenv run python -m pytest
 
 # Run a specific test area
 pipenv run python -m pytest tests/stacks/
-pipenv run python -m pytest tests/plugins/
+pipenv run python -m pytest tests/agents/
 pipenv run python -m pytest tests/lambda/
 
 # Run with coverage
@@ -201,7 +201,7 @@ When adding new code, use type annotations:
 ```python
 from typing import Any, Dict, List, Optional
 
-def my_function(plugins: Optional[List] = None) -> Dict[str, Any]:
+def my_function(agents: Optional[List] = None) -> Dict[str, Any]:
     ...
 ```
 

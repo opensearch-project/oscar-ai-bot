@@ -9,7 +9,7 @@
 Bedrock Agents stack for OSCAR CDK automation.
 
 This module defines the Bedrock agents infrastructure including:
-- Plugin-based collaborator agents created from OscarPlugin definitions
+- Agent-based collaborator agents created from OscarAgent definitions
 - Privileged supervisor agent with full access capabilities
 - Limited supervisor agent with read-only access
 - Action groups with proper Lambda function associations
@@ -40,7 +40,7 @@ class OscarAgentsStack(Stack):
         permissions_stack: Any,
         environment: str,
         lambda_stack: Any,
-        plugins: Optional[List] = None,
+        agents: Optional[List] = None,
         **kwargs,
     ) -> None:
         super().__init__(scope, construct_id, **kwargs)
@@ -52,24 +52,24 @@ class OscarAgentsStack(Stack):
         self.env_name = environment
         self._deploy_ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
 
-        # Create plugin collaborator agents, then supervisors
-        privileged_collaborators, limited_collaborators = self._create_plugin_agents(plugins or [])
+        # Create agent-based collaborators, then supervisors
+        privileged_collaborators, limited_collaborators = self._create_collaborator_agents(agents or [])
         self._create_supervisor_agent(privileged_collaborators)
         self._create_limited_supervisor_agent(limited_collaborators)
 
-    # --------------------------------------------------------------- plugins
-    def _create_plugin_agents(self, plugins) -> tuple:
-        """Create Bedrock agents for each plugin and partition into supervisor lists."""
+    # --------------------------------------------------------- collaborators
+    def _create_collaborator_agents(self, agents) -> tuple:
+        """Create Bedrock agents for each agent module and partition into supervisor lists."""
         privileged_collaborators = []
         limited_collaborators = []
 
-        for plugin in plugins:
-            lambda_fn = self.lambda_stack.lambda_functions[plugin.name]
-            construct_name = plugin.name.replace("-", " ").title().replace(" ", "")
+        for agent in agents:
+            lambda_fn = self.lambda_stack.lambda_functions[agent.name]
+            construct_name = agent.name.replace("-", " ").title().replace(" ", "")
 
             # Knowledge base attachment
             kb_config = None
-            if plugin.uses_knowledge_base():
+            if agent.uses_knowledge_base():
                 kb_config = [bedrock.CfnAgent.AgentKnowledgeBaseProperty(
                     description="Knowledge base with all build, test and release related docs",
                     knowledge_base_id=self.knowledge_base_id,
@@ -78,14 +78,14 @@ class OscarAgentsStack(Stack):
             # Create agent
             agent = bedrock.CfnAgent(
                 self, f"Oscar{construct_name}Agent",
-                agent_name=f"oscar-{plugin.name}-agent-{self.env_name}",
+                agent_name=f"oscar-{agent.name}-agent-{self.env_name}",
                 agent_resource_role_arn=self.agent_role_arn,
-                description=f"OSCAR {plugin.name} collaborator agent",
-                foundation_model=plugin.get_foundation_model(),
+                description=f"OSCAR {agent.name} collaborator agent",
+                foundation_model=agent.get_foundation_model(),
                 idle_session_ttl_in_seconds=600,
                 auto_prepare=True,
-                action_groups=plugin.get_action_groups(lambda_fn.function_arn),
-                instruction=plugin.get_agent_instruction(),
+                action_groups=agent.get_action_groups(lambda_fn.function_arn),
+                instruction=agent.get_agent_instruction(),
                 knowledge_bases=kb_config,
             )
 
@@ -94,22 +94,22 @@ class OscarAgentsStack(Stack):
                 self, f"Oscar{construct_name}Alias",
                 agent_alias_name="LIVE",
                 agent_id=agent.attr_agent_id,
-                description=f"Live alias for OSCAR {plugin.name} agent (deployed {self._deploy_ts})",
+                description=f"Live alias for OSCAR {agent.name} agent (deployed {self._deploy_ts})",
             )
             alias.node.add_dependency(agent)
 
             # Write agent ID + alias to SSM
             ssm.StringParameter(
                 self, f"{construct_name}AgentIdParam",
-                parameter_name=f"/oscar/{self.env_name}/bedrock/{plugin.name}-agent-id",
+                parameter_name=f"/oscar/{self.env_name}/bedrock/{agent.name}-agent-id",
                 string_value=agent.attr_agent_id,
-                description=f"OSCAR {plugin.name} agent ID for {self.env_name}",
+                description=f"OSCAR {agent.name} agent ID for {self.env_name}",
             )
             ssm.StringParameter(
                 self, f"{construct_name}AgentAliasParam",
-                parameter_name=f"/oscar/{self.env_name}/bedrock/{plugin.name}-agent-alias",
+                parameter_name=f"/oscar/{self.env_name}/bedrock/{agent.name}-agent-alias",
                 string_value=alias.attr_agent_alias_id,
-                description=f"OSCAR {plugin.name} agent alias ID for {self.env_name}",
+                description=f"OSCAR {agent.name} agent alias ID for {self.env_name}",
             )
 
             # Build collaborator spec
@@ -117,13 +117,13 @@ class OscarAgentsStack(Stack):
                 agent_descriptor=bedrock.CfnAgent.AgentDescriptorProperty(
                     alias_arn=alias.attr_agent_alias_arn
                 ),
-                collaboration_instruction=plugin.get_collaborator_instruction(),
-                collaborator_name=plugin.get_collaborator_name(),
+                collaboration_instruction=agent.get_collaborator_instruction(),
+                collaborator_name=agent.get_collaborator_name(),
                 relay_conversation_history="TO_COLLABORATOR",
             )
 
             # Route to correct supervisor(s)
-            access = plugin.get_access_level()
+            access = agent.get_access_level()
             if access in ("privileged", "both"):
                 privileged_collaborators.append(collaborator)
             if access in ("limited", "both"):

@@ -1,7 +1,7 @@
 # Copyright OpenSearch Contributors
 # SPDX-License-Identifier: Apache-2.0
 
-"""Shared IAM policies for all metrics plugins."""
+"""Shared IAM policies for all metrics agents."""
 
 import os
 from typing import List

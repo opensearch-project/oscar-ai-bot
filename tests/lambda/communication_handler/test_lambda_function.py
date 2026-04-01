@@ -3,7 +3,7 @@
 """Tests for the communication handler Lambda function.
 
 Uses importlib to load by file path, avoiding sys.path conflicts with
-the Jenkins plugin's lambda_function.py.
+the Jenkins agent's lambda_function.py.
 """
 
 import importlib.util

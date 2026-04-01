@@ -1,7 +1,7 @@
 # Copyright OpenSearch Contributors
 # SPDX-License-Identifier: Apache-2.0
 
-"""Bedrock agent instructions for metrics plugin."""
+"""Bedrock agent instructions for metrics agent."""
 
 AGENT_INSTRUCTION = """You are a Metrics Specialist for the OpenSearch project.
 

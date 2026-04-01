@@ -28,7 +28,7 @@ class OscarPermissionsStack(Stack):
     with least-privilege access and proper security boundaries.
     """
 
-    def __init__(self, scope: Construct, construct_id: str, environment: str, plugins: Optional[List] = None, **kwargs) -> None:
+    def __init__(self, scope: Construct, construct_id: str, environment: str, agents: Optional[List] = None, **kwargs) -> None:
         super().__init__(scope, construct_id, **kwargs)
 
         self.account_id = self.env.account
@@ -43,10 +43,10 @@ class OscarPermissionsStack(Stack):
         self.lambda_execution_roles = self._create_core_lambda_roles()
         self.api_gateway_role = self._create_api_gateway_role()
 
-        # Create plugin roles
-        self.plugin_roles: Dict[str, iam.Role] = {}
-        if plugins:
-            self.plugin_roles = self._create_plugin_roles(plugins)
+        # Create agent roles
+        self.agent_roles: Dict[str, iam.Role] = {}
+        if agents:
+            self.agent_roles = self._create_agent_roles(agents)
 
     def _create_bedrock_agent_role(self) -> iam.Role:
         role = iam.Role(
@@ -59,7 +59,7 @@ class OscarPermissionsStack(Stack):
         return role
 
     def _create_core_lambda_roles(self) -> Dict[str, iam.Role]:
-        """Create Lambda execution roles for core (non-plugin) functions."""
+        """Create Lambda execution roles for core (non-agent) functions."""
         roles = {}
 
         # Base role for oscar-agent
@@ -90,24 +90,24 @@ class OscarPermissionsStack(Stack):
 
         return roles
 
-    def _create_plugin_roles(self, plugins) -> Dict[str, iam.Role]:
-        """Create IAM roles for plugins, deduplicating by Lambda entry path.
+    def _create_agent_roles(self, agents) -> Dict[str, iam.Role]:
+        """Create IAM roles for agents, deduplicating by Lambda entry path.
 
-        Plugins sharing the same Lambda entry directory share a single role.
+        Agents sharing the same Lambda entry directory share a single role.
         """
         roles = {}
         created_entries: Dict[str, iam.Role] = {}
 
-        for plugin in plugins:
-            entry = plugin.get_lambda_config().entry
+        for agent in agents:
+            entry = agent.get_lambda_config().entry
             if entry in created_entries:
-                roles[plugin.name] = created_entries[entry]
+                roles[agent.name] = created_entries[entry]
                 continue
 
-            role_prefix = entry.split("/")[1].title()  # e.g. "plugins/metrics/lambda" → "Metrics"
+            role_prefix = entry.split("/")[1].title()  # e.g. "agents/metrics/lambda" → "Metrics"
             managed = [
                 iam.ManagedPolicy.from_aws_managed_policy_name(p)
-                for p in plugin.get_managed_policies()
+                for p in agent.get_managed_policies()
             ]
             role = iam.Role(
                 self, f"{role_prefix}LambdaRole",
@@ -115,9 +115,9 @@ class OscarPermissionsStack(Stack):
                 managed_policies=managed,
                 description=f"Execution role for OSCAR {role_prefix.lower()} Lambda"
             )
-            for stmt in plugin.get_iam_policies(self.account_id, self.aws_region, self.env_name):
+            for stmt in agent.get_iam_policies(self.account_id, self.aws_region, self.env_name):
                 role.add_to_policy(stmt)
-            roles[plugin.name] = role
+            roles[agent.name] = role
             created_entries[entry] = role
         return roles
 

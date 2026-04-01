@@ -9,7 +9,7 @@ import unittest
 from unittest.mock import patch
 
 # Add jenkins directory to path for imports
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', '..', 'plugins', 'jenkins', 'lambda'))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', '..', 'agents', 'jenkins', 'lambda'))
 
 from jenkins_client import JenkinsClient, JenkinsCredentials  # noqa: E402
 from job_definitions import (JobDefinition, JobParameter,  # noqa: E402

@@ -1,14 +1,14 @@
 # Copyright OpenSearch Contributors
 # SPDX-License-Identifier: Apache-2.0
 
-"""Metrics plugin for OSCAR."""
+"""Metrics agent for OSCAR."""
 
 import os
 
-from plugins.base_plugin import LambdaConfig, OscarPlugin, SecretConfig
-from plugins.metrics.action_groups import get_action_groups
-from plugins.metrics.iam_policies import get_policies
-from plugins.metrics.instructions import (AGENT_INSTRUCTION,
+from agents.base_agent import LambdaConfig, OscarAgent, SecretConfig
+from agents.metrics.action_groups import get_action_groups
+from agents.metrics.iam_policies import get_policies
+from agents.metrics.instructions import (AGENT_INSTRUCTION,
                                           COLLABORATOR_INSTRUCTION)
 
 # Keys to pass through from .env to Lambda (if set).
@@ -33,7 +33,7 @@ def _passthrough_env(keys):
     return {k: os.environ[k] for k in keys if k in os.environ}
 
 
-class MetricsPlugin(OscarPlugin):
+class MetricsAgent(OscarAgent):
 
     @property
     def name(self):
@@ -41,7 +41,7 @@ class MetricsPlugin(OscarPlugin):
 
     def get_lambda_config(self):
         return LambdaConfig(
-            entry="plugins/metrics/lambda",
+            entry="agents/metrics/lambda",
             timeout_seconds=180,
             memory_size=1024,
             reserved_concurrency=100,
@@ -73,7 +73,7 @@ class MetricsPlugin(OscarPlugin):
         return [
             SecretConfig(
                 name_suffix="env",
-                description="Metrics plugin secrets (cross-account role ARN, OpenSearch host, etc.)",
+                description="Metrics agent secrets (cross-account role ARN, OpenSearch host, etc.)",
                 env_var="METRICS_SECRET_NAME",
             ),
         ]
