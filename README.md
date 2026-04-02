@@ -59,11 +59,11 @@ oscar-ai-bot/
 │   ├── lambda_stack.py             # Lambda functions
 │   ├── api_gateway_stack.py        # REST API for Slack
 │   └── bedrock_agents_stack.py     # Bedrock agents (supervisor + collaborators)
-├── lambda/                      # Lambda function source code
+├── lambda/                         # Lambda function source code
 │   ├── oscar-agent/                # Main Slack bot handler
 │   ├── oscar-communication-handler/ # Bedrock action group for messaging
 │   └── knowledge-base/             # Upload and sync docs
-├── agents/                      # Collaborator agent modules
+├── agents/                         # Collaborator agent modules
 │   ├── base_agent.py               # Abstract agent interface
 │   ├── jenkins/                    # Jenkins job operations
 │   └── metrics/                    # Build, test, and release metrics

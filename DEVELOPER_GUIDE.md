@@ -131,13 +131,13 @@ See `.env.example` for the full list of configurable values with defaults.
 
 ## 🔧 Key Files
 
-| File | Purpose |
-|------|---------|
-| `app.py` | CDK application entry point |
-| `.env` | Non-sensitive config (loaded by CDK at deploy time) |
-| `.env.example` | Reference for all configurable values |
-| `stacks/` | CDK stack definitions |
-| `agents/` | Agent modules (one per collaborator agent) |
+| File | Purpose                                                     |
+|------|-------------------------------------------------------------|
+| `app.py` | CDK application entry point                                 |
+| `.env` | Non-sensitive config (loaded by CDK at deploy time)         |
+| `.env.example` | Reference for all configurable values                       |
+| `stacks/` | CDK stack definitions                                       |
+| `agents/` | Agents per functionality (one per collaborator agent)       |
 | `lambda/` | Core Lambda source code (supervisor, communication handler) |
 
 ## 🧪 Testing
