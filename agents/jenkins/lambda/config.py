@@ -31,15 +31,15 @@ class JenkinsConfig:
         # Load Jenkins API token from dedicated secret
         self.jenkins_api_token = self._load_jenkins_secret()
 
-        # Jenkins Server Configuration
-        self.jenkins_url = os.environ['JENKINS_URL']
+        # Jenkins Server Configuration (required)
+        self.jenkins_url = os.environ.get('JENKINS_URL', '')
 
         # Request Configuration
         self.request_timeout = int(os.getenv('JENKINS_REQUEST_TIMEOUT', '30'))
         self.verify_ssl = os.getenv('JENKINS_VERIFY_SSL', 'true').lower() != 'false'
 
         # GitHub Configuration (for Jenkinsfile discovery)
-        self.github_repo = os.getenv('JENKINSFILE_GITHUB_REPO', 'opensearch-project/opensearch-build')
+        self.github_repo = os.environ.get('JENKINSFILE_GITHUB_REPO', '')
         self.github_branch = os.getenv('JENKINSFILE_GITHUB_BRANCH', 'main')
         self.jenkins_dir = os.getenv('JENKINSFILE_JENKINS_DIR', 'jenkins')
         _ignore_raw = os.getenv('JENKINSFILE_IGNORE_LIST', '')
@@ -71,7 +71,10 @@ class JenkinsConfig:
     def _validate_config(self) -> None:
         """Validate that required configuration is present."""
         if not self.jenkins_url:
-            raise ValueError("JENKINS_URL is required")
+            raise ValueError("JENKINS_URL environment variable is required")
+
+        if not self.github_repo:
+            raise ValueError("JENKINSFILE_GITHUB_REPO environment variable is required")
 
         if not self.jenkins_api_token:
             logger.warning("JENKINS_API_TOKEN is not configured")

@@ -17,9 +17,24 @@ from job_definitions import (JobDefinition, JobParameter,  # noqa: E402
 from lambda_function import _validate_build_params  # noqa: E402
 from lambda_function import format_parameters_as_bullets  # noqa: E402
 
+_JENKINS_ENV = {
+    'JENKINS_URL': 'https://test-jenkins.example.com',
+    'JENKINSFILE_GITHUB_REPO': 'https://github.com/test/repo',
+}
 
+
+def _reset_config_cache():
+    """Reset the _ConfigProxy cached config so env changes take effect."""
+    from config import config as _cfg
+    _cfg._cached_config = None
+
+
+@patch.dict(os.environ, _JENKINS_ENV)
 class TestJenkinsCredentials(unittest.TestCase):
     """Test Jenkins credentials management."""
+
+    def setUp(self):
+        _reset_config_cache()
 
     @patch('jenkins_client.config')
     def test_load_credentials_success(self, mock_config):
@@ -160,6 +175,7 @@ class TestJobDefinitions(unittest.TestCase):
         self.assertEqual(validated['NOTES'], '')
 
 
+@patch.dict(os.environ, _JENKINS_ENV)
 class TestJenkinsClient(unittest.TestCase):
     """Test Jenkins client functionality."""
 
@@ -193,8 +209,12 @@ class TestJenkinsClient(unittest.TestCase):
         self.assertGreater(result['total_jobs'], 0)
 
 
+@patch.dict(os.environ, _JENKINS_ENV)
 class TestLambdaHandler(unittest.TestCase):
     """Test Lambda handler functionality."""
+
+    def setUp(self):
+        _reset_config_cache()
 
     @patch('lambda_function.get_job_registry')
     @patch('lambda_function.config')
@@ -322,8 +342,12 @@ class TestValidateBuildParams(unittest.TestCase):
         self.assertIn('must be an integer', error['message'])
 
 
+@patch.dict(os.environ, _JENKINS_ENV)
 class TestGetBuildFailureDetailsHandler(unittest.TestCase):
     """Test get_build_failure_details Lambda handler routing."""
+
+    def setUp(self):
+        _reset_config_cache()
 
     @patch('lambda_function.get_job_registry')
     @patch('lambda_function.config')
