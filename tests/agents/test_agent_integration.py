@@ -181,7 +181,7 @@ class TestMetricsNoWriteGuardrail:
     def test_iam_policies_exclude_write_actions(self):
         """IAM policies must not grant es:ESHttpPost, es:ESHttpPut, or es:ESHttpDelete."""
         metrics_agent = MetricsAgent()
-        policies = agent.get_iam_policies("123456789012", "us-east-1", "dev")
+        policies = metrics_agent.get_iam_policies("123456789012", "us-east-1", "dev")
         forbidden_actions = {"es:ESHttpPost", "es:ESHttpPut", "es:ESHttpDelete"}
         for stmt in policies:
             stmt_json = stmt.to_json()
@@ -197,7 +197,7 @@ class TestMetricsNoWriteGuardrail:
     def test_iam_policies_exclude_wildcard_es_actions(self):
         """IAM policies must not grant es:* (blanket OpenSearch access)."""
         metrics_agent = MetricsAgent()
-        policies = agent.get_iam_policies("123456789012", "us-east-1", "dev")
+        policies = metrics_agent.get_iam_policies("123456789012", "us-east-1", "dev")
         for stmt in policies:
             stmt_json = stmt.to_json()
             actions = stmt_json.get("Action", [])

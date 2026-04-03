@@ -9,7 +9,7 @@ from agents.base_agent import LambdaConfig, OscarAgent, SecretConfig
 from agents.metrics.action_groups import get_action_groups
 from agents.metrics.iam_policies import get_policies
 from agents.metrics.instructions import (AGENT_INSTRUCTION,
-                                          COLLABORATOR_INSTRUCTION)
+                                         COLLABORATOR_INSTRUCTION)
 
 # Keys to pass through from .env to Lambda (if set).
 # config.py has its own defaults for each.

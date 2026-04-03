@@ -9,7 +9,7 @@ from agents.base_agent import LambdaConfig, OscarAgent, SecretConfig
 from agents.jenkins.action_groups import get_action_groups
 from agents.jenkins.iam_policies import get_policies
 from agents.jenkins.instructions import (AGENT_INSTRUCTION,
-                                          COLLABORATOR_INSTRUCTION)
+                                         COLLABORATOR_INSTRUCTION)
 
 
 class JenkinsAgent(OscarAgent):
