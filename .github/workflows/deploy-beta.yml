@@ -55,6 +55,8 @@ jobs:
 
       - name: Create beta change-set for approval
         id: beta_stack_diff
+        env:
+          METRICS_CROSS_ACCOUNT_ROLE_ARN: ${{ secrets.METRICS_CROSS_ACCOUNT_ROLE }}
         run: |
           cp deployment/beta.env .env
           pipenv run cdk diff -c ENVIRONMENT=dev | sed -E 's/[0-9]{12}/[MASKED]/g' > beta_diff.txt
@@ -99,6 +101,8 @@ jobs:
             </details>
 
       - name: Deploy beta stacks
+        env:
+          METRICS_CROSS_ACCOUNT_ROLE_ARN: ${{ secrets.METRICS_CROSS_ACCOUNT_ROLE }}
         run: |
           cp deployment/beta.env .env
           pipenv run cdk deploy "*" --require-approval=never -c ENVIRONMENT=dev

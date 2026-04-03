@@ -77,6 +77,10 @@ jobs:
           path: prod_diff.txt
           retention-days: 30
 
+      - name: Get version from pyproject.toml
+        id: get_version
+        run: echo "version=$(python -c "import tomllib; print(tomllib.load(open('pyproject.toml','rb'))['project']['version'])")" >> $GITHUB_OUTPUT
+
       - name: Approve or Deny Production change set
         uses: trstringer/manual-approval@v1
         with:
@@ -87,6 +91,8 @@ jobs:
           issue-body: |
             ## Production Stack Deployment Request
 
+            **Tag:** `${{ github.ref_name }}`
+            **Version:** `${{ steps.get_version.outputs.version }}`
             **Workflow Run:** ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
 
             <details>
