@@ -21,6 +21,7 @@ from aws_cdk import aws_events as events
 from aws_cdk import aws_events_targets as targets
 from aws_cdk import aws_iam as iam
 from aws_cdk import aws_lambda as lambda_
+from aws_cdk import aws_logs as logs
 from aws_cdk import aws_opensearchserverless as opensearchserverless
 from aws_cdk import aws_s3 as s3
 from aws_cdk import aws_s3_notifications as s3n
@@ -330,6 +331,7 @@ class OscarKnowledgeBaseStack(Stack):
         wait_condition = custom_resources.AwsCustomResource(
             self,
             "WaitForCollection",
+            log_retention=logs.RetentionDays.TWO_WEEKS,
             on_create=custom_resources.AwsSdkCall(
                 service="OpenSearchServerless",
                 action="listCollections",
@@ -396,6 +398,7 @@ class OscarKnowledgeBaseStack(Stack):
         index_wait_condition = custom_resources.AwsCustomResource(
             self,
             "WaitForIndex",
+            log_retention=logs.RetentionDays.TWO_WEEKS,
             on_create=custom_resources.AwsSdkCall(
                 service="OpenSearchServerless",
                 action="batchGetCollection",  # Use batchGetCollection instead
