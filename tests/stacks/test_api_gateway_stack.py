@@ -94,3 +94,50 @@ class TestApiGatewayStack:
         template.has_resource_properties("AWS::Logs::LogGroup", {
             "LogGroupName": "/aws/apigateway/oscar-slack-bot-dev",
         })
+
+    def test_waf_web_acl_created(self, template):
+        """A WAFv2 WebACL should be created."""
+        template.resource_count_is("AWS::WAFv2::WebACL", 1)
+
+    def test_waf_associated_with_api_gateway(self, template):
+        """WAF WebACL should be associated with the API Gateway stage."""
+        template.resource_count_is("AWS::WAFv2::WebACLAssociation", 1)
+
+    def test_waf_default_action_is_allow(self, template):
+        """WAF default action should allow requests (rules block specific patterns)."""
+        template.has_resource_properties("AWS::WAFv2::WebACL", {
+            "DefaultAction": {"Allow": {}},
+        })
+
+    def test_waf_has_four_rules(self, template):
+        """WAF should have 4 rules: rate limit, common rules, bad inputs, body size."""
+        resources = template.find_resources("AWS::WAFv2::WebACL")
+        acl = list(resources.values())[0]
+        rules = acl["Properties"]["Rules"]
+        assert len(rules) == 4
+
+    def test_waf_rate_limit_rule(self, template):
+        """WAF should include a rate-based rule."""
+        resources = template.find_resources("AWS::WAFv2::WebACL")
+        acl = list(resources.values())[0]
+        rate_rule = acl["Properties"]["Rules"][0]
+        assert rate_rule["Name"] == "RateLimitPerIP"
+        assert rate_rule["Statement"]["RateBasedStatement"]["AggregateKeyType"] == "IP"
+        assert rate_rule["Statement"]["RateBasedStatement"]["Limit"] == 100
+
+    def test_waf_body_size_rule(self, template):
+        """WAF should include a body size constraint rule."""
+        resources = template.find_resources("AWS::WAFv2::WebACL")
+        acl = list(resources.values())[0]
+        size_rule = acl["Properties"]["Rules"][3]
+        assert size_rule["Name"] == "BodySizeLimit"
+        assert size_rule["Statement"]["SizeConstraintStatement"]["Size"] == 8192
+
+    def test_waf_cloudwatch_metrics_enabled(self, template):
+        """WAF should have CloudWatch metrics enabled."""
+        template.has_resource_properties("AWS::WAFv2::WebACL", {
+            "VisibilityConfig": {
+                "CloudWatchMetricsEnabled": True,
+                "SampledRequestsEnabled": True,
+            },
+        })

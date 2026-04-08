@@ -17,6 +17,7 @@ from typing import Any
 from aws_cdk import RemovalPolicy, Stack
 from aws_cdk import aws_apigateway as apigateway
 from aws_cdk import aws_logs as logs
+from aws_cdk import aws_wafv2 as wafv2
 from constructs import Construct
 
 
@@ -26,6 +27,9 @@ class OscarApiGatewayStack(Stack):
     This stack creates and configures the REST API Gateway with Slack webhook
     endpoints, security features, and monitoring capabilities.
     """
+
+    WAF_RATE_LIMIT = 100  # requests per 5-minute window per IP
+    WAF_MAX_BODY_SIZE = 8192  # 8KB — generous for Slack payloads (typically 1-4KB)
 
     def __init__(
         self,
@@ -62,6 +66,10 @@ class OscarApiGatewayStack(Stack):
 
         # Configure Slack webhook endpoints
         self._configure_slack_endpoints()
+
+        # Attach WAF for rate limiting and payload protection
+        self.web_acl = self._create_waf()
+        self._associate_waf()
 
     def _create_log_group(self) -> logs.LogGroup:
         """
@@ -132,4 +140,94 @@ class OscarApiGatewayStack(Stack):
             "POST",
             lambda_integration,
             authorization_type=apigateway.AuthorizationType.NONE
+        )
+
+    def _create_waf(self) -> wafv2.CfnWebACL:
+        """Create a WAFv2 WebACL with rate limiting, managed rules, and size constraints."""
+
+        def _visibility(name: str) -> wafv2.CfnWebACL.VisibilityConfigProperty:
+            return wafv2.CfnWebACL.VisibilityConfigProperty(
+                cloud_watch_metrics_enabled=True,
+                metric_name=f"oscar-waf-{name}-{self.env_name}",
+                sampled_requests_enabled=True,
+            )
+
+        rules = [
+            # 1. Rate-based rule — block IPs exceeding threshold
+            wafv2.CfnWebACL.RuleProperty(
+                name="RateLimitPerIP",
+                priority=1,
+                statement=wafv2.CfnWebACL.StatementProperty(
+                    rate_based_statement=wafv2.CfnWebACL.RateBasedStatementProperty(
+                        limit=self.WAF_RATE_LIMIT,
+                        aggregate_key_type="IP",
+                    )
+                ),
+                action=wafv2.CfnWebACL.RuleActionProperty(block={}),
+                visibility_config=_visibility("rate-limit"),
+            ),
+            # 2. AWS Common Rule Set — blocks common exploits (XSS, SQLi, etc.)
+            wafv2.CfnWebACL.RuleProperty(
+                name="AWSCommonRuleSet",
+                priority=2,
+                statement=wafv2.CfnWebACL.StatementProperty(
+                    managed_rule_group_statement=wafv2.CfnWebACL.ManagedRuleGroupStatementProperty(
+                        vendor_name="AWS",
+                        name="AWSManagedRulesCommonRuleSet",
+                        excluded_rules=[
+                            # Slack sends URL-encoded POST bodies that trigger this rule
+                            wafv2.CfnWebACL.ExcludedRuleProperty(name="SizeRestrictions_BODY"),
+                        ],
+                    )
+                ),
+                override_action=wafv2.CfnWebACL.OverrideActionProperty(none={}),
+                visibility_config=_visibility("common-rules"),
+            ),
+            # 3. AWS Known Bad Inputs — blocks request patterns associated with exploitation
+            wafv2.CfnWebACL.RuleProperty(
+                name="AWSKnownBadInputs",
+                priority=3,
+                statement=wafv2.CfnWebACL.StatementProperty(
+                    managed_rule_group_statement=wafv2.CfnWebACL.ManagedRuleGroupStatementProperty(
+                        vendor_name="AWS",
+                        name="AWSManagedRulesKnownBadInputsRuleSet",
+                    )
+                ),
+                override_action=wafv2.CfnWebACL.OverrideActionProperty(none={}),
+                visibility_config=_visibility("known-bad-inputs"),
+            ),
+            # 4. Size constraint — reject request bodies > 8KB
+            wafv2.CfnWebACL.RuleProperty(
+                name="BodySizeLimit",
+                priority=4,
+                statement=wafv2.CfnWebACL.StatementProperty(
+                    size_constraint_statement=wafv2.CfnWebACL.SizeConstraintStatementProperty(
+                        field_to_match=wafv2.CfnWebACL.FieldToMatchProperty(body={}),
+                        comparison_operator="GT",
+                        size=self.WAF_MAX_BODY_SIZE,
+                        text_transformations=[
+                            wafv2.CfnWebACL.TextTransformationProperty(priority=0, type="NONE")
+                        ],
+                    )
+                ),
+                action=wafv2.CfnWebACL.RuleActionProperty(block={}),
+                visibility_config=_visibility("body-size"),
+            ),
+        ]
+
+        return wafv2.CfnWebACL(
+            self, "OscarWafWebAcl",
+            name=f"oscar-waf-{self.env_name}",
+            scope="REGIONAL",
+            default_action=wafv2.CfnWebACL.DefaultActionProperty(allow={}),
+            rules=rules,
+            visibility_config=_visibility("overall"),
+        )
+
+    def _associate_waf(self) -> None:
+        """Associate the WAF WebACL with the API Gateway stage."""
+        wafv2.CfnWebACLAssociation(
+            self, "OscarWafAssociation",
+            resource_arn=self.api.deployment_stage.stage_arn,
+            web_acl_arn=self.web_acl.attr_arn,
         )
