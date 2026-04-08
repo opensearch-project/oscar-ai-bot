@@ -53,7 +53,7 @@ class TestSecretsStack:
         """Jenkins agent's api-token secret should be created."""
         template_with_agents.has_resource_properties("AWS::SecretsManager::Secret", {
             "Name": "oscar-jenkins-api-token-dev",
-            "Description": "Jenkins and GitHub credentials JSON: {jenkins_api_token, github_token}",
+            "Description": "Jenkins and GitHub credentials in JSON format",
         })
 
     def test_two_secrets_with_jenkins_agent(self, template_with_agents):
