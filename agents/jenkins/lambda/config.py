@@ -13,6 +13,7 @@ This module provides centralized configuration for the Jenkins integration,
 including job definitions, credentials, and environment settings.
 """
 
+import json
 import logging
 import os
 
@@ -28,8 +29,10 @@ class JenkinsConfig:
     def __init__(self):
         """Initialize configuration by loading .env from secrets manager and setting up all variables."""
 
-        # Load Jenkins API token from dedicated secret
-        self.jenkins_api_token = self._load_jenkins_secret()
+        # Load Jenkins secrets from dedicated secret (JSON format)
+        secrets = self._load_jenkins_secret()
+        self.jenkins_api_token = secrets.get('jenkins_api_token', '')
+        self.github_token = secrets.get('github_token', '')
 
         # Jenkins Server Configuration (required)
         self.jenkins_url = os.environ.get('JENKINS_URL', '')
@@ -48,12 +51,15 @@ class JenkinsConfig:
         # Validate required configuration
         self._validate_config()
 
-    def _load_jenkins_secret(self) -> str:
-        """Load Jenkins API token exclusively from AWS Secrets Manager."""
+    def _load_jenkins_secret(self) -> dict:
+        """Load Jenkins secrets from AWS Secrets Manager (JSON format).
+
+        Expected format: {"jenkins_api_token": "user:token", "github_token": "ghp_..."}
+        """
         secret_name = os.getenv('JENKINS_SECRET_NAME')
         if not secret_name:
             logger.error("JENKINS_SECRET_NAME environment variable is not set")
-            return ''
+            return {}
 
         try:
             session = boto3.session.Session()
@@ -62,11 +68,12 @@ class JenkinsConfig:
                 region_name=os.getenv('AWS_REGION', 'us-east-1')
             )
             response = client.get_secret_value(SecretId=secret_name)
-            logger.info(f"Loaded Jenkins API token from secret: {secret_name}")
-            return response['SecretString']
+            secret_data = json.loads(response['SecretString'])
+            logger.info(f"Loaded Jenkins secrets from: {secret_name}")
+            return secret_data
         except Exception as e:
             logger.error(f"Failed to load Jenkins secret '{secret_name}': {e}")
-            return ''
+            return {}
 
     def _validate_config(self) -> None:
         """Validate that required configuration is present."""

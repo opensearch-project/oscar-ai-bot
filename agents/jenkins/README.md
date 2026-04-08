@@ -94,8 +94,8 @@ These must be set before `cdk deploy`. Set them in your `.env` file or export in
 Add it in `.env`**
 
 ```
-JENKINS_URL=https://build.ci.opensearch.org
-JENKINSFILE_GITHUB_REPO=opensearch-project/opensearch-build
+JENKINS_URL=https://your-jenkins-url
+JENKINSFILE_GITHUB_REPO=you-user-name/your-repo
 JENKINSFILE_GITHUB_BRANCH=main
 JENKINS_VERIFY_SSL=true
 JENKINSFILE_IGNORE_LIST=jenkins/opensearch/benchmark-test.jenkinsfile,jenkins/opensearch/benchmark-pull-request.jenkinsfile
@@ -119,23 +119,35 @@ The agent authenticates with Jenkins using an API token stored in AWS Secrets Ma
 
 The CDK stack creates a secret named `oscar-jenkins-api-token-{env}` (e.g., `oscar-jenkins-api-token-dev`).
 
-After deployment, populate it with the value in `username:token` format:
+After deployment, populate it with a JSON value containing both the Jenkins API token and a GitHub token:
 
 ```bash
 aws secretsmanager put-secret-value \
   --secret-id oscar-jenkins-api-token-dev \
-  --secret-string "your-jenkins-username:your-api-token"
+  --secret-string '{"jenkins_api_token": "your-username:your-api-token", "github_token": "ghp_your_github_token"}'
 ```
 
 The Lambda reads this secret at startup via the `JENKINS_SECRET_NAME` environment variable (automatically set by CDK).
 
-### Token format
+### Secret format
 
-```
-GithubUsername:api-token
+```json
+{
+  "jenkins_api_token": "username:api-token",
+  "github_token": "ghp_xxxxxxxxxxxx"
+}
 ```
 
-Example: `foo:11a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6`
+| Key | Description | Required |
+|-----|-------------|----------|
+| `jenkins_api_token` | Jenkins credentials in `username:token` format | Yes |
+| `github_token` | GitHub personal access token for Jenkinsfile discovery | No (but strongly recommended — unauthenticated GitHub API is limited to 60 requests/hour) |
+
+### GitHub token setup
+
+1. Go to GitHub → Settings → Developer settings → Personal access tokens → Fine-grained tokens.
+2. Create a token with **read-only** access to the `Contents` permission on the target repository.
+3. Add it to the secret JSON as `github_token`.
 
 ### Permissions
 

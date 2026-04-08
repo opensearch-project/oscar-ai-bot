@@ -25,6 +25,14 @@ FETCH_TIMEOUT = 5
 CACHE_TTL = 3600
 
 
+def _github_headers() -> dict:
+    """Build HTTP headers for GitHub API requests, with auth if configured."""
+    headers = {}
+    if config.github_token:
+        headers["Authorization"] = f"Bearer {config.github_token}"
+    return headers
+
+
 def _is_ignored(path: str) -> bool:
     """Check if a path matches any entry in the ignore list (exact or prefix)."""
     for ignored in config.jenkinsfile_ignore_list:
@@ -59,7 +67,7 @@ def _discover_jenkinsfiles(directory: str = None) -> List[str]:
         current_dir = dirs_to_visit.pop()
         url = _github_api_url(current_dir)
         try:
-            resp = requests.get(url, timeout=FETCH_TIMEOUT)
+            resp = requests.get(url, timeout=FETCH_TIMEOUT, headers=_github_headers())
             if resp.status_code != 200:
                 logger.error(f"GitHub API returned {resp.status_code} for {url}")
                 continue
@@ -85,7 +93,7 @@ def _fetch_jenkinsfile(path: str) -> Optional[str]:
     """Fetch a single Jenkinsfile from GitHub. Returns content or None on error."""
     url = _build_raw_url(path)
     try:
-        resp = requests.get(url, timeout=FETCH_TIMEOUT)
+        resp = requests.get(url, timeout=FETCH_TIMEOUT, headers=_github_headers())
         if resp.status_code == 200:
             return resp.text
         logger.error(f"GitHub returned {resp.status_code} for {url}")
