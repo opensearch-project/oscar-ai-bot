@@ -29,6 +29,16 @@ jobs:
           python -m pip install --upgrade pipenv==2026.0.3 wheel
           pipenv install --deploy --dev
 
+      - name: Extract GitHub MCP Server binary
+        run: |
+          mkdir -p agents/github/lambda/bin
+          docker pull --platform linux/amd64 --quiet ghcr.io/github/github-mcp-server:latest
+          CONTAINER=$(docker create --platform linux/amd64 ghcr.io/github/github-mcp-server:latest)
+          docker cp "$CONTAINER:/server/github-mcp-server" agents/github/lambda/bin/github-mcp-server
+          docker rm "$CONTAINER" > /dev/null
+          chmod +x agents/github/lambda/bin/github-mcp-server
+          ls -lh agents/github/lambda/bin/github-mcp-server
+
       - id: get_approvers
         uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
         with:
@@ -52,7 +62,6 @@ jobs:
         with:
           role-to-assume: ${{ secrets.BETA_DEPLOYMENT_ROLE }}
           aws-region: 'us-east-1'
-
       - name: Create beta change-set for approval
         id: beta_stack_diff
         env:

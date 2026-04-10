@@ -10,6 +10,7 @@ query strategy for the OSCAR agent system.
 """
 
 import logging
+from datetime import date
 from typing import Optional, Tuple
 
 from bedrock.agent_invoker import BedrockAgentCore
@@ -59,6 +60,7 @@ class QueryProcessor:
         Returns:
             A tuple containing (response_text, session_id)
         """
+        query = f"[TODAY: {date.today().isoformat()}] {query}"
         logger.info(f"AGENT_QUERY: Starting query - query_len={len(query)}, session_id='{session_id}', context_len={len(context_summary) if context_summary else 0}")
         logger.info(f"AGENT_QUERY: Query preview: {query[:config.log_query_preview_length]}...")
 

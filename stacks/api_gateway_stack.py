@@ -56,6 +56,7 @@ class OscarApiGatewayStack(Stack):
         self.env_name = environment
         # Get the main Lambda function and API Gateway role
         self.lambda_function = lambda_stack.lambda_functions[lambda_stack.get_supervisor_agent_function_name(self.env_name)]
+        self.github_webhook_function = lambda_stack.lambda_functions[lambda_stack.get_github_webhook_handler_function_name(self.env_name)]
         self.api_gateway_role = permissions_stack.api_gateway_role
 
         # Create CloudWatch log group for API Gateway
@@ -66,6 +67,9 @@ class OscarApiGatewayStack(Stack):
 
         # Configure Slack webhook endpoints
         self._configure_slack_endpoints()
+
+        # Configure GitHub webhook endpoint
+        self._configure_github_webhook_endpoint()
 
         # Attach WAF for rate limiting and payload protection
         self.web_acl = self._create_waf()
@@ -142,6 +146,23 @@ class OscarApiGatewayStack(Stack):
             authorization_type=apigateway.AuthorizationType.NONE
         )
 
+    def _configure_github_webhook_endpoint(self) -> None:
+        """Configure GitHub webhook endpoint at /github/webhooks."""
+        github_resource = self.api.root.add_resource("github")
+        webhooks_resource = github_resource.add_resource("webhooks")
+
+        github_integration = apigateway.LambdaIntegration(
+            self.github_webhook_function,
+            proxy=True,
+            allow_test_invoke=True,
+        )
+
+        webhooks_resource.add_method(
+            "POST",
+            github_integration,
+            authorization_type=apigateway.AuthorizationType.NONE,
+        )
+
     def _create_waf(self) -> wafv2.CfnWebACL:
         """Create a WAFv2 WebACL with rate limiting, managed rules, and size constraints."""
 
@@ -167,6 +188,8 @@ class OscarApiGatewayStack(Stack):
                 visibility_config=_visibility("rate-limit"),
             ),
             # 2. AWS Common Rule Set — blocks common exploits (XSS, SQLi, etc.)
+            #    Scoped down to exclude /github/ paths — those payloads contain HTML
+            #    that triggers XSS rules, but are HMAC-signed by GitHub.
             wafv2.CfnWebACL.RuleProperty(
                 name="AWSCommonRuleSet",
                 priority=2,
@@ -175,15 +198,28 @@ class OscarApiGatewayStack(Stack):
                         vendor_name="AWS",
                         name="AWSManagedRulesCommonRuleSet",
                         excluded_rules=[
-                            # Slack sends URL-encoded POST bodies that trigger this rule
                             wafv2.CfnWebACL.ExcludedRuleProperty(name="SizeRestrictions_BODY"),
                         ],
+                        scope_down_statement=wafv2.CfnWebACL.StatementProperty(
+                            not_statement=wafv2.CfnWebACL.NotStatementProperty(
+                                statement=wafv2.CfnWebACL.StatementProperty(
+                                    byte_match_statement=wafv2.CfnWebACL.ByteMatchStatementProperty(
+                                        field_to_match=wafv2.CfnWebACL.FieldToMatchProperty(uri_path={}),
+                                        positional_constraint="STARTS_WITH",
+                                        search_string="/prod/github/",
+                                        text_transformations=[
+                                            wafv2.CfnWebACL.TextTransformationProperty(priority=0, type="NONE")
+                                        ],
+                                    )
+                                )
+                            )
+                        ),
                     )
                 ),
                 override_action=wafv2.CfnWebACL.OverrideActionProperty(none={}),
                 visibility_config=_visibility("common-rules"),
             ),
-            # 3. AWS Known Bad Inputs — blocks request patterns associated with exploitation
+            # 3. AWS Known Bad Inputs — scoped down to exclude /github/ paths
             wafv2.CfnWebACL.RuleProperty(
                 name="AWSKnownBadInputs",
                 priority=3,
@@ -191,23 +227,60 @@ class OscarApiGatewayStack(Stack):
                     managed_rule_group_statement=wafv2.CfnWebACL.ManagedRuleGroupStatementProperty(
                         vendor_name="AWS",
                         name="AWSManagedRulesKnownBadInputsRuleSet",
+                        scope_down_statement=wafv2.CfnWebACL.StatementProperty(
+                            not_statement=wafv2.CfnWebACL.NotStatementProperty(
+                                statement=wafv2.CfnWebACL.StatementProperty(
+                                    byte_match_statement=wafv2.CfnWebACL.ByteMatchStatementProperty(
+                                        field_to_match=wafv2.CfnWebACL.FieldToMatchProperty(uri_path={}),
+                                        positional_constraint="STARTS_WITH",
+                                        search_string="/prod/github/",
+                                        text_transformations=[
+                                            wafv2.CfnWebACL.TextTransformationProperty(priority=0, type="NONE")
+                                        ],
+                                    )
+                                )
+                            )
+                        ),
                     )
                 ),
                 override_action=wafv2.CfnWebACL.OverrideActionProperty(none={}),
                 visibility_config=_visibility("known-bad-inputs"),
             ),
-            # 4. Size constraint — reject request bodies > 8KB
+            # 4. Size constraint — reject request bodies > 8KB (Slack paths only).
+            #    GitHub webhook payloads can be large and are HMAC-signed, so exempt them.
             wafv2.CfnWebACL.RuleProperty(
                 name="BodySizeLimit",
                 priority=4,
                 statement=wafv2.CfnWebACL.StatementProperty(
-                    size_constraint_statement=wafv2.CfnWebACL.SizeConstraintStatementProperty(
-                        field_to_match=wafv2.CfnWebACL.FieldToMatchProperty(body={}),
-                        comparison_operator="GT",
-                        size=self.WAF_MAX_BODY_SIZE,
-                        text_transformations=[
-                            wafv2.CfnWebACL.TextTransformationProperty(priority=0, type="NONE")
-                        ],
+                    and_statement=wafv2.CfnWebACL.AndStatementProperty(
+                        statements=[
+                            wafv2.CfnWebACL.StatementProperty(
+                                not_statement=wafv2.CfnWebACL.NotStatementProperty(
+                                    statement=wafv2.CfnWebACL.StatementProperty(
+                                        byte_match_statement=wafv2.CfnWebACL.ByteMatchStatementProperty(
+                                            field_to_match=wafv2.CfnWebACL.FieldToMatchProperty(
+                                                uri_path={}
+                                            ),
+                                            positional_constraint="STARTS_WITH",
+                                            search_string="/prod/github/",
+                                            text_transformations=[
+                                                wafv2.CfnWebACL.TextTransformationProperty(priority=0, type="NONE")
+                                            ],
+                                        )
+                                    )
+                                )
+                            ),
+                            wafv2.CfnWebACL.StatementProperty(
+                                size_constraint_statement=wafv2.CfnWebACL.SizeConstraintStatementProperty(
+                                    field_to_match=wafv2.CfnWebACL.FieldToMatchProperty(body={}),
+                                    comparison_operator="GT",
+                                    size=self.WAF_MAX_BODY_SIZE,
+                                    text_transformations=[
+                                        wafv2.CfnWebACL.TextTransformationProperty(priority=0, type="NONE")
+                                    ],
+                                )
+                            ),
+                        ]
                     )
                 ),
                 action=wafv2.CfnWebACL.RuleActionProperty(block={}),

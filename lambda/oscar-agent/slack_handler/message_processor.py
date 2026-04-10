@@ -21,7 +21,8 @@ logger = logging.getLogger(__name__)
 class MessageProcessor:
     """Processes Slack messages and generates agent responses."""
 
-    def __init__(self, storage, oscar_agent, reaction_manager, timeout_handler) -> None:
+    def __init__(self, storage, oscar_agent, reaction_manager, timeout_handler,
+                 slack_client=None) -> None:
         """Initialize with required dependencies.
 
         Args:
@@ -29,11 +30,13 @@ class MessageProcessor:
             oscar_agent: OSCAR agent implementation for query processing
             reaction_manager: ReactionManager instance
             timeout_handler: TimeoutHandler instance
+            slack_client: Slack WebClient instance for fetching thread context
         """
         self.storage = storage
         self.oscar_agent = oscar_agent
         self.reaction_manager = reaction_manager
         self.timeout_handler = timeout_handler
+        self.slack_client = slack_client
 
     def extract_query(self, text: str) -> str:
         """Extract the query from the message text by removing mentions.
@@ -78,6 +81,76 @@ class MessageProcessor:
             return cleaned_response
 
         return response
+
+    @staticmethod
+    def _strip_mrkdwn(text: str) -> str:
+        """Strip Slack mrkdwn formatting to plain text."""
+        text = re.sub(r'<([^|>]+)\|([^>]+)>', r'\2', text)
+        text = re.sub(r'<([^>]+)>', r'\1', text)
+        text = text.replace('*', '').replace('>>>', '').strip()
+        return text
+
+    def _fetch_thread_parent_context(self, channel: str, thread_ts: str) -> str:
+        """Fetch the thread parent message and return structured context for the agent."""
+        if not self.slack_client:
+            return ""
+        try:
+            result = self.slack_client.conversations_replies(
+                channel=channel, ts=thread_ts, inclusive=True, limit=1,
+            )
+            messages = result.get("messages", [])
+            if not messages:
+                return ""
+
+            parent = messages[0]
+
+            # Parse Block Kit blocks (webhook notifications) into structured fields
+            header = ""
+            fields = {}
+            body = ""
+            for block in parent.get("blocks", []):
+                btype = block.get("type")
+                if btype == "header":
+                    header = block.get("text", {}).get("text", "")
+                elif btype == "section":
+                    for field in block.get("fields", []):
+                        lines = field.get("text", "").split("\n", 1)
+                        if len(lines) == 2:
+                            fields[self._strip_mrkdwn(lines[0]).rstrip(":")] = self._strip_mrkdwn(lines[1])
+                    section_text = block.get("text", {}).get("text", "")
+                    if section_text:
+                        body = self._strip_mrkdwn(section_text)
+
+            if fields:
+                repo = fields.get("Repo", "")
+                issue_field = fields.get("Issue", fields.get("PR", ""))
+                owner, name = (repo.split("/", 1) + [""])[:2] if "/" in repo else ("", repo)
+
+                issue_number = issue_title = ""
+                num_match = re.match(r'#(\d+)\s*(.*)', issue_field) if issue_field else None
+                if num_match:
+                    issue_number, issue_title = num_match.group(1), num_match.group(2).strip()
+
+                parts = [f"This thread is about a GitHub notification: {header}",
+                         f"Repository: {repo} (owner: {owner}, repo: {name})"]
+                if issue_number:
+                    parts.append(f"Issue/PR number: {issue_number}")
+                if issue_title:
+                    parts.append(f"Issue/PR title: {issue_title}")
+                if fields.get("From"):
+                    parts.append(f"Author: {fields['From']}")
+                if body:
+                    parts.append(f"Original comment/request: {body}")
+                return "\n" + "\n".join(parts) + "\n"
+
+            # No blocks — use plain text fallback
+            fallback = parent.get("text", "")
+            if fallback:
+                return f"\nThread context:\n{fallback}\n"
+            return ""
+        except Exception as e:
+            logger.warning("Failed to fetch thread parent: %s", e)
+            return ""
 
     def is_fully_authorized_user(self, user_id: str) -> bool:
         """
@@ -151,6 +224,13 @@ class MessageProcessor:
 
             # Get formatted context for the query
             formatted_context = self.storage.get_context_for_query(thread_key)
+
+            # For threaded replies, fetch the parent message so Oscar knows
+            # what the thread is about (e.g. a GitHub webhook notification).
+            if message_ts and message_ts != thread_ts:
+                parent_context = self._fetch_thread_parent_context(channel, thread_ts)
+                if parent_context:
+                    formatted_context = parent_context + "\n" + formatted_context if formatted_context else parent_context
 
             # Query OSCAR agent with timeout monitoring (using formatted context)
             privilege = self.is_fully_authorized_user(user_id)

@@ -30,6 +30,7 @@ class OscarLambdaStack(Stack):
 
     SUPERVISOR_AGENT_LAMBDA_FUNCTION_NAME = 'oscar-supervisor-agent'
     COMMUNICATION_HANDLER_LAMBDA_FUNCTION_NAME = 'oscar-communication-handler'
+    GITHUB_WEBHOOK_HANDLER_LAMBDA_FUNCTION_NAME = 'oscar-github-webhook-handler'
 
     @classmethod
     def get_supervisor_agent_function_name(cls, env: str) -> str:
@@ -38,6 +39,10 @@ class OscarLambdaStack(Stack):
     @classmethod
     def get_communication_handler_lambda_function_name(cls, env: str) -> str:
         return f"{cls.COMMUNICATION_HANDLER_LAMBDA_FUNCTION_NAME}-{env}"
+
+    @classmethod
+    def get_github_webhook_handler_function_name(cls, env: str) -> str:
+        return f"{cls.GITHUB_WEBHOOK_HANDLER_LAMBDA_FUNCTION_NAME}-{env}"
 
     def __init__(
         self,
@@ -64,6 +69,7 @@ class OscarLambdaStack(Stack):
         # Core lambdas
         self._create_supervisor_agent_lambda()
         self._create_communication_handler_lambda()
+        self._create_github_webhook_handler_lambda()
 
         # Agent lambdas
         if agents:
@@ -127,6 +133,30 @@ class OscarLambdaStack(Stack):
             source_account=self.account,
         )
         self.lambda_functions[self.get_communication_handler_lambda_function_name(self.env_name)] = function
+
+    def _create_github_webhook_handler_lambda(self) -> None:
+        execution_role = self.permissions_stack.github_webhook_role
+        fn_name = self.get_github_webhook_handler_function_name(self.env_name)
+        secret_name = f"oscar-github-webhook-{self.env_name}"
+
+        function = PythonFunction(
+            self, "GitHubWebhookHandlerLambda",
+            function_name=fn_name,
+            runtime=aws_lambda.Runtime.PYTHON_3_12,
+            handler="lambda_handler",
+            entry="lambda/github-webhook-handler",
+            index="lambda_function.py",
+            timeout=Duration.seconds(30),
+            memory_size=256,
+            environment={
+                "WEBHOOK_SECRET_NAME": secret_name,
+                "GITHUB_BOT_USERNAME": os.environ.get("GITHUB_BOT_USERNAME", "oscar-github-agent-test"),
+            },
+            role=execution_role,
+            description="GitHub webhook handler — posts notifications to Slack",
+            reserved_concurrent_executions=5,
+        )
+        self.lambda_functions[fn_name] = function
 
     # ------------------------------------------------------------ agents
     def _create_agent_lambdas(self, agents) -> None:

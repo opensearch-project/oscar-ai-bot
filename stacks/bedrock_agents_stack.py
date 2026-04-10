@@ -100,6 +100,7 @@ class OscarAgentsStack(Stack):
                 foundation_model=agent.get_foundation_model(),
                 idle_session_ttl_in_seconds=600,
                 auto_prepare=True,
+                skip_resource_in_use_check_on_delete=True,
                 action_groups=agent.get_action_groups(lambda_fn.function_arn),
                 instruction=agent.get_agent_instruction(),
                 knowledge_bases=kb_config,
@@ -221,11 +222,13 @@ class OscarAgentsStack(Stack):
             2. **Release metrics** – Querying build metrics, integration test results, and release status data (delegated to Metrics Specialist agent).
             3. **Security advisories** – Querying CVEs and security vulnerabilities affecting OpenSearch project components (delegated to Security Advisories Specialist agent).
             4. **Release knowledge base** – Answering questions about OpenSearch release processes, procedures, runbooks, and history using the knowledge base.
+            5. **GitHub operations** – Querying and managing GitHub repositories, pull requests, issues, labels, CI/CD workflows, code scanning alerts, commits, branches, and code search (delegated to GitHub Specialist agent).
 
             ## Routing Rules
             - For Jenkins job requests → delegate to the Jenkins Specialist.
             - For metrics, build status, test results → delegate to the Metrics Specialist.
             - For security vulnerabilities, CVEs, security advisories, and vulnerability scans → delegate to the Security Advisories Specialist.
+            - For GitHub operations (repos, PRs, issues, labels, commits, branches, code search, Actions, code scanning) → delegate to the GitHub Specialist.
             - For OpenSearch configuration, installation instructions, APIs, commands & information to build and test, release process questions as well as Best practices, troubleshooting guides, release workflows, and release manager duties. → query the knowledge base.
             - For anything outside the above → respond with a polite redirect (see below).
 

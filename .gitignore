@@ -12,6 +12,7 @@ cdk.out/
 .cdk.staging/
 cdk-outputs.json
 .coverage
+agents/github/lambda/bin/
 
 # Python
 __pycache__/
