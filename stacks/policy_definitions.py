@@ -67,6 +67,19 @@ class OscarPolicyDefinitions:
                 resources=["*"]
             ),
 
+            # Guardrail invocation
+            iam.PolicyStatement(
+                sid="GuardrailAccess",
+                effect=iam.Effect.ALLOW,
+                actions=[
+                    "bedrock:ApplyGuardrail",
+                    "bedrock:GetGuardrail",
+                ],
+                resources=[
+                    f"arn:aws:bedrock:{self.region}:{self.account_id}:guardrail/*"
+                ]
+            ),
+
             # Foundation model access
             iam.PolicyStatement(
                 sid="FoundationModelAccess",

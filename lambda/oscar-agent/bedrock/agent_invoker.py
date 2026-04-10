@@ -111,6 +111,7 @@ class BedrockAgentCore:
             if 'completion' in response:
                 for event in response['completion']:
                     logger.info(f"Completion event: {event}")
+
                     if 'chunk' in event:
                         chunk = event['chunk']
                         if 'bytes' in chunk:

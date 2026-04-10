@@ -64,7 +64,7 @@ class AgentErrorHandler:
             error_code = error.response['Error']['Code']
 
             match error_code:
-                case 'AccessDeniedException':
+                case 'AccessDeniedException' | 'accessDeniedException':
                     return "I don't have permission to access that information. Please contact your administrator."
                 case 'ThrottlingException' | 'throttlingException':
                     return "I'm currently experiencing high load. Please wait a moment and try again."

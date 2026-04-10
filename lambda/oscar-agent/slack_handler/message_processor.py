@@ -12,6 +12,7 @@ import time
 from typing import Callable
 
 from config import config
+from input_validator import InputValidationError, validate_and_sanitize
 
 logger = logging.getLogger(__name__)
 
@@ -130,6 +131,15 @@ class MessageProcessor:
                 query = self.extract_query(text)
                 logger.info(f"Extracted query: {query}")
 
+            # Validate and sanitize query before processing
+            try:
+                query = validate_and_sanitize(query)
+            except InputValidationError as e:
+                logger.warning(f"Input validation failed for user {user_id}: {e}")
+                self.reaction_manager.manage_reactions(channel, reaction_ts, add_reaction="x", remove_reaction="thinking_face")
+                say(text=e.user_message, thread_ts=thread_ts)
+                return
+
             # ALWAYS add user context to query for agent to use as needed
             query = self.add_user_context_to_query(query, user_id)
             logger.info(f"Added user context to query: {query}")
@@ -187,11 +197,12 @@ class MessageProcessor:
             total_elapsed = end_time - start_time
             logger.info(f"Query processed in {total_elapsed:.2f} seconds")
 
-            # Add success reaction and remove processing reactions
+            # Add success or blocked reaction and remove processing reactions
+            success_reaction = "x" if "blocked by OSCAR's safety filters" in response else "white_check_mark"
             self.reaction_manager.manage_reactions(
                 channel,
                 reaction_ts,
-                add_reaction="white_check_mark",
+                add_reaction=success_reaction,
                 remove_reaction=["thinking_face", "hourglass_flowing_sand"]
             )
 

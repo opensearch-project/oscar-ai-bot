@@ -9,11 +9,12 @@ import os
 
 import pytest
 from aws_cdk import App, Environment
-from aws_cdk.assertions import Template
+from aws_cdk.assertions import Match, Template
 
 from agents.base_agent import LambdaConfig, OscarAgent
 from agents.jenkins import JenkinsAgent
 from agents.metrics import MetricsAgent
+from stacks.bedrock_agents_stack import OscarAgentsStack
 from stacks.lambda_stack import OscarLambdaStack
 from stacks.permissions_stack import OscarPermissionsStack
 from stacks.secrets_stack import OscarSecretsStack
@@ -313,3 +314,112 @@ class TestMetricsNoWriteGuardrail:
             "Metrics Lambda uses non-GET HTTP methods:\n" +
             "\n".join(violations)
         )
+
+
+# ---------------------------------------------------------------------------
+# Bedrock guardrail tests
+# ---------------------------------------------------------------------------
+
+@pytest.fixture(scope="module")
+def agents_template():
+    """Synthesise the Bedrock agents stack with its own App."""
+    os.environ["CDK_DEFAULT_ACCOUNT"] = "123456789012"
+    os.environ["CDK_DEFAULT_REGION"] = "us-east-1"
+
+    app = App(context={"aws:cdk:bundling-stacks": []})
+
+    permissions = OscarPermissionsStack(
+        app, "AgentsPerms", environment="dev", agents=ALL_AGENTS, env=ENV,
+    )
+    secrets = OscarSecretsStack(
+        app, "AgentsSecrets", environment="dev", agents=ALL_AGENTS, env=ENV,
+    )
+    storage = OscarStorageStack(app, "AgentsStorage", environment="dev", env=ENV)
+    vpc = OscarVpcStack(app, "AgentsVpc", env=ENV)
+
+    lambda_stack = OscarLambdaStack(
+        app, "AgentsLambda",
+        permissions_stack=permissions,
+        secrets_stack=secrets,
+        storage_stack=storage,
+        vpc_stack=vpc,
+        environment="dev",
+        agents=ALL_AGENTS,
+        env=ENV,
+    )
+
+    agents_stack = OscarAgentsStack(
+        app, "Agents",
+        permissions_stack=permissions,
+        lambda_stack=lambda_stack,
+        environment="dev",
+        agents=ALL_AGENTS,
+        env=ENV,
+    )
+    return Template.from_stack(agents_stack)
+
+
+class TestGuardrail:
+    """Verify guardrail is created and attached only to supervisor agents."""
+
+    def test_guardrail_created(self, agents_template):
+        agents_template.resource_count_is("AWS::Bedrock::Guardrail", 1)
+
+    def test_guardrail_has_content_policy(self, agents_template):
+        agents_template.has_resource_properties("AWS::Bedrock::Guardrail", {
+            "ContentPolicyConfig": {"FiltersConfig": Match.any_value()},
+        })
+
+    def test_guardrail_has_prompt_attack_filter(self, agents_template):
+        agents_template.has_resource_properties("AWS::Bedrock::Guardrail", {
+            "ContentPolicyConfig": {
+                "FiltersConfig": Match.array_with([
+                    Match.object_like({"Type": "PROMPT_ATTACK"}),
+                ]),
+            },
+        })
+
+    def test_guardrail_has_topic_policy(self, agents_template):
+        agents_template.has_resource_properties("AWS::Bedrock::Guardrail", {
+            "TopicPolicyConfig": {
+                "TopicsConfig": Match.array_with([
+                    Match.object_like({"Name": "CredentialExfiltration", "Type": "DENY"}),
+                ]),
+            },
+        })
+
+    def test_guardrail_blocks_aws_keys(self, agents_template):
+        agents_template.has_resource_properties("AWS::Bedrock::Guardrail", {
+            "SensitiveInformationPolicyConfig": {
+                "PiiEntitiesConfig": Match.array_with([
+                    Match.object_like({"Type": "AWS_ACCESS_KEY", "Action": "BLOCK"}),
+                    Match.object_like({"Type": "AWS_SECRET_KEY", "Action": "BLOCK"}),
+                ]),
+            },
+        })
+
+    def test_privileged_agent_has_guardrail(self, agents_template):
+        agents_template.has_resource_properties("AWS::Bedrock::Agent", {
+            "AgentName": "oscar-privileged-agent-dev",
+            "GuardrailConfiguration": {
+                "GuardrailIdentifier": Match.any_value(),
+                "GuardrailVersion": Match.any_value(),
+            },
+        })
+
+    def test_limited_agent_has_guardrail(self, agents_template):
+        agents_template.has_resource_properties("AWS::Bedrock::Agent", {
+            "AgentName": "oscar-limited-agent-dev",
+            "GuardrailConfiguration": {
+                "GuardrailIdentifier": Match.any_value(),
+                "GuardrailVersion": Match.any_value(),
+            },
+        })
+
+    def test_collaborator_agents_no_guardrail(self, agents_template):
+        agents = agents_template.find_resources("AWS::Bedrock::Agent")
+        for logical_id, resource in agents.items():
+            name = resource["Properties"].get("AgentName", "")
+            if "privileged" not in name and "limited" not in name:
+                assert "GuardrailConfiguration" not in resource["Properties"], \
+                    f"Collaborator agent '{name}' should not have a guardrail"

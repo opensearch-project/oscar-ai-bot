@@ -14,7 +14,9 @@ This module defines the Bedrock agents infrastructure including:
 - Limited supervisor agent with read-only access
 - Action groups with proper Lambda function associations
 """
+import hashlib
 import logging
+import os
 from datetime import datetime, timezone
 from typing import Any, List, Optional
 
@@ -24,10 +26,21 @@ from aws_cdk import aws_ssm as ssm
 from constructs import Construct
 
 from utils.foundation_models import FoundationModels
+from utils.guardrail import create_guardrail, get_guardrail_configuration
 
 from .bedrock_agent_details import get_ssm_param_paths
 
 logger = logging.getLogger(__name__)
+
+
+def _dir_hash(path: str) -> str:
+    """Compute a short hash of all Python files in a directory."""
+    h = hashlib.md5()
+    for root, _, files in sorted(os.walk(path)):
+        for f in sorted(files):
+            if f.endswith(".py"):
+                h.update(open(os.path.join(root, f), "rb").read())
+    return h.hexdigest()[:8]
 
 
 class OscarAgentsStack(Stack):
@@ -51,6 +64,10 @@ class OscarAgentsStack(Stack):
         self.knowledge_base_id = Fn.import_value("OscarKnowledgeBaseId")
         self.env_name = environment
         self._deploy_ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+
+        # Create guardrail for supervisor agents (not attached — enable via guardrail_config when ready)
+        self.guardrail, self.guardrail_version = create_guardrail(self, self.env_name)
+        self.guardrail_config = get_guardrail_configuration(self.guardrail, self.guardrail_version)
 
         # Create agent-based collaborators, then supervisors
         privileged_collaborators, limited_collaborators = self._create_collaborator_agents(agents or [])
@@ -89,12 +106,14 @@ class OscarAgentsStack(Stack):
                 knowledge_bases=kb_config,
             )
 
-            # Create alias
+            # Create alias — description uses content hash so new version is only
+            # created when agent code actually changes
+            agent_hash = _dir_hash(f"agents/{agent.name}")
             alias = bedrock.CfnAgentAlias(
                 self, f"Oscar{construct_name}Alias",
                 agent_alias_name="LIVE",
                 agent_id=cfn_agent.attr_agent_id,
-                description=f"Live alias for OSCAR {agent.name} agent (deployed {self._deploy_ts})",
+                description=f"Live alias for OSCAR {agent.name} agent ({agent_hash})",
             )
             alias.node.add_dependency(cfn_agent)
 
@@ -181,6 +200,7 @@ class OscarAgentsStack(Stack):
             agent_collaboration="SUPERVISOR_ROUTER",
             agent_collaborators=collaborators,
             action_groups=[communication_action_group],
+            guardrail_configuration=self.guardrail_config,
             knowledge_bases=[bedrock.CfnAgent.AgentKnowledgeBaseProperty(
                 description="Knowledge base with all build, test and release related docs",
                 knowledge_base_id=self.knowledge_base_id,
@@ -236,7 +256,7 @@ class OscarAgentsStack(Stack):
             self, "OscarPrivilegedAgentAlias",
             agent_alias_name="LIVE",
             agent_id=privileged_agent.attr_agent_id,
-            description=f"Live alias for OSCAR privileged agent (deployed {self._deploy_ts})",
+            description=f"OSCAR privileged agent (deployed {self._deploy_ts})",
         )
         privileged_alias.node.add_dependency(privileged_agent)
 
@@ -266,6 +286,7 @@ class OscarAgentsStack(Stack):
             auto_prepare=True,
             agent_collaboration="SUPERVISOR_ROUTER",
             agent_collaborators=collaborators,
+            guardrail_configuration=self.guardrail_config,
             knowledge_bases=[bedrock.CfnAgent.AgentKnowledgeBaseProperty(
                 description="Knowledge base with all build, test and release related docs",
                 knowledge_base_id=self.knowledge_base_id,
