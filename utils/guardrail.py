@@ -40,10 +40,7 @@ def create_guardrail(scope: Construct, environment: str) -> tuple:
                 ),
                 bedrock.CfnGuardrail.ContentFilterConfigProperty(
                     type="MISCONDUCT", input_strength="MEDIUM", output_strength="MEDIUM",
-                ),
-                bedrock.CfnGuardrail.ContentFilterConfigProperty(
-                    type="PROMPT_ATTACK", input_strength="HIGH", output_strength="NONE",
-                ),
+                )
             ]
         ),
 

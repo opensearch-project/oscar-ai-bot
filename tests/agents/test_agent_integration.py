@@ -370,15 +370,6 @@ class TestGuardrail:
             "ContentPolicyConfig": {"FiltersConfig": Match.any_value()},
         })
 
-    def test_guardrail_has_prompt_attack_filter(self, agents_template):
-        agents_template.has_resource_properties("AWS::Bedrock::Guardrail", {
-            "ContentPolicyConfig": {
-                "FiltersConfig": Match.array_with([
-                    Match.object_like({"Type": "PROMPT_ATTACK"}),
-                ]),
-            },
-        })
-
     def test_guardrail_has_topic_policy(self, agents_template):
         agents_template.has_resource_properties("AWS::Bedrock::Guardrail", {
             "TopicPolicyConfig": {

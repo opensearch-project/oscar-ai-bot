@@ -9,8 +9,9 @@ import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', '..', '..', 'lambda', 'oscar-agent'))
 
-from input_validator import (MAX_QUERY_LENGTH, InputValidationError,  # noqa: E402
-                             validate_and_sanitize)
+from input_validator import MAX_QUERY_LENGTH  # noqa: E402
+from input_validator import InputValidationError  # noqa: E402
+from input_validator import validate_and_sanitize  # noqa: E402
 
 
 class TestValidateAndSanitize:
