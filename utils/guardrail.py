@@ -59,7 +59,10 @@ def create_guardrail(scope: Construct, environment: str) -> tuple:
                 ),
             ]
         ),
-
+        # Word blocklist — intentionally duplicates patterns from input_validator.py
+        # as defense-in-depth. The input validator catches these client-side before
+        # the Bedrock API call; this guardrail acts as a server-side safety net if
+        # the validator is bypassed or the agent is invoked through a different path.
         word_policy_config=bedrock.CfnGuardrail.WordPolicyConfigProperty(
             words_config=[
                 bedrock.CfnGuardrail.WordConfigProperty(text="ignore previous instructions"),
