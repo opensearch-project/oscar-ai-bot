@@ -68,7 +68,7 @@ class EventHandlers:
 
         # Check if user is authorized for DM access
         if user_id not in config.fully_authorized_users and user_id not in config.dm_authorized_users:
-            logger.warning(f"Unauthorized DM attempt by user {user_id}")  # no message sent to minimize overhead
+            logger.warning(f"UNAUTHORIZED_DM_ATTEMPT: user={user_id}")
             return
 
         logger.info(f"Processing DM message event: channel={channel}, ts={event_ts}, thread_ts={thread_ts}")

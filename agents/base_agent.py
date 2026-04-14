@@ -14,6 +14,15 @@ from utils.foundation_models import FoundationModels
 
 
 @dataclass
+class MonitoringConfig:
+    """A metric filter + alarm for an agent's Lambda log group."""
+    pattern: str
+    alarm_threshold: int
+    period_minutes: int = 5
+    description: str = ""
+
+
+@dataclass
 class SecretConfig:
     """A secret that an agent needs created in AWS Secrets Manager.
 
@@ -102,3 +111,8 @@ class OscarAgent(ABC):
     def get_foundation_model(self) -> str:
         """Foundation model ID."""
         return FoundationModels.CLAUDE_4_5_SONNET.value
+
+    def get_monitoring_config(self) -> List['MonitoringConfig']:
+        """Metric filters and alarms for this agent's Lambda log group.
+        Override to declare agent-specific monitoring. Default: none."""
+        return []

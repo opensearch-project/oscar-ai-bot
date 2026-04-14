@@ -107,7 +107,7 @@ def handle_metrics_query(params: Dict[str, Any], request_id: Optional[str] = Non
             opensearch_results = agentic_search(pipeline_name, enhanced_query)
             logger.info(f"METRICS_QUERY [{req_id}]: Agentic search completed")
         except AgenticSearchError as e:
-            logger.error(f"METRICS_QUERY [{req_id}]: Agentic search failed: {e}")
+            logger.error(f"AGENTIC_SEARCH_FAILED: Agentic search failed for request {req_id}: {e}")
             return {
                 'error': str(e),
                 'status_code': e.status_code,

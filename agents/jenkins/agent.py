@@ -5,7 +5,8 @@
 
 import os
 
-from agents.base_agent import LambdaConfig, OscarAgent, SecretConfig
+from agents.base_agent import (LambdaConfig, MonitoringConfig, OscarAgent,
+                               SecretConfig)
 from agents.jenkins.action_groups import get_action_groups
 from agents.jenkins.iam_policies import get_policies
 from agents.jenkins.instructions import (AGENT_INSTRUCTION,
@@ -59,3 +60,17 @@ class JenkinsAgent(OscarAgent):
 
     def get_access_level(self):
         return "privileged"
+
+    def get_monitoring_config(self):
+        return [
+            MonitoringConfig(
+                pattern="JENKINS_TRIGGER_FAILED",
+                alarm_threshold=3,
+                description="Jenkins job trigger failures",
+            ),
+            MonitoringConfig(
+                pattern="JENKINS_CONNECTION_FAILED",
+                alarm_threshold=2,
+                description="Jenkins server connection failures",
+            ),
+        ]

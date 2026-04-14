@@ -112,6 +112,13 @@ class BedrockAgentCore:
                 for event in response['completion']:
                     logger.info(f"Completion event: {event}")
 
+                    # Detect and log guardrail interventions
+                    trace_data = event.get('trace', {}).get('trace', {})
+                    guardrail_trace = trace_data.get('guardrailTrace')
+                    if guardrail_trace and guardrail_trace.get('action') == 'INTERVENED':
+                        assessments = guardrail_trace.get('inputAssessments', [])
+                        logger.warning(f"GUARDRAIL_INTERVENED: assessments={assessments}")
+
                     if 'chunk' in event:
                         chunk = event['chunk']
                         if 'bytes' in chunk:

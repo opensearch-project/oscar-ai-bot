@@ -41,7 +41,7 @@ def get_opensearch_session():
         )
         logger.info("Successfully assumed cross-account role")
     except Exception as e:
-        logger.error(f"Failed to assume cross-account role: {e}")
+        logger.error(f"CROSS_ACCOUNT_ROLE_FAILED: Failed to assume cross-account role: {e}")
         raise
 
     return boto3.Session(
@@ -82,7 +82,7 @@ def opensearch_request(method, path, body=None):
             timeout=config.opensearch_request_timeout
         )
     except Exception as e:
-        logger.error(f"OpenSearch connection failed: {e}")
+        logger.error(f"OPENSEARCH_CONNECTION_FAILED: Failed to connect to OpenSearch cluster: {e}")
         raise
 
     if response.status_code in [200, 201]:

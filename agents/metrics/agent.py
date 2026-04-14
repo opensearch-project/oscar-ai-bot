@@ -5,7 +5,8 @@
 
 import os
 
-from agents.base_agent import LambdaConfig, OscarAgent, SecretConfig
+from agents.base_agent import (LambdaConfig, MonitoringConfig, OscarAgent,
+                               SecretConfig)
 from agents.metrics.action_groups import get_action_groups
 from agents.metrics.iam_policies import get_policies
 from agents.metrics.instructions import (AGENT_INSTRUCTION,
@@ -80,4 +81,23 @@ class MetricsAgent(OscarAgent):
         return [
             "service-role/AWSLambdaBasicExecutionRole",
             "service-role/AWSLambdaVPCAccessExecutionRole",
+        ]
+
+    def get_monitoring_config(self):
+        return [
+            MonitoringConfig(
+                pattern="AGENTIC_SEARCH_FAILED",
+                alarm_threshold=5,
+                description="OpenSearch agentic query failures",
+            ),
+            MonitoringConfig(
+                pattern="OPENSEARCH_CONNECTION_FAILED",
+                alarm_threshold=2,
+                description="OpenSearch connectivity issues",
+            ),
+            MonitoringConfig(
+                pattern="CROSS_ACCOUNT_ROLE_FAILED",
+                alarm_threshold=1,
+                description="Cross-account role assumption failure",
+            ),
         ]

@@ -211,6 +211,7 @@ class JenkinsClient:
             else:
                 # Error response
                 error_message = response.text[:500] if response.text else 'Unknown error'
+                logger.error(f"JENKINS_TRIGGER_FAILED: job={job_name}, http_status={response.status_code}, error={error_message}")
                 return {
                     'status': 'error',
                     'message': f'Failed to trigger Jenkins job: {job_name}',
@@ -220,6 +221,7 @@ class JenkinsClient:
                 }
 
         except requests.exceptions.Timeout:
+            logger.error(f"JENKINS_TRIGGER_FAILED: job={job_name}, error=timeout after {config.request_timeout}s")
             return {
                 'status': 'error',
                 'message': f'Request timed out after {config.request_timeout} seconds',
@@ -227,6 +229,7 @@ class JenkinsClient:
                 'job_name': job_name
             }
         except requests.exceptions.ConnectionError as e:
+            logger.error(f"JENKINS_TRIGGER_FAILED: job={job_name}, error=connection_error, details={e}")
             return {
                 'status': 'error',
                 'message': 'Failed to connect to Jenkins server',
@@ -234,7 +237,7 @@ class JenkinsClient:
                 'jenkins_url': config.jenkins_url
             }
         except Exception as e:
-            logger.error(f"Unexpected error triggering job {job_name}: {e}", exc_info=True)
+            logger.error(f"JENKINS_TRIGGER_FAILED: job={job_name}, error=unexpected, details={e}", exc_info=True)
             return {
                 'status': 'error',
                 'message': f'Unexpected error triggering job: {job_name}',
@@ -278,6 +281,7 @@ class JenkinsClient:
                         'note': 'Connected but could not parse server info'
                     }
             else:
+                logger.error(f"JENKINS_CONNECTION_FAILED: http_status={response.status_code}")
                 return {
                     'status': 'error',
                     'message': f'Jenkins connection failed with HTTP status: {response.status_code}',
@@ -287,6 +291,7 @@ class JenkinsClient:
                 }
 
         except requests.exceptions.Timeout:
+            logger.error(f"JENKINS_CONNECTION_FAILED: error=timeout after {config.request_timeout}s")
             return {
                 'status': 'error',
                 'message': f'Connection test timed out after {config.request_timeout} seconds',
@@ -294,6 +299,7 @@ class JenkinsClient:
                 'jenkins_url': config.jenkins_url
             }
         except requests.exceptions.ConnectionError as e:
+            logger.error(f"JENKINS_CONNECTION_FAILED: error=connection_error, details={e}")
             return {
                 'status': 'error',
                 'message': 'Failed to connect to Jenkins server',
@@ -301,7 +307,7 @@ class JenkinsClient:
                 'jenkins_url': config.jenkins_url
             }
         except Exception as e:
-            logger.error(f"Unexpected error testing connection: {e}", exc_info=True)
+            logger.error(f"JENKINS_CONNECTION_FAILED: error=unexpected, details={e}", exc_info=True)
             return {
                 'status': 'error',
                 'message': 'Unexpected error testing Jenkins connection',
@@ -352,12 +358,14 @@ class JenkinsClient:
                     'build_url': config.get_workflow_url(job_name, build_number),
                 }
             elif response.status_code == 404:
+                logger.error(f"JENKINS_BUILD_STATUS_FAILED: job={job_name}, build={build_number}, error=not_found")
                 return {
                     'status': 'error',
                     'message': f'Build #{build_number} not found for job {job_name}',
                     'job_url': config.get_job_url(job_name),
                 }
             else:
+                logger.error(f"JENKINS_BUILD_STATUS_FAILED: job={job_name}, build={build_number}, http_status={response.status_code}")
                 return {
                     'status': 'error',
                     'message': f'Failed to get build status: HTTP {response.status_code}',
@@ -366,6 +374,7 @@ class JenkinsClient:
                 }
 
         except requests.exceptions.Timeout:
+            logger.error(f"JENKINS_BUILD_STATUS_FAILED: job={job_name}, build={build_number}, error=timeout")
             return {
                 'status': 'error',
                 'message': f'Request timed out after {config.request_timeout} seconds',
@@ -373,13 +382,14 @@ class JenkinsClient:
                 'build_number': build_number,
             }
         except requests.exceptions.ConnectionError as e:
+            logger.error(f"JENKINS_BUILD_STATUS_FAILED: job={job_name}, build={build_number}, error=connection_error, details={e}")
             return {
                 'status': 'error',
                 'message': 'Failed to connect to Jenkins server',
                 'error': f'Connection error: {str(e)}',
             }
         except Exception as e:
-            logger.error(f"Error getting build status for {job_name} #{build_number}: {e}", exc_info=True)
+            logger.error(f"JENKINS_BUILD_STATUS_FAILED: job={job_name}, build={build_number}, error=unexpected, details={e}", exc_info=True)
             return {
                 'status': 'error',
                 'message': 'Unexpected error getting build status',
@@ -405,6 +415,7 @@ class JenkinsClient:
                 return self._get_console_tail(job_name, build_number, auth, max_log_lines)
 
             if response.status_code != 200:
+                logger.error(f"JENKINS_FAILURE_DETAILS_FAILED: job={job_name}, build={build_number}, http_status={response.status_code}")
                 return {
                     'status': 'error',
                     'message': f'Failed to get pipeline details: HTTP {response.status_code}',
@@ -483,6 +494,7 @@ class JenkinsClient:
             }
 
         except requests.exceptions.Timeout:
+            logger.error(f"JENKINS_FAILURE_DETAILS_FAILED: job={job_name}, build={build_number}, error=timeout")
             return {
                 'status': 'error',
                 'message': f'Request timed out after {config.request_timeout} seconds',
@@ -490,13 +502,14 @@ class JenkinsClient:
                 'build_number': build_number,
             }
         except requests.exceptions.ConnectionError as e:
+            logger.error(f"JENKINS_FAILURE_DETAILS_FAILED: job={job_name}, build={build_number}, error=connection_error, details={e}")
             return {
                 'status': 'error',
                 'message': 'Failed to connect to Jenkins server',
                 'error': f'Connection error: {str(e)}',
             }
         except Exception as e:
-            logger.error(f"Error getting failure details for {job_name} #{build_number}: {e}", exc_info=True)
+            logger.error(f"JENKINS_FAILURE_DETAILS_FAILED: job={job_name}, build={build_number}, error=unexpected, details={e}", exc_info=True)
             return {
                 'status': 'error',
                 'message': 'Unexpected error getting build failure details',
