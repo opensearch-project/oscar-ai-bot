@@ -34,12 +34,11 @@ logger = logging.getLogger(__name__)
 
 
 def _dir_hash(path: str) -> str:
-    """Compute a short hash of all Python files in a directory."""
+    """Compute a short hash of all files in a directory."""
     h = hashlib.md5()
     for root, _, files in sorted(os.walk(path)):
         for f in sorted(files):
-            if f.endswith(".py"):
-                h.update(open(os.path.join(root, f), "rb").read())
+            h.update(open(os.path.join(root, f), "rb").read())
     return h.hexdigest()[:8]
 
 
