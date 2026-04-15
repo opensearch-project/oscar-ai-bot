@@ -42,6 +42,7 @@ class OscarPermissionsStack(Stack):
         self.bedrock_agent_role = self._create_bedrock_agent_role()
         self.lambda_execution_roles = self._create_core_lambda_roles()
         self.api_gateway_role = self._create_api_gateway_role()
+        self.alarm_notification_role = self._create_alarm_notification_role()
 
         # Create agent roles
         self.agent_roles: Dict[str, iam.Role] = {}
@@ -129,4 +130,24 @@ class OscarPermissionsStack(Stack):
         )
         for policy_statement in self.policy_definitions.get_api_gateway_policies():
             role.add_to_policy(policy_statement)
+        return role
+
+    def _create_alarm_notification_role(self) -> iam.Role:
+        from stacks.secrets_stack import OscarSecretsStack
+
+        role = iam.Role(
+            self, "AlarmNotificationRole",
+            assumed_by=iam.ServicePrincipal("lambda.amazonaws.com"),
+            managed_policies=[
+                iam.ManagedPolicy.from_aws_managed_policy_name("service-role/AWSLambdaBasicExecutionRole"),
+            ],
+            description="Execution role for OSCAR alarm notification Lambda",
+        )
+        role.add_to_policy(iam.PolicyStatement(
+            sid="CentralSecretsReadAccess",
+            actions=["secretsmanager:GetSecretValue"],
+            resources=[
+                f"arn:aws:secretsmanager:{self.aws_region}:{self.account_id}:secret:{OscarSecretsStack.get_central_env_secret_name(self.env_name)}*"
+            ],
+        ))
         return role

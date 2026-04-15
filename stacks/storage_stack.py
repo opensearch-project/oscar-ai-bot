@@ -106,7 +106,7 @@ class OscarStorageStack(Stack):
         throttling, and error rates with appropriate thresholds.
         """
         # Create SNS topic for alerts (optional - can be configured later)
-        alert_topic = sns.Topic(
+        self.alert_topic = sns.Topic(
             self, "OscarStorageAlerts",
             topic_name=f"oscar-storage-alerts-{environment}",
             display_name="OSCAR Storage Monitoring Alerts"
@@ -116,7 +116,7 @@ class OscarStorageStack(Stack):
         self._create_table_alarms(
             table=self.context_table,
             table_type="Context",
-            alert_topic=alert_topic,
+            alert_topic=self.alert_topic,
             environment=environment
         )
 

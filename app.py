@@ -160,9 +160,15 @@ def main() -> None:
         app, f"OscarSecurityMonitoringStack-{environment}",
         env=env,
         environment=environment,
+        permissions_stack=permissions_stack,
+        secrets_stack=secrets_stack,
+        storage_stack=storage_stack,
         agents=agents,
         description="OSCAR security monitoring and alarms",
     )
+    security_monitoring_stack.add_dependency(permissions_stack)
+    security_monitoring_stack.add_dependency(secrets_stack)
+    security_monitoring_stack.add_dependency(storage_stack)
     security_monitoring_stack.add_dependency(lambda_stack)
 
     # Synthesize the CloudFormation templates

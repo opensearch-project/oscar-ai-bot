@@ -10,8 +10,11 @@ from aws_cdk.assertions import Match, Template
 
 from agents.jenkins import JenkinsAgent
 from agents.metrics import MetricsAgent
+from stacks.permissions_stack import OscarPermissionsStack
+from stacks.secrets_stack import OscarSecretsStack
 from stacks.security_monitoring_stack import (CORE_MONITORING,
                                               OscarSecurityMonitoringStack)
+from stacks.storage_stack import OscarStorageStack
 
 ALL_AGENTS = [JenkinsAgent(), MetricsAgent()]
 ENV = Environment(account="123456789012", region="us-east-1")
@@ -23,9 +26,21 @@ def template():
     os.environ["CDK_DEFAULT_REGION"] = "us-east-1"
 
     app = App(context={"aws:cdk:bundling-stacks": []})
+
+    permissions = OscarPermissionsStack(
+        app, "MonPerms", environment="dev", agents=ALL_AGENTS, env=ENV,
+    )
+    secrets = OscarSecretsStack(
+        app, "MonSecrets", environment="dev", agents=ALL_AGENTS, env=ENV,
+    )
+    storage = OscarStorageStack(app, "MonStorage", environment="dev", env=ENV)
+
     stack = OscarSecurityMonitoringStack(
         app, "TestSecurityMonitoring",
         environment="dev",
+        permissions_stack=permissions,
+        secrets_stack=secrets,
+        storage_stack=storage,
         agents=ALL_AGENTS,
         env=ENV,
     )
@@ -69,4 +84,12 @@ class TestSecurityMonitoringStack:
     def test_prompt_injection_filter(self, template):
         template.has_resource_properties("AWS::Logs::MetricFilter", {
             "FilterPattern": Match.string_like_regexp("PROMPT_INJECTION_DETECTED"),
+        })
+
+    def test_dashboard_created(self, template):
+        template.resource_count_is("AWS::CloudWatch::Dashboard", 1)
+
+    def test_dashboard_name(self, template):
+        template.has_resource_properties("AWS::CloudWatch::Dashboard", {
+            "DashboardName": "oscar-security-dev",
         })

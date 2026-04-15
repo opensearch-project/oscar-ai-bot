@@ -105,7 +105,8 @@ aws secretsmanager put-secret-value \
     "SLACK_SIGNING_SECRET": "your-signing-secret",
     "DM_AUTHORIZED_USERS": "U12345678,U87654321",
     "FULLY_AUTHORIZED_USERS": "U12345678",
-    "CHANNEL_ALLOW_LIST": "C12345678,C87654321"
+    "CHANNEL_ALLOW_LIST": "C12345678,C87654321",
+    "ALERTS_CHANNELS": "C12345678"
   }'
 ```
 
@@ -116,6 +117,7 @@ aws secretsmanager put-secret-value \
 | `DM_AUTHORIZED_USERS` | Comma-separated Slack user IDs allowed to DM the bot |
 | `FULLY_AUTHORIZED_USERS` | Comma-separated user IDs with full access (Jenkins, communication) |
 | `CHANNEL_ALLOW_LIST` | Comma-separated channel IDs the bot responds in |
+| `ALERTS_CHANNELS` | Comma-separated channel IDs for CloudWatch alarm notifications |
 
 Agent-specific secrets (e.g., Jenkins API token) are documented in each agent's README.
 
