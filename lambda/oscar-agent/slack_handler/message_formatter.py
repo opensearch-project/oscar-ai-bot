@@ -18,6 +18,30 @@ class MessageFormatter:
     """Handles message formatting and template processing."""
 
     @staticmethod
+    def linkify_cve_ids(message: str) -> str:
+        """Convert bare CVE and GHSA identifiers into Markdown links.
+
+        Matches identifiers like CVE-2024-12345 or GHSA-abcd-1234-efgh that
+        are NOT already inside a Markdown link ``[id](url)`` or a URL.
+
+        Args:
+            message: Message text potentially containing bare CVE/GHSA IDs.
+
+        Returns:
+            Message with bare identifiers wrapped as Markdown links to
+            advisories.opensearch.org.
+        """
+        def _replace(match):
+            vuln_id = match.group(0)
+            return f"[{vuln_id}](https://advisories.opensearch.org/advisory/{vuln_id})"
+
+        # Match CVE-YYYY-N+ or GHSA-xxxx-xxxx-xxxx that are NOT inside:
+        # - a Markdown link text: [CVE-...](...)  — preceded by '['
+        # - a URL path: .../CVE-...  — preceded by '/'
+        pattern = r'(?<![\[/])(?:CVE-\d{4}-\d{3,}|GHSA-[a-zA-Z0-9]{4}-[a-zA-Z0-9]{4}-[a-zA-Z0-9]{4})(?!\])'
+        return re.sub(pattern, _replace, message)
+
+    @staticmethod
     def convert_at_symbols_to_slack_pings(message: str) -> str:
         """Convert @username to <@username> for Slack pings.
 
@@ -52,7 +76,10 @@ class MessageFormatter:
             # Start with the original message
             formatted = message
 
-            # Step 0: Strip XML tags from agent responses (<answer>, <answer_part>, <text>, <sources>)
+            # Step 0a: Convert bare CVE/GHSA IDs into Markdown links before any other formatting
+            formatted = MessageFormatter.linkify_cve_ids(formatted)
+
+            # Step 0b: Strip XML tags from agent responses (<answer>, <answer_part>, <text>, <sources>)
             formatted = re.sub(r'<answer>\s*', '', formatted)
             formatted = re.sub(r'\s*</answer>', '', formatted)
             formatted = re.sub(r'<answer_part>\s*', '', formatted)

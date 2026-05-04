@@ -29,6 +29,9 @@ venv/
 ENV/
 env/
 
+# Local scripts
+scripts/
+
 # IDE and OS
 .idea/
 .vscode/
