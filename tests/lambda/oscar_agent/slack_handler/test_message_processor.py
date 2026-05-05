@@ -173,3 +173,18 @@ class TestProcessMessage:
                            message_ts='mts', skip_context_storage=True)
 
         storage.update_context.assert_not_called()
+
+
+class TestLinkGithubInterception:
+
+    def test_detects_link_github_request(self):
+        mp = _make_processor()
+        assert mp._is_link_github_request("link my github") is True
+        assert mp._is_link_github_request("link github account") is True
+        assert mp._is_link_github_request("please link my GitHub") is True
+
+    def test_does_not_match_unrelated_queries(self):
+        mp = _make_processor()
+        assert mp._is_link_github_request("trigger docker-scan") is False
+        assert mp._is_link_github_request("what is github actions") is False
+        assert mp._is_link_github_request("link my jira account") is False

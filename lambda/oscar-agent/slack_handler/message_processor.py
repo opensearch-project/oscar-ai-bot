@@ -7,10 +7,12 @@ Message processing for Slack Handler.
 """
 
 import logging
+import os
 import re
 import time
 from typing import Callable
 
+import boto3
 from config import config
 from input_validator import InputValidationError, validate_and_sanitize
 
@@ -92,6 +94,67 @@ class MessageProcessor:
         logger.debug(f"User {user_id} authorization check: {is_authorized}")
         return is_authorized
 
+    def _is_link_github_request(self, query: str) -> bool:
+        """Check if the query is asking to link a GitHub account."""
+        q = query.lower()
+        return "link" in q and "github" in q
+
+    def _handle_link_github_via_dm(self, user_id: str, channel: str, thread_ts: str, reaction_ts: str, say: Callable) -> None:
+        """Handle link-github request by sending OAuth link via DM."""
+        import json as _json
+
+        from slack_sdk import WebClient
+
+        workspace_tables = _json.loads(os.environ.get("WORKSPACE_TABLES", "{}"))
+        if not workspace_tables:
+            say(text="Identity linking is not configured.", thread_ts=thread_ts)
+            self.reaction_manager.manage_reactions(channel, reaction_ts, add_reaction="x", remove_reaction="thinking_face")
+            return
+
+        # Pick the first workspace table to check existing mapping
+        workspace_id = next(iter(workspace_tables))
+        dynamodb = boto3.resource("dynamodb", region_name=os.environ.get("AWS_REGION", "us-east-1"))
+        table = dynamodb.Table(workspace_tables[workspace_id])
+
+        # Check existing mapping
+        resp = table.query(
+            IndexName="slack-user-index",
+            KeyConditionExpression="slack_user_id = :uid",
+            ExpressionAttributeValues={":uid": user_id},
+        )
+        items = resp.get("Items", [])
+        active = next((i for i in items if i.get("status") == "active"), None)
+        if active:
+            say(text=f"You're already linked to GitHub account *@{active.get('github_handle')}*.", thread_ts=thread_ts)
+            self.reaction_manager.manage_reactions(channel, reaction_ts, add_reaction="white_check_mark", remove_reaction="thinking_face")
+            return
+
+        # Build OAuth URL
+        client_id = config.github_oauth_client_id
+        callback_url = config.oauth_callback_url
+        state = f"{user_id}:{workspace_id}"
+        oauth_url = (
+            f"https://github.com/login/oauth/authorize"
+            f"?client_id={client_id}"
+            f"&redirect_uri={callback_url}"
+            f"&state={state}"
+            f"&scope=read:user"
+        )
+
+        # Send OAuth link via DM
+        try:
+            client = WebClient(token=config.slack_bot_token)
+            client.chat_postMessage(
+                channel=user_id,
+                text=f"<{oauth_url}|Click here to link your GitHub account>"
+            )
+            say(text="Check your DMs for the GitHub linking instructions.", thread_ts=thread_ts)
+            self.reaction_manager.manage_reactions(channel, reaction_ts, add_reaction="white_check_mark", remove_reaction="thinking_face")
+        except Exception as e:
+            logger.error(f"Failed to send DM for GitHub linking: {e}")
+            say(text="Failed to send DM. Please try `/oscar-link-github` instead.", thread_ts=thread_ts)
+            self.reaction_manager.manage_reactions(channel, reaction_ts, add_reaction="x", remove_reaction="thinking_face")
+
     def process_message(self, channel: str, thread_ts: str, user_id: str,
                         text: str, say: Callable, message_ts: str = None,
                         slash_command: str = None, skip_context_storage: bool = False) -> None:
@@ -138,6 +201,11 @@ class MessageProcessor:
                 logger.warning(f"Input validation failed for user {user_id}: {e}")
                 self.reaction_manager.manage_reactions(channel, reaction_ts, add_reaction="x", remove_reaction="thinking_face")
                 say(text=e.user_message, thread_ts=thread_ts)
+                return
+
+            # Intercept "link github" requests — send OAuth link via DM
+            if self._is_link_github_request(query):
+                self._handle_link_github_via_dm(user_id, channel, thread_ts, reaction_ts, say)
                 return
 
             # ALWAYS add user context to query for agent to use as needed

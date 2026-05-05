@@ -49,6 +49,7 @@ class OscarLambdaStack(Stack):
         environment: str,
         agents: Optional[List] = None,
         vpc_stack: Optional[Any] = None,
+        identity_stack: Optional[Any] = None,
         **kwargs,
     ) -> None:
         super().__init__(scope, construct_id, **kwargs)
@@ -57,6 +58,7 @@ class OscarLambdaStack(Stack):
         self.permissions_stack = permissions_stack
         self.secrets_stack = secrets_stack
         self.vpc_stack = vpc_stack
+        self.identity_stack = identity_stack
         self.env_name = environment
 
         self.lambda_functions: Dict[str, PythonFunction] = {}
@@ -64,6 +66,10 @@ class OscarLambdaStack(Stack):
         # Core lambdas
         self._create_supervisor_agent_lambda()
         self._create_communication_handler_lambda()
+
+        # Identity lambda
+        if identity_stack:
+            self._create_identity_lambda()
 
         # Agent lambdas
         if agents:
@@ -73,6 +79,11 @@ class OscarLambdaStack(Stack):
     def _create_supervisor_agent_lambda(self) -> None:
         execution_role = self.permissions_stack.lambda_execution_roles["base"]
         self.secrets_stack.grant_read_access(execution_role)
+
+        # Grant identity table access if configured
+        if self.identity_stack:
+            for t in self.identity_stack.identity_tables.values():
+                t.grant_read_write_data(execution_role)
 
         function = PythonFunction(
             self, "MainOscarAgentLambda",
@@ -127,6 +138,40 @@ class OscarLambdaStack(Stack):
             source_account=self.account,
         )
         self.lambda_functions[self.get_communication_handler_lambda_function_name(self.env_name)] = function
+
+    # ----------------------------------------------------------- identity
+    def _create_identity_lambda(self) -> None:
+        """Create the OAuth callback Lambda for identity linking."""
+        assert self.identity_stack is not None
+        role = self.permissions_stack.lambda_execution_roles.get("identity")
+        if not role:
+            role = self.permissions_stack.lambda_execution_roles["base"]
+
+        import json as _json
+        workspace_tables = {wid: t.table_name for wid, t in self.identity_stack.identity_tables.items()}
+
+        function = PythonFunction(
+            self, "IdentityLambda",
+            function_name=f"oscar-identity-{self.env_name}",
+            runtime=aws_lambda.Runtime.PYTHON_3_12,
+            handler="lambda_handler",
+            entry="lambda/oscar-identity",
+            index="lambda_function.py",
+            timeout=Duration.seconds(30),
+            memory_size=256,
+            environment={
+                "WORKSPACE_TABLES": _json.dumps(workspace_tables),
+                "CENTRAL_SECRET_NAME": self.secrets_stack.central_env_secret.secret_name,
+            },
+            role=role,
+            description="OAuth callback handler for Slack-GitHub identity linking",
+            reserved_concurrent_executions=5,
+        )
+        for t in self.identity_stack.identity_tables.values():
+            t.grant_read_write_data(role)
+        self.secrets_stack.grant_read_access(role)
+
+        self.lambda_functions["identity"] = function
 
     # ------------------------------------------------------------ agents
     def _create_agent_lambdas(self, agents) -> None:
@@ -224,6 +269,10 @@ class OscarLambdaStack(Stack):
             "OSCAR_LIMITED_BEDROCK_AGENT_ALIAS_PARAM_PATH": params["limited_supervisor_agent_alias"],
             "AWS_ACCOUNT_ID": os.environ.get("AWS_ACCOUNT_ID") or os.environ.get("CDK_DEFAULT_ACCOUNT", ""),
         })
+        if self.identity_stack:
+            import json as _json
+            workspace_tables = {wid: t.table_name for wid, t in self.identity_stack.identity_tables.items()}
+            env["WORKSPACE_TABLES"] = _json.dumps(workspace_tables)
         return env
 
     def _get_communication_handler_environment_variables(self) -> Dict[str, str]:

@@ -142,6 +142,22 @@ class OscarApiGatewayStack(Stack):
             authorization_type=apigateway.AuthorizationType.NONE
         )
 
+        # Create /oauth/callback endpoint for GitHub OAuth redirect
+        identity_fn = self.lambda_stack.lambda_functions.get("identity")
+        if identity_fn:
+            oauth_resource = self.api.root.add_resource("oauth")
+            callback_resource = oauth_resource.add_resource("callback")
+            callback_integration = apigateway.LambdaIntegration(
+                identity_fn,
+                proxy=True,
+                allow_test_invoke=True
+            )
+            callback_resource.add_method(
+                "GET",
+                callback_integration,
+                authorization_type=apigateway.AuthorizationType.NONE
+            )
+
     def _create_waf(self) -> wafv2.CfnWebACL:
         """Create a WAFv2 WebACL with rate limiting, managed rules, and size constraints."""
 
