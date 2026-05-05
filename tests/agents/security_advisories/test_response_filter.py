@@ -17,7 +17,6 @@ sys.path.insert(0, os.path.join(
 
 from response_filter import build_summary, filter_vulnerabilities  # noqa: E402
 
-
 # Reusable mock vulnerability data
 MOCK_VULNERABILITIES = [
     {

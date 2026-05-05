@@ -130,8 +130,8 @@ class _ConfigProxy:
     def __getattr__(self, name):
         # If no config cached yet or request ID changed, create fresh config
         if self._cached_config is None or (
-            self.aws_request_id
-            and self._lambda_request_id != self.aws_request_id
+            self.aws_request_id and
+            self._lambda_request_id != self.aws_request_id
         ):
             self._cached_config = SecurityAdvisoriesConfig(validate_required=False)
             self._lambda_request_id = self.aws_request_id
