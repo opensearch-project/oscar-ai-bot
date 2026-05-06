@@ -27,8 +27,8 @@ class TestSecurityAdvisoriesAgentInterface:
         config = agent.get_lambda_config()
         assert isinstance(config, LambdaConfig)
 
-    def test_get_access_level_returns_both(self, agent):
-        assert agent.get_access_level() == "both"
+    def test_get_access_level_returns_privileged(self, agent):
+        assert agent.get_access_level() == "privileged"
 
     def test_uses_knowledge_base_returns_false(self, agent):
         assert agent.uses_knowledge_base() is False
