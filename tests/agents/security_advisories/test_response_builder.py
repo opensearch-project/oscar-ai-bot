@@ -12,10 +12,7 @@ _Requirements: 3.6_
 import importlib
 import json
 import os
-import sys
 from unittest.mock import MagicMock, patch
-
-import pytest
 
 # Path to the real response_builder module
 _LAMBDA_PATH = os.path.join(

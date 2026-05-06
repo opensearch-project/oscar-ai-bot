@@ -155,7 +155,7 @@ class TestAgenticSearchLogsDSL:
     """Test that agentic_search logs generated DSL from ext.dsl_query."""
 
     def test_logs_dsl_query_when_present(self, caplog):
-        mod = _load_agentic_search()
+        _load_agentic_search()
 
         dsl = {'bool': {'filter': [{'term': {'project.name': 'OpenSearch'}}]}}
         mock_response = {
@@ -183,7 +183,7 @@ class TestAgenticSearchLogsDSL:
                 )
 
     def test_no_dsl_log_when_ext_missing(self, caplog):
-        mod = _load_agentic_search()
+        _load_agentic_search()
 
         mock_response = {
             'hits': {'total': {'value': 0}, 'hits': []},

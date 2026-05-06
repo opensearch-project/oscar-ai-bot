@@ -11,10 +11,7 @@ sorting, descending tag sorting, and error handling.
 
 import importlib
 import os
-import sys
 from unittest.mock import MagicMock, patch
-
-import pytest
 
 # Path to the real projects_handler module
 _LAMBDA_PATH = os.path.join(

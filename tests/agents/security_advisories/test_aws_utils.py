@@ -11,7 +11,7 @@ and error log markers.
 import importlib
 import json
 import os
-from unittest.mock import MagicMock, Mock, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 

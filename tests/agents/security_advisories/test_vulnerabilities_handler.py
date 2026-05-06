@@ -15,8 +15,6 @@ import os
 import sys
 from unittest.mock import MagicMock, patch
 
-import pytest
-
 # Path to the real vulnerabilities_handler module
 _LAMBDA_PATH = os.path.join(
     os.path.dirname(__file__), '..', '..', '..', 'agents', 'security_advisories', 'lambda',

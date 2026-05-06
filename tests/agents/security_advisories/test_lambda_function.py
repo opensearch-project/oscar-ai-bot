@@ -12,10 +12,7 @@ _Requirements: 2.1, 4.3, 6.1_
 import importlib
 import json
 import os
-import sys
 from unittest.mock import MagicMock, patch
-
-import pytest
 
 # Path to the real lambda_function module
 _LAMBDA_PATH = os.path.join(
