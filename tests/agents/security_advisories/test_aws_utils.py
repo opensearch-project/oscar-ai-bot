@@ -133,7 +133,7 @@ class TestCrossAccountRoleFailedLogMarker:
                 with pytest.raises(Exception, match='Access denied'):
                     mod.get_opensearch_session()
 
-            assert any('CROSS_ACCOUNT_ROLE_FAILED' in r.message for r in caplog.records)
+            assert any('SECURITY_ADVISORIES_CROSS_ACCOUNT_ROLE_FAILED' in r.message for r in caplog.records)
 
 
 class TestOpensearchConnectionFailedLogMarker:
@@ -160,7 +160,7 @@ class TestOpensearchConnectionFailedLogMarker:
                     mod.opensearch_request('GET', '/_search')
 
             assert any(
-                'OPENSEARCH_CONNECTION_FAILED' in r.message for r in caplog.records
+                'SECURITY_ADVISORIES_OPENSEARCH_CONNECTION_FAILED' in r.message for r in caplog.records
             )
 
 

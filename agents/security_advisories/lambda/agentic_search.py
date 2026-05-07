@@ -106,7 +106,7 @@ def agentic_search(pipeline: str, query_text: str, index: str = None) -> Dict[st
                 )
             except (ValueError, IndexError):
                 pass
-        logger.error(f'AGENTIC_SEARCH_FAILED: {error_msg}')
+        logger.error(f'SECURITY_ADVISORIES_AGENTIC_SEARCH_FAILED: {error_msg}')
         raise AgenticSearchError(
             f'Agentic search request failed: {e}', status_code=status_code,
         )

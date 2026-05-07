@@ -132,7 +132,7 @@ def handle_query_vulnerabilities(params: Dict[str, Any], request_id: str) -> Dic
     try:
         response = agentic_search(config.agentic_pipeline, enhanced_query)
     except AgenticSearchError as e:
-        logger.error(f"[{request_id}] AGENTIC_SEARCH_FAILED: {e}")
+        logger.error(f"[{request_id}] SECURITY_ADVISORIES_AGENTIC_SEARCH_FAILED: {e}")
         return {
             'status': 'error',
             'type': 'agentic_search_error',

@@ -260,7 +260,7 @@ class TestAgenticSearchErrorOnFailure:
                 with pytest.raises(test_mod.AgenticSearchError):
                     test_mod.agentic_search('oscar-agentic-pipeline', 'test query')
 
-            assert any('AGENTIC_SEARCH_FAILED' in r.message for r in caplog.records)
+            assert any('SECURITY_ADVISORIES_AGENTIC_SEARCH_FAILED' in r.message for r in caplog.records)
 
 
 class TestNoMemoryIdInRequest:

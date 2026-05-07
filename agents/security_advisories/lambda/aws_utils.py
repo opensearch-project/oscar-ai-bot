@@ -49,7 +49,7 @@ def get_opensearch_session():
             logger.info('Successfully assumed cross-account role')
         except Exception as e:
             logger.error(
-                f'CROSS_ACCOUNT_ROLE_FAILED: Failed to assume cross-account role: {e}',
+                f'SECURITY_ADVISORIES_CROSS_ACCOUNT_ROLE_FAILED: Failed to assume cross-account role: {e}',
             )
             raise
 
@@ -111,7 +111,7 @@ def opensearch_request(method, path, body=None):
         )
     except Exception as e:
         logger.error(
-            f'OPENSEARCH_CONNECTION_FAILED: Failed to connect to OpenSearch cluster: {e}',
+            f'SECURITY_ADVISORIES_OPENSEARCH_CONNECTION_FAILED: Failed to connect to OpenSearch cluster: {e}',
         )
         raise
 

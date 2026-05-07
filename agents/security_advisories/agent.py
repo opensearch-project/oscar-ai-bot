@@ -82,17 +82,17 @@ class SecurityAdvisoriesAgent(OscarAgent):
     def get_monitoring_config(self):
         return [
             MonitoringConfig(
-                pattern="AGENTIC_SEARCH_FAILED",
+                pattern="SECURITY_ADVISORIES_AGENTIC_SEARCH_FAILED",
                 alarm_threshold=5,
                 description="OpenSearch agentic query failures",
             ),
             MonitoringConfig(
-                pattern="OPENSEARCH_CONNECTION_FAILED",
+                pattern="SECURITY_ADVISORIES_OPENSEARCH_CONNECTION_FAILED",
                 alarm_threshold=2,
                 description="OpenSearch connectivity issues",
             ),
             MonitoringConfig(
-                pattern="CROSS_ACCOUNT_ROLE_FAILED",
+                pattern="SECURITY_ADVISORIES_CROSS_ACCOUNT_ROLE_FAILED",
                 alarm_threshold=1,
                 description="Cross-account role assumption failure",
             ),

@@ -138,17 +138,17 @@ class TestMonitoringConfig:
     def test_monitoring_config_has_agentic_search_failed(self, agent):
         configs = agent.get_monitoring_config()
         patterns = [c.pattern for c in configs]
-        assert "AGENTIC_SEARCH_FAILED" in patterns
+        assert "SECURITY_ADVISORIES_AGENTIC_SEARCH_FAILED" in patterns
 
     def test_monitoring_config_has_opensearch_connection_failed(self, agent):
         configs = agent.get_monitoring_config()
         patterns = [c.pattern for c in configs]
-        assert "OPENSEARCH_CONNECTION_FAILED" in patterns
+        assert "SECURITY_ADVISORIES_OPENSEARCH_CONNECTION_FAILED" in patterns
 
     def test_monitoring_config_has_cross_account_role_failed(self, agent):
         configs = agent.get_monitoring_config()
         patterns = [c.pattern for c in configs]
-        assert "CROSS_ACCOUNT_ROLE_FAILED" in patterns
+        assert "SECURITY_ADVISORIES_CROSS_ACCOUNT_ROLE_FAILED" in patterns
 
     def test_monitoring_configs_are_monitoring_config_instances(self, agent):
         configs = agent.get_monitoring_config()
