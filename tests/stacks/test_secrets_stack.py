@@ -46,8 +46,8 @@ class TestSecretsStack:
         })
 
     def test_one_secret_without_agents(self, template_no_agents):
-        """Only the central secret should exist when no agents are registered."""
-        template_no_agents.resource_count_is("AWS::SecretsManager::Secret", 1)
+        """Central secret + GitHub webhook secret should exist when no agents are registered."""
+        template_no_agents.resource_count_is("AWS::SecretsManager::Secret", 2)
 
     def test_agent_secret_created(self, template_with_agents):
         """Jenkins agent's api-token secret should be created."""
@@ -57,5 +57,5 @@ class TestSecretsStack:
         })
 
     def test_two_secrets_with_jenkins_agent(self, template_with_agents):
-        """Central secret + Jenkins api-token secret = 2."""
-        template_with_agents.resource_count_is("AWS::SecretsManager::Secret", 2)
+        """Central secret + GitHub webhook secret + Jenkins api-token secret = 3."""
+        template_with_agents.resource_count_is("AWS::SecretsManager::Secret", 3)

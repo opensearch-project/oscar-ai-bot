@@ -31,6 +31,14 @@ def template():
         function_name="oscar-supervisor-agent-dev",
     )
 
+    mock_webhook_fn = aws_lambda.Function(
+        helper, "MockWebhookLambda",
+        runtime=aws_lambda.Runtime.PYTHON_3_12,
+        handler="index.handler",
+        code=aws_lambda.Code.from_inline("def handler(e,c): pass"),
+        function_name="oscar-github-webhook-handler-dev",
+    )
+
     mock_role = iam.Role(
         helper, "MockApiGwRole",
         assumed_by=iam.ServicePrincipal("apigateway.amazonaws.com"),
@@ -38,8 +46,12 @@ def template():
 
     # Wire up the mocks as the API Gateway stack expects them
     lambda_stack = MagicMock()
-    lambda_stack.lambda_functions = {"oscar-supervisor-agent-dev": mock_fn}
+    lambda_stack.lambda_functions = {
+        "oscar-supervisor-agent-dev": mock_fn,
+        "oscar-github-webhook-handler-dev": mock_webhook_fn,
+    }
     lambda_stack.get_supervisor_agent_function_name.return_value = "oscar-supervisor-agent-dev"
+    lambda_stack.get_github_webhook_handler_function_name.return_value = "oscar-github-webhook-handler-dev"
 
     permissions_stack = MagicMock()
     permissions_stack.api_gateway_role = mock_role
@@ -131,7 +143,9 @@ class TestApiGatewayStack:
         acl = list(resources.values())[0]
         size_rule = acl["Properties"]["Rules"][3]
         assert size_rule["Name"] == "BodySizeLimit"
-        assert size_rule["Statement"]["SizeConstraintStatement"]["Size"] == 8192
+        statements = size_rule["Statement"]["AndStatement"]["Statements"]
+        size_stmt = next(s for s in statements if "SizeConstraintStatement" in s)
+        assert size_stmt["SizeConstraintStatement"]["Size"] == 8192
 
     def test_waf_cloudwatch_metrics_enabled(self, template):
         """WAF should have CloudWatch metrics enabled."""

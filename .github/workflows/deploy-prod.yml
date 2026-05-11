@@ -32,8 +32,8 @@ jobs:
       - name: Extract GitHub MCP Server binary
         run: |
           mkdir -p agents/github/lambda/bin
-          docker pull --platform linux/amd64 --quiet ghcr.io/github/github-mcp-server:latest
-          CONTAINER=$(docker create --platform linux/amd64 ghcr.io/github/github-mcp-server:latest)
+          docker pull --platform linux/amd64 --quiet ghcr.io/github/github-mcp-server:v1.0.4
+          CONTAINER=$(docker create --platform linux/amd64 ghcr.io/github/github-mcp-server:v1.0.4)
           docker cp "$CONTAINER:/server/github-mcp-server" agents/github/lambda/bin/github-mcp-server
           docker rm "$CONTAINER" > /dev/null
           chmod +x agents/github/lambda/bin/github-mcp-server
