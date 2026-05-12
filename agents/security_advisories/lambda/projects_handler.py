@@ -42,13 +42,13 @@ def handle_list_projects(request_id: str) -> Dict[str, Any]:
         'aggs': {
             'projects': {
                 'terms': {
-                    'field': 'project.name.keyword',
+                    'field': 'project.name',
                     'size': 1000,
                 },
                 'aggs': {
                     'tags': {
                         'terms': {
-                            'field': 'project.tag.keyword',
+                            'field': 'project.tag',
                             'size': 1000,
                         },
                     },
@@ -69,6 +69,10 @@ def handle_list_projects(request_id: str) -> Dict[str, Any]:
             'status': 'error',
             'message': f'Failed to list projects: {e}',
         }
+
+    # Log response metadata for debugging
+    total_hits = response.get('hits', {}).get('total', {})
+    logger.info(f"[{request_id}] LIST_PROJECTS: total_hits={total_hits}, has_aggregations={'aggregations' in response}")
 
     # Parse aggregation buckets
     aggs = response.get('aggregations', {})

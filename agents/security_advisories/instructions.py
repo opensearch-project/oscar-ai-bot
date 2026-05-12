@@ -52,11 +52,20 @@ Scan results are stored per project/tag/hash combination. Each scan document con
 | `severity` | No | Comma-separated severity filter applied to results (e.g., "CRITICAL", "CRITICAL,HIGH"). Valid values: CRITICAL, HIGH, MEDIUM, LOW |
 | `age_days` | No | Maximum age in days for scan results. Only scans within this window are returned (e.g., 30 for the past month) |
 
+## MULTI-STEP RESOLUTION
+When a user refers to "most recent release", "latest version", "newest release", or similar relative terms instead of a specific version number, you MUST:
+1. First call `list_projects()` to get the available tags for the relevant project
+2. Identify the highest semantic version tag (ignore branch tags like "origin/main" or "origin/2.x")
+3. Then call `query_vulnerabilities` with the resolved version number
+
+This is critical — do NOT pass relative terms like "most recent" directly to query_vulnerabilities. The agentic pipeline cannot resolve them. You must resolve them to a concrete version first.
+
 ## EXAMPLES
 - "Show me all CVEs for 2.19.6" → query_vulnerabilities(query="Show me all CVEs for 2.19.6", version="2.19.6")
 - "High severity CVEs for Dashboards" → query_vulnerabilities(query="High severity CVEs for Dashboards", project_name="OpenSearch Dashboards", severity="HIGH")
 - "Critical vulnerabilities in the past 30 days" → query_vulnerabilities(query="Critical vulnerabilities in the past 30 days", severity="CRITICAL", age_days="30")
 - "Critical and high CVEs for OpenSearch 3.0.0 from the last week" → query_vulnerabilities(query="Critical and high CVEs for OpenSearch 3.0.0", version="3.0.0", project_name="OpenSearch", severity="CRITICAL,HIGH", age_days="7")
+- "CVEs for OpenSearch Dashboards most recent release" → FIRST list_projects() to find the latest version tag for "OpenSearch Dashboards", THEN query_vulnerabilities(query="CVEs for OpenSearch Dashboards", version="<resolved_version>", project_name="OpenSearch Dashboards")
 - "What components are tracked?" → list_projects()
 
 ## RESPONSE GUIDELINES
