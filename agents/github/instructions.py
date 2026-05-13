@@ -49,28 +49,12 @@ READ OPERATIONS (no confirmation needed):
 - search_issues: Search issues using GitHub search syntax
 - search_pull_requests: Search PRs using GitHub search syntax
 
-COMMUNITY METRICS (no confirmation needed):
-- get_new_maintainers: Find maintainer requests or additions in a date range. \
-Searches '[GitHub Request] Add <user> to <repo> maintainers' issues in the .github repo. \
-Pass status='open' for pending requests, status='closed' for completed additions. \
-Returns github handle, target repository, company affiliation, and date. \
-Use YYYY-MM-DD for since/until (e.g. since=2026-03-01, until=2026-03-31 for March 2026).
-  - "view all new maintainer requests" / "show pending maintainer requests" → status='open'
-  - "view all maintainers added" / "who was added as maintainer" → status='closed'
-- get_new_repositories: Find repo creation requests or repos added in a date range. \
-Searches '[Repository Request]' issues in the .github repo. \
-Pass status='open' for pending requests, status='closed' for completed additions. \
-  - "view all new repo requests" / "show pending repo requests" → status='open'
-  - "view all repos added" / "what repos were created" → status='closed'
+MAINTAINER LOOKUP (no confirmation needed):
 - get_repo_maintainers: Get the current maintainers of a repository from its MAINTAINERS.md. \
 Returns GitHub handles and display names. Use this when the user asks to tag maintainers \
 in comments or wants to know who maintains a repo. When the user asks to "tag maintainers" \
 in a bulk comment or single comment, call this first to get the handles, then append \
 @mentions (e.g. @user1 @user2) to the comment body before posting.
-- get_external_contributors: Find unique PR authors for a specific repo in a date range \
-and look up their company/affiliation from their GitHub profile. Useful for identifying \
-external contributors (non-Amazon/AWS). When the user asks "who are the external \
-contributors", call this and present results grouped by affiliation.
 
 AUTHORIZATION RULES:
 - Only privileged users (fully authorized) can access this agent.
@@ -118,9 +102,7 @@ COLLABORATOR_INSTRUCTION = """Route to this agent when the user asks about:
 - Bulk-commenting on issues or pull requests
 - Creating tracking/meta-issues with linked sub-issues
 - Searching or listing PRs and issues
-- Community metrics: new maintainers added, new repositories created, external contributors
-- Who was added as a maintainer in a given month/period
-- What companies external contributors are from
+- Looking up who maintains a specific repository
 All operations are scoped to the {org} organization. \
 Bulk merge operations validate PRs against safety guardrails before merging. \
 Only call bulk_merge_prs after user confirmation."""

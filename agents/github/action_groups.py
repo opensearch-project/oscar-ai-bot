@@ -285,56 +285,14 @@ def get_action_groups(lambda_arn: str) -> List[bedrock.CfnAgent.AgentActionGroup
             ),
         ),
 
-        # -------------------------------------------- Group 4: Community Metrics
+        # -------------------------------------------- Group 4: Maintainer Lookup
         bedrock.CfnAgent.AgentActionGroupProperty(
-            action_group_name="githubCommunityMetrics",
-            description="Read-only community metrics: new maintainers, new repositories, and external contributors",
+            action_group_name="githubMaintainerLookup",
+            description="Look up current maintainers of a repository from MAINTAINERS.md",
             action_group_state="ENABLED",
             action_group_executor=executor,
             function_schema=bedrock.CfnAgent.FunctionSchemaProperty(
                 functions=[
-                    bedrock.CfnAgent.FunctionProperty(
-                        name="get_new_maintainers",
-                        description=(
-                            "Find maintainer requests or additions during a date range by searching "
-                            "'[GitHub Request] Add <user> to <repo> maintainers' issues in "
-                            "the .github repo. Use status='open' for pending requests, "
-                            "status='closed' for completed additions. Returns github handle, "
-                            "repository, affiliation (company from their GitHub profile), and date."
-                        ),
-                        parameters={
-                            "since": _param("string", "Start date in YYYY-MM-DD format", True),
-                            "until": _param("string", "End date in YYYY-MM-DD format", True),
-                            "status": _param(
-                                "string",
-                                "Issue state: 'open' for pending requests, 'closed' for completed additions. Defaults to 'closed'.",
-                            ),
-                            "organization": _param(
-                                "string",
-                                "GitHub organization (defaults to 'opensearch-project')",
-                            ),
-                        },
-                    ),
-                    bedrock.CfnAgent.FunctionProperty(
-                        name="get_new_repositories",
-                        description=(
-                            "Find repository creation requests or repos added during a date range. "
-                            "Searches '[Repository Request]' issues. Use status='open' for pending "
-                            "requests, status='closed' for completed additions."
-                        ),
-                        parameters={
-                            "since": _param("string", "Start date in YYYY-MM-DD format", True),
-                            "until": _param("string", "End date in YYYY-MM-DD format", True),
-                            "status": _param(
-                                "string",
-                                "Issue state: 'open' for pending requests, 'closed' for completed additions. Defaults to 'closed'.",
-                            ),
-                            "organization": _param(
-                                "string",
-                                "GitHub organization (defaults to 'opensearch-project')",
-                            ),
-                        },
-                    ),
                     bedrock.CfnAgent.FunctionProperty(
                         name="get_repo_maintainers",
                         description=(
@@ -345,23 +303,6 @@ def get_action_groups(lambda_arn: str) -> List[bedrock.CfnAgent.AgentActionGroup
                         ),
                         parameters={
                             "repo": _param("string", "Repository name", True),
-                            "organization": _param(
-                                "string",
-                                "GitHub organization (defaults to 'opensearch-project')",
-                            ),
-                        },
-                    ),
-                    bedrock.CfnAgent.FunctionProperty(
-                        name="get_external_contributors",
-                        description=(
-                            "Find unique PR authors for a repository in a date range and fetch "
-                            "their company/affiliation from their GitHub profile. Useful for "
-                            "identifying external (non-Amazon/AWS) contributors."
-                        ),
-                        parameters={
-                            "repo": _param("string", "Repository name", True),
-                            "since": _param("string", "Start date in YYYY-MM-DD format", True),
-                            "until": _param("string", "End date in YYYY-MM-DD format", True),
                             "organization": _param(
                                 "string",
                                 "GitHub organization (defaults to 'opensearch-project')",

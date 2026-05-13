@@ -12,9 +12,8 @@ from typing import Any, Dict
 
 import boto3
 from authorizer import audit_log, is_write_operation, validate_org_scope
-from github_api import (add_comment, bulk_comment, get_external_contributors,
-                        get_new_maintainers, get_new_repositories,
-                        get_repo_maintainers, transfer_issue)
+from github_api import (add_comment, bulk_comment, get_repo_maintainers,
+                        transfer_issue)
 from guardrails import (bulk_merge, list_merge_candidates,
                         validate_bulk_comment, validate_comment,
                         validate_single_pr, validate_transfer_issue)
@@ -81,11 +80,8 @@ TOOL_NAME_MAP = {
     # Bulk merge operations (direct API with guardrails)
     "list_merge_candidates": None,
     "bulk_merge_prs": None,
-    # Community metrics (direct API)
-    "get_new_maintainers": None,
-    "get_new_repositories": None,
+    # Maintainer lookup (direct API)
     "get_repo_maintainers": None,
-    "get_external_contributors": None,
 }
 
 # Tools that need owner/repo injected
@@ -99,8 +95,7 @@ _NEEDS_OWNER = {
 _DIRECT_API_FUNCTIONS = {
     "transfer_issue", "add_comment", "bulk_comment",
     "list_merge_candidates", "bulk_merge_prs",
-    "get_new_maintainers", "get_new_repositories", "get_repo_maintainers",
-    "get_external_contributors",
+    "get_repo_maintainers",
 }
 
 
@@ -223,28 +218,6 @@ def _handle_direct_api(
         )
         return bulk_merge(token, version, org)
 
-    elif function_name == "get_new_maintainers":
-        since = params.get("since", "")
-        until = params.get("until", "")
-        org = params.get("organization", ORG)
-        status = params.get("status", "closed")
-        logger.info(
-            "GITHUB [%s]: get_new_maintainers org=%s since=%s until=%s status=%s",
-            request_id, org, since, until, status,
-        )
-        return get_new_maintainers(token, org, since, until, status)
-
-    elif function_name == "get_new_repositories":
-        since = params.get("since", "")
-        until = params.get("until", "")
-        org = params.get("organization", ORG)
-        status = params.get("status", "closed")
-        logger.info(
-            "GITHUB [%s]: get_new_repositories org=%s since=%s until=%s status=%s",
-            request_id, org, since, until, status,
-        )
-        return get_new_repositories(token, org, since, until, status)
-
     elif function_name == "get_repo_maintainers":
         repo = params.get("repo", "")
         org = params.get("organization", ORG)
@@ -253,17 +226,6 @@ def _handle_direct_api(
             request_id, org, repo,
         )
         return get_repo_maintainers(token, org, repo)
-
-    elif function_name == "get_external_contributors":
-        repo = params.get("repo", "")
-        since = params.get("since", "")
-        until = params.get("until", "")
-        org = params.get("organization", ORG)
-        logger.info(
-            "GITHUB [%s]: get_external_contributors org=%s repo=%s since=%s until=%s",
-            request_id, org, repo, since, until,
-        )
-        return get_external_contributors(token, org, repo, since, until)
 
     raise ValueError(f"Unknown direct API function: {function_name}")
 
