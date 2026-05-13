@@ -14,7 +14,7 @@ import boto3
 from authorizer import audit_log, is_write_operation, validate_org_scope
 from github_api import (add_comment, bulk_comment, get_external_contributors,
                         get_new_maintainers, get_new_repositories,
-                        transfer_issue)
+                        get_repo_maintainers, transfer_issue)
 from guardrails import (bulk_merge, list_merge_candidates,
                         validate_bulk_comment, validate_comment,
                         validate_single_pr, validate_transfer_issue)
@@ -84,6 +84,7 @@ TOOL_NAME_MAP = {
     # Community metrics (direct API)
     "get_new_maintainers": None,
     "get_new_repositories": None,
+    "get_repo_maintainers": None,
     "get_external_contributors": None,
 }
 
@@ -98,7 +99,8 @@ _NEEDS_OWNER = {
 _DIRECT_API_FUNCTIONS = {
     "transfer_issue", "add_comment", "bulk_comment",
     "list_merge_candidates", "bulk_merge_prs",
-    "get_new_maintainers", "get_new_repositories", "get_external_contributors",
+    "get_new_maintainers", "get_new_repositories", "get_repo_maintainers",
+    "get_external_contributors",
 }
 
 
@@ -242,6 +244,15 @@ def _handle_direct_api(
             request_id, org, since, until, status,
         )
         return get_new_repositories(token, org, since, until, status)
+
+    elif function_name == "get_repo_maintainers":
+        repo = params.get("repo", "")
+        org = params.get("organization", ORG)
+        logger.info(
+            "GITHUB [%s]: get_repo_maintainers org=%s repo=%s",
+            request_id, org, repo,
+        )
+        return get_repo_maintainers(token, org, repo)
 
     elif function_name == "get_external_contributors":
         repo = params.get("repo", "")

@@ -336,6 +336,22 @@ def get_action_groups(lambda_arn: str) -> List[bedrock.CfnAgent.AgentActionGroup
                         },
                     ),
                     bedrock.CfnAgent.FunctionProperty(
+                        name="get_repo_maintainers",
+                        description=(
+                            "Get the current maintainers of a repository by parsing its MAINTAINERS.md file. "
+                            "Returns GitHub handles and display names. Use this when the user asks to "
+                            "tag or mention maintainers (e.g. in bulk comments), or to look up who "
+                            "maintains a specific repo."
+                        ),
+                        parameters={
+                            "repo": _param("string", "Repository name", True),
+                            "organization": _param(
+                                "string",
+                                "GitHub organization (defaults to 'opensearch-project')",
+                            ),
+                        },
+                    ),
+                    bedrock.CfnAgent.FunctionProperty(
                         name="get_external_contributors",
                         description=(
                             "Find unique PR authors for a repository in a date range and fetch "
