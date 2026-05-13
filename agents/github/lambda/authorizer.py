@@ -9,12 +9,16 @@ from typing import Dict, Optional
 from http_client import ORG
 
 logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
 
 # Functions that perform mutating operations
 WRITE_FUNCTIONS = frozenset({
     "merge_pr",
-    "create_issue", "close_issue", "transfer_issue",
-    "add_comment", "bulk_comment",
+    "create_issue",
+    "close_issue",
+    "transfer_issue",
+    "add_comment",
+    "bulk_comment",
     "bulk_merge_prs",
 })
 

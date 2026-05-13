@@ -17,6 +17,7 @@ import requests
 from http_client import API_BASE, GitHubAPIError, get, post, request
 
 logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
 
 
 def _get_issue_node_id(token: str, owner: str, repo: str, issue_number: int) -> str:
