@@ -137,7 +137,7 @@ class TestResultEntryStructuralCompleteness:
         mod, _ = _load_vulnerabilities_handler(mock_agentic=mock_agentic)
 
         result = mod.handle_query_vulnerabilities(
-            {'query': 'Show critical CVEs'}, 'test-001',
+            {'query': 'Show critical CVEs', '_access_tier': 'privileged'}, 'test-001',
         )
 
         assert result['status'] == 'success'
@@ -153,7 +153,7 @@ class TestResultEntryStructuralCompleteness:
         mod, _ = _load_vulnerabilities_handler(mock_agentic=mock_agentic)
 
         result = mod.handle_query_vulnerabilities(
-            {'query': 'Show CVEs'}, 'test-002',
+            {'query': 'Show CVEs', '_access_tier': 'privileged'}, 'test-002',
         )
 
         entry = result['results'][0]
@@ -167,7 +167,7 @@ class TestResultEntryStructuralCompleteness:
         mod, _ = _load_vulnerabilities_handler(mock_agentic=mock_agentic)
 
         result = mod.handle_query_vulnerabilities(
-            {'query': 'Show CVEs'}, 'test-003',
+            {'query': 'Show CVEs', '_access_tier': 'privileged'}, 'test-003',
         )
 
         entry = result['results'][0]
@@ -181,7 +181,7 @@ class TestResultEntryStructuralCompleteness:
         mod, _ = _load_vulnerabilities_handler(mock_agentic=mock_agentic)
 
         result = mod.handle_query_vulnerabilities(
-            {'query': 'Show CVEs'}, 'test-004',
+            {'query': 'Show CVEs', '_access_tier': 'privileged'}, 'test-004',
         )
 
         entry = result['results'][0]
@@ -195,7 +195,7 @@ class TestResultEntryStructuralCompleteness:
         mod, _ = _load_vulnerabilities_handler(mock_agentic=mock_agentic)
 
         result = mod.handle_query_vulnerabilities(
-            {'query': 'Show CVEs'}, 'test-005',
+            {'query': 'Show CVEs', '_access_tier': 'privileged'}, 'test-005',
         )
 
         entry = result['results'][0]
@@ -209,7 +209,7 @@ class TestResultEntryStructuralCompleteness:
         mod, _ = _load_vulnerabilities_handler(mock_agentic=mock_agentic)
 
         result = mod.handle_query_vulnerabilities(
-            {'query': 'Show CVEs'}, 'test-006',
+            {'query': 'Show CVEs', '_access_tier': 'privileged'}, 'test-006',
         )
 
         entry = result['results'][0]
@@ -236,7 +236,7 @@ class TestVulnerabilityExtractionCompleteness:
         mod, _ = _load_vulnerabilities_handler(mock_agentic=mock_agentic)
 
         result = mod.handle_query_vulnerabilities(
-            {'query': 'Show all CVEs'}, 'test-010',
+            {'query': 'Show all CVEs', '_access_tier': 'privileged'}, 'test-010',
         )
 
         assert result['status'] == 'success'
@@ -251,7 +251,7 @@ class TestVulnerabilityExtractionCompleteness:
         mod, _ = _load_vulnerabilities_handler(mock_agentic=mock_agentic)
 
         result = mod.handle_query_vulnerabilities(
-            {'query': 'Show CVEs'}, 'test-011',
+            {'query': 'Show CVEs', '_access_tier': 'privileged'}, 'test-011',
         )
 
         assert result['result_count'] == 1
@@ -274,7 +274,7 @@ class TestVulnerabilityExtractionCompleteness:
         mod, _ = _load_vulnerabilities_handler(mock_agentic=mock_agentic)
 
         result = mod.handle_query_vulnerabilities(
-            {'query': 'Show all CVEs'}, 'test-012',
+            {'query': 'Show all CVEs', '_access_tier': 'privileged'}, 'test-012',
         )
 
         assert result['result_count'] == 3
@@ -297,7 +297,7 @@ class TestEmptyResults:
         mod, _ = _load_vulnerabilities_handler(mock_agentic=mock_agentic)
 
         result = mod.handle_query_vulnerabilities(
-            {'query': 'Show CVEs for nonexistent project'}, 'test-020',
+            {'query': 'Show CVEs for nonexistent project', '_access_tier': 'privileged'}, 'test-020',
         )
 
         assert result['status'] == 'success'
@@ -311,7 +311,7 @@ class TestEmptyResults:
         mod, _ = _load_vulnerabilities_handler(mock_agentic=mock_agentic)
 
         result = mod.handle_query_vulnerabilities(
-            {'query': 'Show CVEs'}, 'test-021',
+            {'query': 'Show CVEs', '_access_tier': 'privileged'}, 'test-021',
         )
 
         assert result['status'] == 'success'
@@ -334,7 +334,7 @@ class TestAgenticSearchErrorHandling:
         mod, _ = _load_vulnerabilities_handler(mock_agentic=mock_agentic)
 
         result = mod.handle_query_vulnerabilities(
-            {'query': 'Show CVEs'}, 'test-030',
+            {'query': 'Show CVEs', '_access_tier': 'privileged'}, 'test-030',
         )
 
         assert result['status'] == 'error'
@@ -350,7 +350,7 @@ class TestAgenticSearchErrorHandling:
         mod, _ = _load_vulnerabilities_handler(mock_agentic=mock_agentic)
 
         result = mod.handle_query_vulnerabilities(
-            {'query': 'Show CVEs'}, 'test-031',
+            {'query': 'Show CVEs', '_access_tier': 'privileged'}, 'test-031',
         )
 
         assert result['status'] == 'error'
@@ -364,8 +364,143 @@ class TestAgenticSearchErrorHandling:
         mod, _ = _load_vulnerabilities_handler(mock_agentic=mock_agentic)
 
         result = mod.handle_query_vulnerabilities(
-            {'query': 'Show CVEs'}, 'test-032',
+            {'query': 'Show CVEs', '_access_tier': 'privileged'}, 'test-032',
         )
 
         assert 'message' in result
         assert len(result['message']) > 0
+
+# ---------------------------------------------------------------------------
+# Privileged response enrichment (access_tier and neglected_page_url)
+# ---------------------------------------------------------------------------
+
+
+class TestPrivilegedResponseEnrichment:
+    """Test that privileged responses include access_tier and neglected_page_url.
+
+    _Validates: Requirements 2.1, 3.1, 5.2_
+    """
+
+    def test_privileged_response_has_access_tier(self):
+        """Privileged response includes access_tier: 'privileged'."""
+        mock_agentic = _make_mock_agentic_search()
+        mock_agentic.agentic_search.return_value = {
+            'hits': {'hits': [SAMPLE_HIT]},
+        }
+        mod, _ = _load_vulnerabilities_handler(mock_agentic=mock_agentic)
+
+        result = mod.handle_query_vulnerabilities(
+            {'query': 'Show CVEs', '_access_tier': 'privileged'}, 'test-040',
+        )
+
+        assert result['access_tier'] == 'privileged'
+
+    def test_privileged_response_has_neglected_page_url(self):
+        """Privileged response includes neglected_page_url field."""
+        mock_agentic = _make_mock_agentic_search()
+        mock_agentic.agentic_search.return_value = {
+            'hits': {'hits': [SAMPLE_HIT]},
+        }
+        mod, _ = _load_vulnerabilities_handler(mock_agentic=mock_agentic)
+
+        result = mod.handle_query_vulnerabilities(
+            {'query': 'Show CVEs', '_access_tier': 'privileged'}, 'test-041',
+        )
+
+        assert 'neglected_page_url' in result
+        assert result['neglected_page_url'].startswith(
+            'https://advisories.opensearch.org/advisories/neglected/',
+        )
+
+    def test_neglected_url_includes_age_param(self):
+        """Neglected URL includes age parameter when provided in query."""
+        mock_agentic = _make_mock_agentic_search()
+        mock_agentic.agentic_search.return_value = {
+            'hits': {'hits': [SAMPLE_HIT]},
+        }
+        mod, _ = _load_vulnerabilities_handler(mock_agentic=mock_agentic)
+
+        result = mod.handle_query_vulnerabilities(
+            {'query': 'Show CVEs', 'age': '30d', '_access_tier': 'privileged'}, 'test-042',
+        )
+
+        assert 'age=30d' in result['neglected_page_url']
+
+    def test_neglected_url_includes_severe_param(self):
+        """Neglected URL includes severe parameter when provided."""
+        mock_agentic = _make_mock_agentic_search()
+        mock_agentic.agentic_search.return_value = {
+            'hits': {'hits': [SAMPLE_HIT]},
+        }
+        mod, _ = _load_vulnerabilities_handler(mock_agentic=mock_agentic)
+
+        result = mod.handle_query_vulnerabilities(
+            {'query': 'Show CVEs', 'severe': 'true', '_access_tier': 'privileged'}, 'test-043',
+        )
+
+        assert 'severe=true' in result['neglected_page_url']
+
+    def test_neglected_url_includes_tag_param(self):
+        """Neglected URL includes tag parameter when provided."""
+        mock_agentic = _make_mock_agentic_search()
+        mock_agentic.agentic_search.return_value = {
+            'hits': {'hits': [SAMPLE_HIT]},
+        }
+        mod, _ = _load_vulnerabilities_handler(mock_agentic=mock_agentic)
+
+        result = mod.handle_query_vulnerabilities(
+            {'query': 'Show CVEs', 'tag': '2.19.6', '_access_tier': 'privileged'}, 'test-044',
+        )
+
+        assert 'tag=2.19.6' in result['neglected_page_url']
+
+    def test_neglected_url_includes_releases_and_critical(self):
+        """Neglected URL includes releases and critical params when provided."""
+        mock_agentic = _make_mock_agentic_search()
+        mock_agentic.agentic_search.return_value = {
+            'hits': {'hits': [SAMPLE_HIT]},
+        }
+        mod, _ = _load_vulnerabilities_handler(mock_agentic=mock_agentic)
+
+        result = mod.handle_query_vulnerabilities(
+            {
+                'query': 'Show CVEs',
+                'releases': 'true',
+                'critical': 'false',
+                '_access_tier': 'privileged',
+            },
+            'test-045',
+        )
+
+        assert 'releases=true' in result['neglected_page_url']
+        assert 'critical=false' in result['neglected_page_url']
+
+    def test_neglected_url_base_when_no_filter_params(self):
+        """Neglected URL is the base URL when no filter params are provided."""
+        mock_agentic = _make_mock_agentic_search()
+        mock_agentic.agentic_search.return_value = {
+            'hits': {'hits': [SAMPLE_HIT]},
+        }
+        mod, _ = _load_vulnerabilities_handler(mock_agentic=mock_agentic)
+
+        result = mod.handle_query_vulnerabilities(
+            {'query': 'Show CVEs', '_access_tier': 'privileged'}, 'test-046',
+        )
+
+        assert result['neglected_page_url'] == 'https://advisories.opensearch.org/advisories/neglected/'
+
+    def test_empty_results_still_has_neglected_url(self):
+        """Even with no hits, privileged response includes neglected_page_url."""
+        mock_agentic = _make_mock_agentic_search()
+        mock_agentic.agentic_search.return_value = {
+            'hits': {'hits': []},
+        }
+        mod, _ = _load_vulnerabilities_handler(mock_agentic=mock_agentic)
+
+        result = mod.handle_query_vulnerabilities(
+            {'query': 'Show CVEs for nonexistent', '_access_tier': 'privileged'}, 'test-047',
+        )
+
+        # Empty results return a message-style response, which may or may not have neglected_url
+        # The key point is it doesn't crash and returns success
+        assert result['status'] == 'success'

@@ -111,6 +111,7 @@ class TestRoutingToQueryVulnerabilities:
             'parameters': [
                 {'name': 'query', 'value': 'Show critical CVEs'},
             ],
+            'sessionAttributes': {'access_tier': 'privileged'},
         }
         mod.lambda_handler(event, None)
 
@@ -131,6 +132,7 @@ class TestRoutingToQueryVulnerabilities:
                 {'name': 'version', 'value': '2.19.6'},
                 {'name': 'project_name', 'value': 'OpenSearch'},
             ],
+            'sessionAttributes': {'access_tier': 'privileged'},
         }
         mod.lambda_handler(event, None)
 
@@ -155,6 +157,7 @@ class TestRoutingToListProjects:
             'function': 'list_projects',
             'actionGroup': 'securityAdvisoriesActions',
             'parameters': [],
+            'sessionAttributes': {'access_tier': 'privileged'},
         }
         mod.lambda_handler(event, None)
 
@@ -171,6 +174,7 @@ class TestRoutingToListProjects:
             'function': 'list_projects',
             'actionGroup': 'securityAdvisoriesActions',
             'parameters': [],
+            'sessionAttributes': {'access_tier': 'privileged'},
         }
         mod.lambda_handler(event, None)
 
@@ -195,6 +199,7 @@ class TestUnknownFunctionHandling:
             'function': 'nonexistent_function',
             'actionGroup': 'securityAdvisoriesActions',
             'parameters': [],
+            'sessionAttributes': {'access_tier': 'privileged'},
         }
         response = mod.lambda_handler(event, None)
 
@@ -211,6 +216,7 @@ class TestUnknownFunctionHandling:
             'function': 'nonexistent_function',
             'actionGroup': 'securityAdvisoriesActions',
             'parameters': [],
+            'sessionAttributes': {'access_tier': 'privileged'},
         }
         response = mod.lambda_handler(event, None)
 
@@ -228,6 +234,7 @@ class TestUnknownFunctionHandling:
             'function': '',
             'actionGroup': 'securityAdvisoriesActions',
             'parameters': [],
+            'sessionAttributes': {'access_tier': 'privileged'},
         }
         response = mod.lambda_handler(event, None)
 
@@ -285,13 +292,14 @@ class TestParameterParsing:
         event = {
             'function': 'query_vulnerabilities',
             'actionGroup': 'securityAdvisoriesActions',
+            'sessionAttributes': {'access_tier': 'privileged'},
         }
         # Should not raise
         mod.lambda_handler(event, None)
 
         call_args = mock_vuln.handle_query_vulnerabilities.call_args
         params = call_args[0][0]
-        assert params == {}
+        assert params == {'_access_tier': 'privileged'}
 
 
 # ---------------------------------------------------------------------------

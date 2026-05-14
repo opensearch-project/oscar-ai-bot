@@ -70,3 +70,47 @@ def build_summary(vulnerabilities: List[Dict[str, Any]]) -> Dict[str, int]:
         sev = vuln.get("severity", "UNKNOWN")
         summary[sev] = summary.get(sev, 0) + 1
     return summary
+
+
+# --- Neglected Page URL Builder ---
+
+NEGLECTED_PAGE_BASE = "https://advisories.opensearch.org/advisories/neglected/"
+
+VALID_AGE_VALUES = {"15d", "30d", "45d", "60d"}
+
+
+def build_neglected_page_url(
+    age: Optional[str] = None,
+    severe: Optional[bool] = None,
+    releases: Optional[bool] = None,
+    critical: Optional[bool] = None,
+    tag: Optional[str] = None,
+) -> str:
+    """Build a neglected-page URL with query parameters matching the user's filters.
+
+    Parameters:
+        age: Age threshold for neglected advisories. Valid values: "15d", "30d", "45d", "60d".
+        severe: If True, only show high-severity advisories.
+        releases: If True, only show release components.
+        critical: If True, only show critical CVEs.
+        tag: Branch or tag in the CVE (e.g., "1.2.0.1", "2.x").
+
+    Returns:
+        Full URL to the neglected vulnerabilities page with applicable query params.
+    """
+    params = {}
+    if age and age in VALID_AGE_VALUES:
+        params["age"] = age
+    if severe is not None:
+        params["severe"] = str(severe).lower()
+    if releases is not None:
+        params["releases"] = str(releases).lower()
+    if critical is not None:
+        params["critical"] = str(critical).lower()
+    if tag:
+        params["tag"] = tag
+
+    if params:
+        query_string = "&".join(f"{k}={v}" for k, v in sorted(params.items()))
+        return f"{NEGLECTED_PAGE_BASE}?{query_string}"
+    return NEGLECTED_PAGE_BASE

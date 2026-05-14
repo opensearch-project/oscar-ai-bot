@@ -18,10 +18,33 @@ from typing import Any, Dict, Optional, Set
 
 from agentic_search import AgenticSearchError, agentic_search, enhance_query
 from config import config
-from response_filter import build_summary, filter_vulnerabilities
+from response_filter import (build_neglected_page_url, build_summary,
+                             filter_vulnerabilities)
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
+
+DASHBOARD_URL = "https://advisories.opensearch.org"
+
+
+def _build_limited_response() -> Dict[str, Any]:
+    """Build the dashboard-link-only response for limited-access users.
+
+    Returns:
+        Response dict containing only the dashboard URL and advisory message.
+        No CVE identifiers, severity levels, component names, or counts.
+    """
+    return {
+        'status': 'success',
+        'access_tier': 'limited',
+        'message': (
+            'For detailed vulnerability information and to explore the complete '
+            'security advisory data, please visit the '
+            '**[Security Advisory Dashboard](https://advisories.opensearch.org)**.'
+        ),
+        'dashboard_url': DASHBOARD_URL,
+        'results': [],
+    }
 
 
 def _parse_severity(raw: Optional[str]) -> Optional[Set[str]]:
@@ -54,6 +77,20 @@ def _parse_age_days(raw: Optional[str]) -> Optional[int]:
         return value if value > 0 else None
     except (ValueError, TypeError):
         return None
+
+
+def _parse_bool(raw: Optional[str]) -> Optional[bool]:
+    """Parse a string boolean value.
+
+    Args:
+        raw: String representation of a boolean (e.g. ``"true"``, ``"false"``).
+
+    Returns:
+        ``True`` or ``False`` if parseable, ``None`` if *raw* is empty/None.
+    """
+    if raw is None:
+        return None
+    return str(raw).lower().strip() in ('true', '1', 'yes')
 
 
 def _is_within_age(timestamp: Dict[str, Any], age_days: int) -> bool:
@@ -117,6 +154,12 @@ def handle_query_vulnerabilities(params: Dict[str, Any], request_id: str) -> Dic
     project_name = params.get('project_name')
     severity = _parse_severity(params.get('severity'))
     age_days = _parse_age_days(params.get('age_days'))
+
+    # Access-tier check — short-circuit before any data retrieval for limited users
+    access_tier = params.get('_access_tier', 'limited')
+    if access_tier != 'privileged':
+        logger.info(f"[{request_id}] Limited access — returning dashboard link only")
+        return _build_limited_response()
 
     logger.info(
         f"[{request_id}] QUERY_VULNERABILITIES: query='{query}', "
@@ -186,8 +229,19 @@ def handle_query_vulnerabilities(params: Dict[str, Any], request_id: str) -> Dic
 
     logger.info(f"[{request_id}] Returning {len(results)} result entries")
 
+    # Build neglected page URL with the user's original query filters
+    neglected_url = build_neglected_page_url(
+        age=params.get('age'),
+        severe=_parse_bool(params.get('severe')),
+        releases=_parse_bool(params.get('releases')),
+        critical=_parse_bool(params.get('critical')),
+        tag=params.get('tag'),
+    )
+
     return {
         'status': 'success',
+        'access_tier': 'privileged',
         'result_count': len(results),
         'results': results,
+        'neglected_page_url': neglected_url,
     }

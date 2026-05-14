@@ -288,7 +288,7 @@ class TestSeverityFilteringIntegration:
         mod, _ = _load_vulnerabilities_handler(mock_agentic=mock_agentic)
 
         result = mod.handle_query_vulnerabilities(
-            {'query': 'Show CVEs', 'severity': 'CRITICAL'}, 'test-sev-001',
+            {'query': 'Show CVEs', 'severity': 'CRITICAL', '_access_tier': 'privileged'}, 'test-sev-001',
         )
 
         assert result['status'] == 'success'
@@ -309,7 +309,7 @@ class TestSeverityFilteringIntegration:
         mod, _ = _load_vulnerabilities_handler(mock_agentic=mock_agentic)
 
         result = mod.handle_query_vulnerabilities(
-            {'query': 'Show CVEs', 'severity': 'CRITICAL,HIGH'}, 'test-sev-002',
+            {'query': 'Show CVEs', 'severity': 'CRITICAL,HIGH', '_access_tier': 'privileged'}, 'test-sev-002',
         )
 
         entry = result['results'][0]
@@ -330,7 +330,7 @@ class TestSeverityFilteringIntegration:
         mod, _ = _load_vulnerabilities_handler(mock_agentic=mock_agentic)
 
         result = mod.handle_query_vulnerabilities(
-            {'query': 'Show CVEs'}, 'test-sev-003',
+            {'query': 'Show CVEs', '_access_tier': 'privileged'}, 'test-sev-003',
         )
 
         entry = result['results'][0]
@@ -349,7 +349,7 @@ class TestSeverityFilteringIntegration:
         mod, _ = _load_vulnerabilities_handler(mock_agentic=mock_agentic)
 
         result = mod.handle_query_vulnerabilities(
-            {'query': 'Show CVEs', 'severity': 'CRITICAL'}, 'test-sev-004',
+            {'query': 'Show CVEs', 'severity': 'CRITICAL', '_access_tier': 'privileged'}, 'test-sev-004',
         )
 
         entry = result['results'][0]
@@ -366,7 +366,7 @@ class TestSeverityFilteringIntegration:
         mod, _ = _load_vulnerabilities_handler(mock_agentic=mock_agentic)
 
         result = mod.handle_query_vulnerabilities(
-            {'query': 'Show CVEs', 'severity': 'CRITICAL'}, 'test-sev-005',
+            {'query': 'Show CVEs', 'severity': 'CRITICAL', '_access_tier': 'privileged'}, 'test-sev-005',
         )
 
         entry = result['results'][0]
@@ -393,7 +393,7 @@ class TestAgeThresholdFilteringIntegration:
         mod, _ = _load_vulnerabilities_handler(mock_agentic=mock_agentic)
 
         result = mod.handle_query_vulnerabilities(
-            {'query': 'Show CVEs', 'age_days': '30'}, 'test-age-001',
+            {'query': 'Show CVEs', 'age_days': '30', '_access_tier': 'privileged'}, 'test-age-001',
         )
 
         assert result['result_count'] == 1
@@ -409,7 +409,7 @@ class TestAgeThresholdFilteringIntegration:
         mod, _ = _load_vulnerabilities_handler(mock_agentic=mock_agentic)
 
         result = mod.handle_query_vulnerabilities(
-            {'query': 'Show CVEs', 'age_days': '30'}, 'test-age-002',
+            {'query': 'Show CVEs', 'age_days': '30', '_access_tier': 'privileged'}, 'test-age-002',
         )
 
         assert result['result_count'] == 0
@@ -432,7 +432,7 @@ class TestAgeThresholdFilteringIntegration:
         mod, _ = _load_vulnerabilities_handler(mock_agentic=mock_agentic)
 
         result = mod.handle_query_vulnerabilities(
-            {'query': 'Show CVEs', 'age_days': '30'}, 'test-age-003',
+            {'query': 'Show CVEs', 'age_days': '30', '_access_tier': 'privileged'}, 'test-age-003',
         )
 
         assert result['result_count'] == 1
@@ -449,7 +449,7 @@ class TestAgeThresholdFilteringIntegration:
         mod, _ = _load_vulnerabilities_handler(mock_agentic=mock_agentic)
 
         result = mod.handle_query_vulnerabilities(
-            {'query': 'Show CVEs'}, 'test-age-004',
+            {'query': 'Show CVEs', '_access_tier': 'privileged'}, 'test-age-004',
         )
 
         assert result['result_count'] == 1
@@ -465,7 +465,7 @@ class TestAgeThresholdFilteringIntegration:
         mod, _ = _load_vulnerabilities_handler(mock_agentic=mock_agentic)
 
         result = mod.handle_query_vulnerabilities(
-            {'query': 'Show CVEs', 'age_days': 'abc'}, 'test-age-005',
+            {'query': 'Show CVEs', 'age_days': 'abc', '_access_tier': 'privileged'}, 'test-age-005',
         )
 
         assert result['result_count'] == 1
@@ -481,7 +481,7 @@ class TestAgeThresholdFilteringIntegration:
         mod, _ = _load_vulnerabilities_handler(mock_agentic=mock_agentic)
 
         result = mod.handle_query_vulnerabilities(
-            {'query': 'Show CVEs', 'age_days': '7'}, 'test-age-006',
+            {'query': 'Show CVEs', 'age_days': '7', '_access_tier': 'privileged'}, 'test-age-006',
         )
 
         assert result['result_count'] == 1
@@ -503,7 +503,7 @@ class TestAgeThresholdFilteringIntegration:
         mod, _ = _load_vulnerabilities_handler(mock_agentic=mock_agentic)
 
         result = mod.handle_query_vulnerabilities(
-            {'query': 'Show CVEs', 'age_days': '7'}, 'test-age-007',
+            {'query': 'Show CVEs', 'age_days': '7', '_access_tier': 'privileged'}, 'test-age-007',
         )
 
         assert result['status'] == 'success'
@@ -540,7 +540,7 @@ class TestCombinedSeverityAndAgeFiltering:
         mod, _ = _load_vulnerabilities_handler(mock_agentic=mock_agentic)
 
         result = mod.handle_query_vulnerabilities(
-            {'query': 'Show CVEs', 'severity': 'CRITICAL', 'age_days': '30'},
+            {'query': 'Show CVEs', 'severity': 'CRITICAL', 'age_days': '30', '_access_tier': 'privileged'},
             'test-combo-001',
         )
 
@@ -564,7 +564,7 @@ class TestCombinedSeverityAndAgeFiltering:
         mod, _ = _load_vulnerabilities_handler(mock_agentic=mock_agentic)
 
         result = mod.handle_query_vulnerabilities(
-            {'query': 'Show CVEs', 'severity': 'CRITICAL', 'age_days': '7'},
+            {'query': 'Show CVEs', 'severity': 'CRITICAL', 'age_days': '7', '_access_tier': 'privileged'},
             'test-combo-002',
         )
 

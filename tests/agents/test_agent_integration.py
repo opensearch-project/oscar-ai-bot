@@ -107,7 +107,7 @@ class TestAgentRegistration:
         assert MetricsAgent().get_access_level() == "both"
 
     def test_security_advisories_access_level(self):
-        assert SecurityAdvisoriesAgent().get_access_level() == "privileged"
+        assert SecurityAdvisoriesAgent().get_access_level() == "both"
 
 
 # ---------------------------------------------------------------------------
