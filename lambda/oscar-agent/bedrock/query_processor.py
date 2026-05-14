@@ -86,7 +86,7 @@ class QueryProcessor:
                 final_session_id = returned_session_id or session_id
                 logger.info(f"AGENT_QUERY: Session-based query succeeded with session_id: {final_session_id}")
                 logger.info(f"AGENT_QUERY: Response length: {len(response)} characters")
-                return response, final_session_id
+                return self._apply_limited_tier_override(response, privilege), final_session_id
             except Exception as e:
                 logger.warning(f"AGENT_QUERY: Session-based query failed (possibly expired session): {e}")
 
@@ -99,7 +99,7 @@ class QueryProcessor:
                 response, new_session_id = self.bedrock_agent.invoke_agent(enhanced_query, privilege, None)
                 logger.info(f"AGENT_QUERY: Context-enhanced query succeeded with new session: {new_session_id}")
                 logger.info(f"AGENT_QUERY: Response length: {len(response)} characters")
-                return response, new_session_id
+                return self._apply_limited_tier_override(response, privilege), new_session_id
             except Exception as e:
                 logger.warning(f"AGENT_QUERY: Context-enhanced query failed: {e}")
         else:
@@ -111,8 +111,35 @@ class QueryProcessor:
             response, new_session_id = self.bedrock_agent.invoke_agent(query, privilege, None)
             logger.info(f"AGENT_QUERY: Plain query succeeded with new session: {new_session_id}")
             logger.info(f"AGENT_QUERY: Response length: {len(response)} characters")
-            return response, new_session_id
+            return self._apply_limited_tier_override(response, privilege), new_session_id
         except Exception as e:
             logger.error(f"AGENT_QUERY: All query attempts failed: {e}", exc_info=True)
             error_message = self.error_handler.handle_agent_error(e, query)
             return error_message, original_session_id  # Return original session ID to preserve context
+
+    # Canonical limited-tier message — single source of truth
+    LIMITED_TIER_MESSAGE = (
+        'For detailed vulnerability information and to explore the complete '
+        'security advisory data, please visit the '
+        '**[Security Advisory Dashboard](https://advisories.opensearch.org)**.'
+    )
+
+    def _apply_limited_tier_override(self, response: str, privilege: bool) -> str:
+        """Replace LLM response with canonical message for limited-tier security advisory queries.
+
+        The Bedrock LLM cannot be reliably constrained via prompt instructions alone.
+        When the user is not privileged and the response contains the advisory dashboard
+        link (indicating the security advisories collaborator was invoked), we replace
+        the entire response deterministically.
+
+        Args:
+            response: The raw LLM response text.
+            privilege: Whether the user has privileged access.
+
+        Returns:
+            The original response if privileged, or the canonical message if limited.
+        """
+        if not privilege and response and 'advisories.opensearch.org' in response:
+            logger.info("AGENT_QUERY: Limited-tier override applied — replacing LLM response with canonical message")
+            return self.LIMITED_TIER_MESSAGE
+        return response

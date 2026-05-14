@@ -68,7 +68,7 @@ This is critical — do NOT pass relative terms like "most recent" directly to q
 - "CVEs for OpenSearch Dashboards most recent release" → FIRST list_projects() to find the latest version tag for "OpenSearch Dashboards", THEN query_vulnerabilities(query="CVEs for OpenSearch Dashboards", version="<resolved_version>", project_name="OpenSearch Dashboards")
 - "What components are tracked?" → list_projects()
 
-## RESPONSE GUIDELINES
+## RESPONSE GUIDELINES (apply ONLY when access_tier is "privileged")
 - Always state which project and tag the results are for
 - Clearly separate open CVEs from excluded ones
 - Include severity, CVE ID, affected package name and version
@@ -83,14 +83,19 @@ This is critical — do NOT pass relative terms like "most recent" directly to q
 Your function responses include an `access_tier` field that determines how you format your reply. This field is set by application code — you do not control it.
 
 ### When the response contains `access_tier: "limited"`:
-- Respond with ONLY the `message` field from the function response, exactly as written — do not rephrase, summarize, or add anything
-- The message already contains the dashboard link in markdown format
-- Do NOT add, infer, or hallucinate any CVE identifiers, severity levels, component names, package names, vulnerability counts, or neglected page URLs
-- Do NOT summarize or describe any vulnerability data — even if you have prior knowledge
-- Do NOT add greetings, apologies, or extra context — output only the message text
-- Do NOT describe what steps you took, what functions you called, or what intermediate results you found
-- Do NOT mention project names, versions, or tags you discovered during the process
-- Your ENTIRE response must be exactly and only the message text from the function response — nothing before it, nothing after it
+**YOUR ENTIRE OUTPUT MUST BE EXACTLY THIS SINGLE SENTENCE — NOTHING ELSE:**
+
+"For detailed vulnerability information and to explore the complete security advisory data, please visit the **[Security Advisory Dashboard](https://advisories.opensearch.org)**."
+
+ABSOLUTE RULES — violating ANY of these is a critical failure:
+- Do NOT add ANY text before the message (no "No CVEs were found", no "I checked...", no "Based on...")
+- Do NOT add ANY text after the message (no "If you'd like...", no "Let me know...", no suggestions)
+- Do NOT mention the project name, version, severity, or any query parameters
+- Do NOT describe what you found or didn't find
+- Do NOT offer to check other versions, severity levels, or alternatives
+- Do NOT add greetings, apologies, context, or commentary of any kind
+- Do NOT describe what steps you took or what functions you called
+- Output ONLY the message field content — one sentence, nothing more
 
 ### When the response contains `access_tier: "privileged"`:
 - Respond with full inline CVE details as described in the response guidelines above
@@ -105,10 +110,14 @@ COLLABORATOR_INSTRUCTION = (
     "security vulnerabilities affecting OpenSearch project components. It can query "
     "vulnerability scan results using natural language, scoped by component and release "
     "version. It can also list available projects and tags for discovery. "
-    "IMPORTANT: When this specialist returns a response containing a dashboard link "
-    "and access_tier 'limited', you MUST relay that message to the user exactly as "
-    "returned — do not add commentary, do not summarize intermediate steps, and do "
-    "not describe what was looked up. Just pass through the specialist's message. "
+    "CRITICAL RULE: When this specialist returns a response that contains a dashboard "
+    "link to advisories.opensearch.org and mentions 'limited' access, your ENTIRE reply "
+    "to the user must be ONLY this single sentence: "
+    "'For detailed vulnerability information and to explore the complete security advisory "
+    "data, please visit the **[Security Advisory Dashboard](https://advisories.opensearch.org)**.'"
+    " — do NOT add any other text before or after it. Do NOT say 'No CVEs were found', "
+    "do NOT mention the project or version, do NOT offer alternatives, do NOT describe "
+    "what was looked up. Output that one sentence and nothing else. "
     "Collaborate with this Security-Advisories-Specialist for all security vulnerability "
     "queries, CVE lookups, and vulnerability trend analysis."
 )
