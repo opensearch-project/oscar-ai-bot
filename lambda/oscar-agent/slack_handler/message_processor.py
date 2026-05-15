@@ -143,8 +143,6 @@ class MessageProcessor:
             # ALWAYS add user context to query for agent to use as needed
             query = self.add_user_context_to_query(query, user_id)
             logger.info(f"Added user context to query: {query}")
-            logger.info(f"Processing automated message sending request from authorized user {user_id}")
-            # Continue with normal agent processing - agent will handle message sending via action group
 
             # Get context from storage and format for query
             stored_context = self.storage.get_context(thread_key)
