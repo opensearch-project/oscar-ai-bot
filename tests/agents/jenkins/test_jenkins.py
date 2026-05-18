@@ -6,7 +6,7 @@
 import os
 import sys
 import unittest
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 # Add jenkins directory to path for imports
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', '..', 'agents', 'jenkins', 'lambda'))
@@ -405,6 +405,40 @@ class TestJobParameterFormatting(unittest.TestCase):
         """Test parameter formatting with no parameters."""
         result = format_parameters_as_bullets({})
         self.assertEqual(result, "• No parameters required")
+
+
+class TestJenkinsfileDiscovery(unittest.TestCase):
+    """Test Jenkinsfile discovery handles case-insensitive extensions."""
+
+    @patch('jenkinsfile_fetcher.requests.get')
+    @patch('jenkinsfile_fetcher.config')
+    def test_discovers_jenkinsfile_case_insensitive(self, mock_config, mock_get):
+        """Test that files with .jenkinsFile (capital F) are discovered."""
+        from jenkinsfile_fetcher import _discover_jenkinsfiles
+
+        mock_config.jenkins_dir = 'jenkins'
+        mock_config.github_repo = 'opensearch-project/opensearch-build'
+        mock_config.github_branch = 'main'
+        mock_config.github_token = None
+        mock_config.jenkinsfile_ignore_list = []
+
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = [
+            {'path': 'jenkins/check-for-build.jenkinsfile', 'type': 'file'},
+            {'path': 'jenkins/manifests-update.jenkinsFile', 'type': 'file'},
+            {'path': 'jenkins/some-job.JENKINSFILE', 'type': 'file'},
+            {'path': 'jenkins/not-a-jenkinsfile.groovy', 'type': 'file'},
+        ]
+        mock_get.return_value = mock_response
+
+        paths = _discover_jenkinsfiles()
+
+        self.assertIn('jenkins/check-for-build.jenkinsfile', paths)
+        self.assertIn('jenkins/manifests-update.jenkinsFile', paths)
+        self.assertIn('jenkins/some-job.JENKINSFILE', paths)
+        self.assertNotIn('jenkins/not-a-jenkinsfile.groovy', paths)
+        self.assertEqual(len(paths), 3)
 
 
 if __name__ == '__main__':
