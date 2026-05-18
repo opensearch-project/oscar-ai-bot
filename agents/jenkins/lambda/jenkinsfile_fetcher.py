@@ -79,7 +79,7 @@ def _discover_jenkinsfiles(directory: str = None) -> List[str]:
                     continue
                 if item.get("type") == "dir":
                     dirs_to_visit.append(item_path)
-                elif item.get("type") == "file" and item_path.endswith(".jenkinsfile"):
+                elif item.get("type") == "file" and item_path.lower().endswith(".jenkinsfile"):
                     paths.append(item_path)
 
         except requests.RequestException as e:
