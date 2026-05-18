@@ -11,6 +11,7 @@ Functions:
     handle_list_projects: Handle list_projects requests
 """
 
+import json
 import logging
 from typing import Any, Dict
 
@@ -37,7 +38,7 @@ def handle_list_projects(request_id: str) -> Dict[str, Any]:
     """
     logger.info(f"[{request_id}] LIST_PROJECTS: Listing projects and tags")
 
-    query_body = {
+    query_body = json.dumps({
         'size': 0,
         'aggs': {
             'projects': {
@@ -55,7 +56,7 @@ def handle_list_projects(request_id: str) -> Dict[str, Any]:
                 },
             },
         },
-    }
+    })
 
     try:
         response = opensearch_request(

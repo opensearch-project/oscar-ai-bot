@@ -12,7 +12,6 @@ Functions:
     opensearch_request: Make signed HTTP request to OpenSearch
 """
 
-import json
 import logging
 
 import boto3
@@ -70,7 +69,7 @@ def opensearch_request(method, path, body=None):
     Args:
         method: HTTP method (GET, POST, PUT, etc.).
         path: URL path including query string (e.g. ``/_search?search_pipeline=...``).
-        body: Optional request body dict to be JSON-serialised.
+        body: Optional request body as a JSON-encoded string.
 
     Returns:
         dict: Parsed JSON response from OpenSearch.
@@ -90,7 +89,7 @@ def opensearch_request(method, path, body=None):
     request = AWSRequest(
         method=method,
         url=url,
-        data=json.dumps(body) if body else None,
+        data=body,
         headers={'Content-Type': 'application/json'} if body else {},
     )
 

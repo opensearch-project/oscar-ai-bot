@@ -81,13 +81,13 @@ def agentic_search(pipeline: str, query_text: str, index: str = None) -> Dict[st
         index = config.scans_index
 
     path = f'/{index}/_search?search_pipeline={pipeline}'
-    body = {
+    body = json.dumps({
         'query': {
             'agentic': {
                 'query_text': query_text,
             },
         },
-    }
+    })
 
     logger.info(f'AGENTIC_SEARCH: GET {path}')
     logger.info(f"AGENTIC_SEARCH: query_text='{query_text}'")
