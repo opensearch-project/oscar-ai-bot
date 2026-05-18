@@ -310,12 +310,12 @@ class TestOpensearchRequest:
             mock_boto3.Session.return_value = mock_session
             mock_requests.request.return_value = mock_response
 
-            body = {'query': {'match_all': {}}}
+            body = json.dumps({'query': {'match_all': {}}})
             mod.opensearch_request('POST', '/_search', body=body)
 
             call_kwargs = mock_requests.request.call_args
             sent_data = call_kwargs[1].get('data') or call_kwargs[0][2] if len(call_kwargs[0]) > 2 else call_kwargs[1]['data']
-            assert json.loads(sent_data) == body
+            assert json.loads(sent_data) == json.loads(body)
 
     def test_returns_parsed_json_on_success(self):
         mod = _load_aws_utils()

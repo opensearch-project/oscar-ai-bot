@@ -21,6 +21,7 @@ from typing import Any, Dict, Optional
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
+
 class AgenticSearchError(Exception):
     """Raised when agentic search request fails."""
 
