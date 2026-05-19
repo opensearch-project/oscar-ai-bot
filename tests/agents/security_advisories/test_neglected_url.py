@@ -27,8 +27,8 @@ if _LAMBDA_PATH not in sys.path:
     sys.path.insert(0, _LAMBDA_PATH)
 
 from response_filter import NEGLECTED_PAGE_BASE  # noqa: E402
-from response_filter import (VALID_AGE_VALUES,  # noqa: E402
-                             build_neglected_page_url)
+from response_filter import VALID_AGE_VALUES  # noqa: E402
+from response_filter import build_neglected_page_url
 
 # ---------------------------------------------------------------------------
 # Property 2: Neglected page URL round-trip
