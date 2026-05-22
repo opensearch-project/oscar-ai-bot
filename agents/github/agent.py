@@ -25,7 +25,7 @@ class GitHubAgent(OscarAgent):
             entry="agents/github/lambda",
             timeout_seconds=180,
             memory_size=1024,
-            reserved_concurrency=10,
+            reserved_concurrency=2,
             environment_variables={
                 "MCP_TOOLSETS": "issues,pull_requests",
                 "MCP_READ_ONLY": "false",
