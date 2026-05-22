@@ -173,3 +173,44 @@ class TestProcessMessage:
                            message_ts='mts', skip_context_storage=True)
 
         storage.update_context.assert_not_called()
+
+    def test_limited_user_advisory_response_is_overridden(self):
+        """Non-privileged user gets canonical dashboard message when response contains advisory link."""
+        mp, _, say = self._setup()
+        advisory_response = (
+            'Here is a detailed CVE breakdown from advisories.opensearch.org with specifics.'
+        )
+        mp.timeout_handler.query_agent_with_timeout.return_value = (advisory_response, 'sess2')
+
+        mp.process_message('C_ALLOWED', 'tts', 'U_NOBODY', '<@BOT> show vulns', say, message_ts='mts')
+
+        sent_text = say.call_args[1]['text']
+        assert 'Security Advisory Dashboard' in sent_text
+        assert 'advisories.opensearch.org' in sent_text
+        # The original detailed content should NOT be present
+        assert 'detailed CVE breakdown' not in sent_text
+
+    def test_privileged_user_advisory_response_not_overridden(self):
+        """Privileged user receives the full agent response even when it contains advisory link."""
+        mp, _, say = self._setup()
+        advisory_response = (
+            'Here is a detailed CVE breakdown from advisories.opensearch.org with specifics.'
+        )
+        mp.timeout_handler.query_agent_with_timeout.return_value = (advisory_response, 'sess2')
+
+        mp.process_message('C_ALLOWED', 'tts', 'U_ADMIN', '<@BOT> show vulns', say, message_ts='mts')
+
+        sent_text = say.call_args[1]['text']
+        assert 'detailed CVE breakdown' in sent_text
+
+    def test_limited_user_non_advisory_response_not_overridden(self):
+        """Non-privileged user gets normal response when it doesn't contain advisory link."""
+        mp, _, say = self._setup()
+        normal_response = 'Here are the latest metrics for your project.'
+        mp.timeout_handler.query_agent_with_timeout.return_value = (normal_response, 'sess2')
+
+        mp.process_message('C_ALLOWED', 'tts', 'U_NOBODY', '<@BOT> show metrics', say, message_ts='mts')
+
+        sent_text = say.call_args[1]['text']
+        assert 'latest metrics' in sent_text
+        assert 'Security Advisory Dashboard' not in sent_text
