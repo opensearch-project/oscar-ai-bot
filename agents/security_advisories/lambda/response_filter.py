@@ -11,6 +11,7 @@ severity, exclusion status, and specific CVE lookups.
 
 import logging
 from typing import Any, Dict, List, Optional, Set
+from urllib.parse import urlencode
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -111,6 +112,6 @@ def build_neglected_page_url(
         params["tag"] = tag
 
     if params:
-        query_string = "&".join(f"{k}={v}" for k, v in sorted(params.items()))
+        query_string = urlencode(sorted(params.items()))
         return f"{NEGLECTED_PAGE_BASE}?{query_string}"
     return NEGLECTED_PAGE_BASE
