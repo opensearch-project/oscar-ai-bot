@@ -20,9 +20,10 @@ import uuid
 from typing import Any, Dict, List
 
 from config import config
+from constants import DASHBOARD_URL, LIMITED_ACCESS_MESSAGE
 from projects_handler import handle_list_projects
 from response_builder import create_response
-from vulnerabilities_handler import DASHBOARD_URL, handle_query_vulnerabilities
+from vulnerabilities_handler import handle_query_vulnerabilities
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -70,11 +71,7 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             result = {
                 'status': 'success',
                 'access_tier': 'limited',
-                'message': (
-                    'For detailed vulnerability information and to explore the complete '
-                    'security advisory data, please visit the '
-                    '**[Security Advisory Dashboard](https://advisories.opensearch.org)**.'
-                ),
+                'message': LIMITED_ACCESS_MESSAGE,
                 'dashboard_url': DASHBOARD_URL,
                 'results': [],
             }

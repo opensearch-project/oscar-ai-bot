@@ -12,6 +12,7 @@ import time
 from typing import Callable
 
 from config import config
+from constants import LIMITED_ACCESS_MESSAGE
 from input_validator import InputValidationError, validate_and_sanitize
 
 logger = logging.getLogger(__name__)
@@ -169,11 +170,7 @@ class MessageProcessor:
             # (indicating the security advisories collaborator was invoked), replace the
             # entire response with the canonical dashboard-only message.
             if not privilege and response and 'advisories.opensearch.org' in response:
-                response = (
-                    'For detailed vulnerability information and to explore the complete '
-                    'security advisory data, please visit the '
-                    '**[Security Advisory Dashboard](https://advisories.opensearch.org)**.'
-                )
+                response = LIMITED_ACCESS_MESSAGE
                 logger.info("Limited-tier override applied — replaced LLM response with canonical dashboard message")
 
             # Handle confirmation detection and warning reaction

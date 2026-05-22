@@ -18,13 +18,12 @@ from typing import Any, Dict, Optional, Set
 
 from agentic_search import AgenticSearchError, agentic_search, enhance_query
 from config import config
+from constants import DASHBOARD_URL, LIMITED_ACCESS_MESSAGE
 from response_filter import (build_neglected_page_url, build_summary,
                              filter_vulnerabilities)
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
-
-DASHBOARD_URL = "https://advisories.opensearch.org"
 
 
 def _build_limited_response() -> Dict[str, Any]:
@@ -37,11 +36,7 @@ def _build_limited_response() -> Dict[str, Any]:
     return {
         'status': 'success',
         'access_tier': 'limited',
-        'message': (
-            'For detailed vulnerability information and to explore the complete '
-            'security advisory data, please visit the '
-            '**[Security Advisory Dashboard](https://advisories.opensearch.org)**.'
-        ),
+        'message': LIMITED_ACCESS_MESSAGE,
         'dashboard_url': DASHBOARD_URL,
         'results': [],
     }

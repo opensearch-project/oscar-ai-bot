@@ -15,6 +15,7 @@ from typing import Optional, Tuple
 from bedrock.agent_invoker import BedrockAgentCore
 from bedrock.error_handler import AgentErrorHandler
 from config import config
+from constants import LIMITED_ACCESS_MESSAGE
 
 logger = logging.getLogger(__name__)
 
@@ -118,11 +119,7 @@ class QueryProcessor:
             return error_message, original_session_id  # Return original session ID to preserve context
 
     # Canonical limited-tier message — single source of truth
-    LIMITED_TIER_MESSAGE = (
-        'For detailed vulnerability information and to explore the complete '
-        'security advisory data, please visit the '
-        '**[Security Advisory Dashboard](https://advisories.opensearch.org)**.'
-    )
+    LIMITED_TIER_MESSAGE = LIMITED_ACCESS_MESSAGE
 
     def _apply_limited_tier_override(self, response: str, privilege: bool) -> str:
         """Replace LLM response with canonical message for limited-tier security advisory queries.
