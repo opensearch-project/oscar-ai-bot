@@ -75,11 +75,10 @@ def agentic_search(pipeline: str, query_text: str, index: str = None) -> Dict[st
     Raises:
         AgenticSearchError: On request failure with status code and reason.
     """
-    from aws_utils import opensearch_request
-    from config import config
+    from aws_utils import get_latest_scans_index, opensearch_request
 
     if index is None:
-        index = config.scans_index
+        index = get_latest_scans_index()
 
     path = f'/{index}/_search?search_pipeline={pipeline}'
     body = json.dumps({

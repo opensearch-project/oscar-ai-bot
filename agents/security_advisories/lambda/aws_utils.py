@@ -9,6 +9,7 @@ cross-account role assumption, and OpenSearch request handling.
 
 Functions:
     get_opensearch_session: Get boto3 session with optional cross-account role
+    get_latest_scans_index: Resolve the most recently created scans-* index
     opensearch_request: Make signed HTTP request to OpenSearch
 """
 
@@ -61,6 +62,44 @@ def get_opensearch_session():
     # No cross-account role configured — use Lambda execution role
     logger.info('Using Lambda execution role credentials')
     return boto3.Session()
+
+
+def get_latest_scans_index() -> str:
+    """Get the concrete index that the ``scans`` alias points to.
+
+    Queries the OpenSearch ``_alias/scans`` API to resolve the alias to
+    its underlying concrete index name. This avoids wildcards in the
+    request (which cause SigV4 encoding issues) and avoids passing an
+    alias directly to agentic search (which can't resolve mappings from
+    aliases).
+
+    Returns:
+        The concrete index name (e.g. ``scans-000003``).
+        Falls back to ``config.scans_index`` if the lookup fails.
+    """
+    try:
+        path = '/_alias/scans'
+        response = opensearch_request('GET', path)
+
+        if response and isinstance(response, dict):
+            # Response is {concrete_index_name: {"aliases": {"scans": {...}}}}
+            indices = list(response.keys())
+            if indices:
+                latest_index = indices[0]
+                logger.info(f'Latest scans index resolved via alias: {latest_index}')
+                return latest_index
+
+        logger.warning(
+            'Could not resolve scans alias, '
+            f'falling back to {config.scans_index}',
+        )
+    except Exception as e:
+        logger.error(
+            f'SECURITY_ADVISORIES_INDEX_LOOKUP_FAILED: '
+            f'Could not resolve scans alias: {e}',
+        )
+
+    return config.scans_index
 
 
 def opensearch_request(method, path, body=None):
