@@ -352,7 +352,6 @@ class TestGetLatestScansIndexHappyPath:
     def test_returns_concrete_index_from_alias_response(self):
         mod = _load_aws_utils()
         cfg = _make_config_mock(cross_account_role_arn='')
-        cfg.scans_index = 'scans-000001'
 
         alias_response = {
             'scans-000003': {
@@ -383,12 +382,11 @@ class TestGetLatestScansIndexHappyPath:
 
 
 class TestGetLatestScansIndexEmptyResponse:
-    """Test get_latest_scans_index falls back when alias lookup fails."""
+    """Test get_latest_scans_index raises when alias lookup returns empty."""
 
-    def test_falls_back_to_config_on_empty_response(self):
+    def test_raises_runtime_error_on_empty_response(self):
         mod = _load_aws_utils()
         cfg = _make_config_mock(cross_account_role_arn='')
-        cfg.scans_index = 'scans-000001'
 
         mock_session = MagicMock()
         mock_creds = MagicMock()
@@ -405,6 +403,5 @@ class TestGetLatestScansIndexEmptyResponse:
             mock_boto3.Session.return_value = mock_session
             mock_requests.request.return_value = mock_response
 
-            result = mod.get_latest_scans_index()
-
-        assert result == 'scans-000001'
+            with pytest.raises(RuntimeError, match='Could not resolve scans alias'):
+                mod.get_latest_scans_index()

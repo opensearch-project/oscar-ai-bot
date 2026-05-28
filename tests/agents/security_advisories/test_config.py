@@ -74,22 +74,6 @@ class TestDefaultValues:
             cfg = mod.SecurityAdvisoriesConfig(validate_required=False)
             assert cfg.request_timeout == 60
 
-    def test_scans_index_default(self):
-        with pytest.MonkeyPatch.context() as mp:
-            mp.delenv('SCANS_INDEX', raising=False)
-            mp.delenv('SECURITY_ADVISORIES_SECRET_NAME', raising=False)
-            mod = _load_config_module()
-            cfg = mod.SecurityAdvisoriesConfig(validate_required=False)
-            assert cfg.scans_index == 'scans-000001'
-
-    def test_advisories_index_default(self):
-        with pytest.MonkeyPatch.context() as mp:
-            mp.delenv('ADVISORIES_INDEX', raising=False)
-            mp.delenv('SECURITY_ADVISORIES_SECRET_NAME', raising=False)
-            mod = _load_config_module()
-            cfg = mod.SecurityAdvisoriesConfig(validate_required=False)
-            assert cfg.advisories_index == 'advisories'
-
     def test_bedrock_message_version_default(self):
         with pytest.MonkeyPatch.context() as mp:
             mp.delenv('BEDROCK_RESPONSE_MESSAGE_VERSION', raising=False)
@@ -144,24 +128,6 @@ class TestEnvVarOverrides:
             mod = _load_config_module()
             cfg = mod.SecurityAdvisoriesConfig(validate_required=False)
             assert cfg.request_timeout == 120
-
-    def test_scans_index_override(self):
-        env = {**BASE_ENV, 'SCANS_INDEX': 'custom-scans'}
-        with pytest.MonkeyPatch.context() as mp:
-            for k, v in env.items():
-                mp.setenv(k, v)
-            mod = _load_config_module()
-            cfg = mod.SecurityAdvisoriesConfig(validate_required=False)
-            assert cfg.scans_index == 'custom-scans'
-
-    def test_advisories_index_override(self):
-        env = {**BASE_ENV, 'ADVISORIES_INDEX': 'custom-advisories'}
-        with pytest.MonkeyPatch.context() as mp:
-            for k, v in env.items():
-                mp.setenv(k, v)
-            mod = _load_config_module()
-            cfg = mod.SecurityAdvisoriesConfig(validate_required=False)
-            assert cfg.advisories_index == 'custom-advisories'
 
     def test_agentic_pipeline_override(self):
         env = {**BASE_ENV, 'AGENTIC_PIPELINE': 'my-custom-pipeline'}

@@ -9,7 +9,7 @@ cross-account role assumption, and OpenSearch request handling.
 
 Functions:
     get_opensearch_session: Get boto3 session with optional cross-account role
-    get_latest_scans_index: Resolve the most recently created scans-* index
+    get_latest_scans_index: Resolve the scans alias to its concrete index
     opensearch_request: Make signed HTTP request to OpenSearch
 """
 
@@ -75,7 +75,9 @@ def get_latest_scans_index() -> str:
 
     Returns:
         The concrete index name (e.g. ``scans-000003``).
-        Falls back to ``config.scans_index`` if the lookup fails.
+
+    Raises:
+        RuntimeError: If the alias cannot be resolved to a concrete index.
     """
     try:
         path = '/_alias/scans'
@@ -88,18 +90,18 @@ def get_latest_scans_index() -> str:
                 latest_index = indices[0]
                 logger.info(f'Latest scans index resolved via alias: {latest_index}')
                 return latest_index
-
-        logger.warning(
-            'Could not resolve scans alias, '
-            f'falling back to {config.scans_index}',
-        )
     except Exception as e:
         logger.error(
             f'SECURITY_ADVISORIES_INDEX_LOOKUP_FAILED: '
             f'Could not resolve scans alias: {e}',
         )
+        raise RuntimeError(
+            f'Failed to resolve scans alias: {e}',
+        ) from e
 
-    return config.scans_index
+    raise RuntimeError(
+        'Could not resolve scans alias: alias response was empty or invalid',
+    )
 
 
 def opensearch_request(method, path, body=None):

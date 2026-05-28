@@ -304,7 +304,6 @@ These are passed through from `.env` to the Lambda as environment variables. All
 | `OPENSEARCH_REGION` | AWS region of the OpenSearch cluster | `us-east-1` |
 | `OPENSEARCH_SERVICE` | AWS service name for SigV4 signing | `es` |
 | `OPENSEARCH_REQUEST_TIMEOUT` | Request timeout in seconds | `60` |
-| `SCANS_INDEX` | Index name for scan documents | `scans` |
 | `AGENTIC_PIPELINE` | Agentic search pipeline name | `oscar-agentic-pipeline` |
 | `SECURITY_ADVISORIES_CROSS_ACCOUNT_ROLE_ARN` | IAM role ARN for cross-account OpenSearch access | _(none)_ |
 

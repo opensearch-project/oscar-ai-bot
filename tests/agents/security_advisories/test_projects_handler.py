@@ -22,7 +22,6 @@ _LAMBDA_PATH = os.path.join(
 def _make_mock_config():
     """Create a mock config module with required attributes."""
     mock_config = MagicMock()
-    mock_config.scans_index = 'scans'
     mock_config_module = MagicMock()
     mock_config_module.config = mock_config
     return mock_config_module

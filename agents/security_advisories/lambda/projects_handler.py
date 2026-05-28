@@ -15,7 +15,7 @@ import json
 import logging
 from typing import Any, Dict
 
-from aws_utils import opensearch_request
+from aws_utils import get_latest_scans_index, opensearch_request
 from config import config
 
 logger = logging.getLogger(__name__)
@@ -61,7 +61,7 @@ def handle_list_projects(request_id: str) -> Dict[str, Any]:
     try:
         response = opensearch_request(
             'POST',
-            f'/{config.scans_index}/_search',
+            f'/{get_latest_scans_index()}/_search',
             query_body,
         )
     except Exception as e:
