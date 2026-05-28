@@ -16,7 +16,6 @@ import logging
 from typing import Any, Dict
 
 from aws_utils import get_latest_scans_index, opensearch_request
-from config import config
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
