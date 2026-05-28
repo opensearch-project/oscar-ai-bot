@@ -6,7 +6,7 @@
 Slash command handlers for Slack Handler.
 """
 
-import json as _json
+import json
 import logging
 import os
 import time
@@ -16,15 +16,14 @@ from config import config
 
 logger = logging.getLogger(__name__)
 
-
-_workspace_tables = _json.loads(os.environ.get("WORKSPACE_TABLES", "{}"))
+ENVIRONMENT = os.environ.get("ENVIRONMENT", "")
 
 
 def _get_identity_table(workspace_id):
     """Get the identity DynamoDB table for a workspace."""
-    table_name = _workspace_tables.get(workspace_id)
-    if not table_name:
+    if not ENVIRONMENT:
         return None
+    table_name = f"oscar-identity-{workspace_id}-{ENVIRONMENT}"
     _dynamodb = boto3.resource("dynamodb", region_name=os.environ.get("AWS_REGION", "us-east-1"))
     return _dynamodb.Table(table_name)
 
@@ -173,10 +172,12 @@ class SlashCommandHandlers:
             say(text=f"✅ Already linked to *@{handle}*. Use `/oscar-unlink-github` to unlink.", response_type="ephemeral")
             return
 
-        # Build OAuth URL with state = user_id:workspace_id
+        # Build OAuth URL with HMAC-signed state
+        from oauth_state import generate_state
+
         client_id = config.github_oauth_client_id
         callback_url = config.oauth_callback_url
-        state = f"{user_id}:{workspace_id}"
+        state = generate_state(user_id, workspace_id, config.oauth_state_secret)
         oauth_url = (
             f"https://github.com/login/oauth/authorize"
             f"?client_id={client_id}"

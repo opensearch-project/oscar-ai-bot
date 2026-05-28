@@ -52,6 +52,7 @@ class Config:
         self.channel_allow_list = [c.strip() for c in secrets.get('CHANNEL_ALLOW_LIST', '').split(',') if c.strip()]
         self.github_oauth_client_id = secrets.get('GITHUB_OAUTH_CLIENT_ID', '')
         self.oauth_callback_url = secrets.get('OAUTH_CALLBACK_URL', '')
+        self.oauth_state_secret = secrets.get('OAUTH_STATE_SECRET', '')
 
         if validate_required and not self.slack_bot_token:
             raise ValueError("SLACK_BOT_TOKEN not found in central secret")

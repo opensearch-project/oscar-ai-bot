@@ -2,10 +2,11 @@
 # SPDX-License-Identifier: Apache-2.0
 """OAuth callback Lambda for Slack-GitHub identity linking."""
 
-import json
 import logging
 import os
+from dataclasses import dataclass
 from datetime import datetime, timezone
+from typing import Optional
 
 import boto3
 import requests
@@ -18,99 +19,125 @@ secrets_client = boto3.client("secretsmanager")
 
 _oauth_creds = None
 
-WORKSPACE_TABLES = json.loads(os.environ.get("WORKSPACE_TABLES", "{}"))
+IDENTITY_TABLE_PREFIX = "oscar-identity"
+ENVIRONMENT = os.environ.get("ENVIRONMENT", "")
+CENTRAL_SECRET_NAME = os.environ.get("CENTRAL_SECRET_NAME", "")
+
+if not ENVIRONMENT:
+    raise ValueError("ENVIRONMENT environment variable is required")
+if not CENTRAL_SECRET_NAME:
+    raise ValueError("CENTRAL_SECRET_NAME environment variable is required")
+
+
+@dataclass
+class IdentityRecord:
+    github_id: int
+    github_handle: str
+    slack_user_id: str
+    status: str
+    affiliation: str
+    last_validated: str
+
+    def to_dynamo_item(self) -> dict:
+        return {
+            "github_id": self.github_id,
+            "github_handle": self.github_handle,
+            "slack_user_id": self.slack_user_id,
+            "status": self.status,
+            "affiliation": self.affiliation,
+            "last_validated": self.last_validated,
+        }
 
 
 def _get_oauth_creds():
     global _oauth_creds
     if _oauth_creds is None:
-        raw = secrets_client.get_secret_value(SecretId=os.environ["CENTRAL_SECRET_NAME"])
+        raw = secrets_client.get_secret_value(SecretId=CENTRAL_SECRET_NAME)
+        import json
         _oauth_creds = json.loads(raw["SecretString"])
     return _oauth_creds
 
 
-def _get_table(workspace_id):
-    table_name = WORKSPACE_TABLES.get(workspace_id)
-    if not table_name:
+def _get_table(workspace_id) -> Optional[object]:
+    if not IDENTITY_TABLE_PREFIX or not ENVIRONMENT:
         return None
+    table_name = f"{IDENTITY_TABLE_PREFIX}-{workspace_id}-{ENVIRONMENT}"
     return dynamodb.Table(table_name)
 
 
 def lambda_handler(event, context):
     params = event.get("queryStringParameters") or {}
+    # code: the temporary OAuth authorization code returned by GitHub after user consent
     code = params.get("code")
+    # state: HMAC-signed, base64url-encoded token containing slack_user_id, workspace_id, and timestamp
     state = params.get("state")
 
     if not code or not state:
         return _html(400, "Missing code or state parameter.")
 
-    parts = state.split(":", 1)
-    if len(parts) != 2:
-        return _html(400, "Invalid state parameter.")
-    slack_user_id, workspace_id = parts
+    from oauth_state import verify_state
+
+    creds = _get_oauth_creds()
+    try:
+        slack_user_id, workspace_id = verify_state(state, creds["OAUTH_STATE_SECRET"])
+    except ValueError as e:
+        logger.warning(f"IDENTITY_STATE_INVALID: reason={e}")
+        return _html(400, "Invalid or expired link. Please run /oscar-link-github again.")
 
     table = _get_table(workspace_id)
     if not table:
         return _html(400, "Workspace not configured for identity linking.")
 
-    creds = _get_oauth_creds()
-    token_resp = requests.post(
-        "https://github.com/login/oauth/access_token",
-        headers={"Accept": "application/json"},
-        data={
-            "client_id": creds["GITHUB_OAUTH_CLIENT_ID"],
-            "client_secret": creds["GITHUB_OAUTH_CLIENT_SECRET"],
-            "code": code,
-        },
-        timeout=10,
-    )
-    access_token = token_resp.json().get("access_token")
+    try:
+        token_resp = requests.post(
+            "https://github.com/login/oauth/access_token",
+            headers={"Accept": "application/json"},
+            data={
+                "client_id": creds["GITHUB_OAUTH_CLIENT_ID"],
+                "client_secret": creds["GITHUB_OAUTH_CLIENT_SECRET"],
+                "code": code,
+            },
+            timeout=10,
+        )
+        token_resp.raise_for_status()
+        access_token = token_resp.json().get("access_token")
+    except requests.RequestException as e:
+        logger.warning(f"IDENTITY_AUTH_FAILED: slack_user={slack_user_id} workspace={workspace_id} reason=token_exchange_error error={e}")
+        return _html(400, "GitHub authorization failed. Run /oscar-link-github again.")
+
     if not access_token:
         logger.warning(f"IDENTITY_AUTH_FAILED: slack_user={slack_user_id} workspace={workspace_id} reason=token_exchange_failed")
         return _html(400, "GitHub authorization failed. Run /oscar-link-github again.")
 
     headers = {"Authorization": f"Bearer {access_token}", "Accept": "application/vnd.github+json"}
 
-    try:
-        user = requests.get("https://api.github.com/user", headers=headers, timeout=10).json()
-        github_handle = user.get("login")
-        github_id = user.get("id")
+    user = requests.get("https://api.github.com/user", headers=headers, timeout=10).json()
+    github_handle = user.get("login")
+    github_id = user.get("id")
 
-        if not github_handle or not github_id:
-            return _html(400, "Could not retrieve GitHub profile.")
+    if not github_handle or not github_id:
+        return _html(400, "Could not retrieve GitHub profile.")
 
-        affiliation = user.get("company") or ""
+    affiliation = user.get("company") or ""
 
-        # Duplicate check
-        existing = table.get_item(Key={"github_id": github_id}).get("Item")
-        if existing and existing.get("slack_user_id") != slack_user_id and existing.get("status") == "active":
-            logger.warning(f"IDENTITY_DUPLICATE_REJECTED: slack_user={slack_user_id} workspace={workspace_id} github={github_handle} github_id={github_id} existing_slack_user={existing['slack_user_id']}")
-            return _html(409, "This GitHub account is already linked to another Slack user.")
+    existing = table.get_item(Key={"github_id": github_id}).get("Item")
+    if existing and existing.get("slack_user_id") != slack_user_id and existing.get("status") == "active":
+        logger.warning(f"IDENTITY_DUPLICATE_REJECTED: slack_user={slack_user_id} workspace={workspace_id} github={github_handle} github_id={github_id} existing_slack_user={existing['slack_user_id']}")
+        return _html(409, "This GitHub account is already linked to another Slack user.")
 
-        now = datetime.now(timezone.utc).isoformat()
-        table.put_item(Item={
-            "github_id": github_id,
-            "github_handle": github_handle,
-            "slack_user_id": slack_user_id,
-            "status": "active",
-            "affiliation": affiliation,
-            "last_validated": now,
-        })
-        logger.info(f"IDENTITY_LINKED: slack_user={slack_user_id} workspace={workspace_id} github={github_handle} github_id={github_id} affiliation={affiliation}")
+    now = datetime.now(timezone.utc).isoformat()
+    record = IdentityRecord(
+        github_id=github_id,
+        github_handle=github_handle,
+        slack_user_id=slack_user_id,
+        status="active",
+        affiliation=affiliation,
+        last_validated=now,
+    )
+    table.put_item(Item=record.to_dynamo_item())
+    logger.info(f"IDENTITY_LINKED: slack_user={slack_user_id} workspace={workspace_id} github={github_handle} github_id={github_id} affiliation={affiliation}")
 
-        return _html(200, "Successfully linked your GitHub account.")
-
-    finally:
-        try:
-            requests.delete(
-                f"https://api.github.com/applications/{creds['GITHUB_OAUTH_CLIENT_ID']}/token",
-                auth=(creds["GITHUB_OAUTH_CLIENT_ID"], creds["GITHUB_OAUTH_CLIENT_SECRET"]),
-                headers={"Accept": "application/vnd.github+json"},
-                json={"access_token": access_token},
-                timeout=10,
-            )
-        except Exception as e:
-            logger.warning(f"Token revocation failed (non-critical): {e}")
+    return _html(200, "Successfully linked your GitHub account.")
 
 
 def _html(status_code, message):

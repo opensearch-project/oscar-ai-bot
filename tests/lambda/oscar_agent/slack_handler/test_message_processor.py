@@ -2,8 +2,9 @@
 # SPDX-License-Identifier: Apache-2.0
 """Tests for MessageProcessor."""
 
+import os
 import sys
-from unittest.mock import Mock
+from unittest.mock import Mock, patch, MagicMock
 
 from slack_handler.message_processor import MessageProcessor
 
@@ -175,16 +176,138 @@ class TestProcessMessage:
         storage.update_context.assert_not_called()
 
 
-class TestLinkGithubInterception:
+class TestHasIdentityMapping:
 
-    def test_detects_link_github_request(self):
+    @patch.dict(os.environ, {"ENVIRONMENT": ""})
+    def test_returns_true_when_no_workspace_tables(self):
         mp = _make_processor()
-        assert mp._is_link_github_request("link my github") is True
-        assert mp._is_link_github_request("link github account") is True
-        assert mp._is_link_github_request("please link my GitHub") is True
+        assert mp._has_identity_mapping("U123") is True
 
-    def test_does_not_match_unrelated_queries(self):
+    @patch.dict(os.environ, {"ENVIRONMENT": "dev", "SLACK_WORKSPACE_IDS": "W1"})
+    @patch("slack_handler.message_processor.boto3")
+    def test_returns_true_when_active_mapping_exists(self, mock_boto3):
+        table = Mock()
+        table.query.return_value = {"Items": [{"status": "active", "github_handle": "user1"}]}
+        mock_boto3.resource.return_value.Table.return_value = table
+
         mp = _make_processor()
-        assert mp._is_link_github_request("trigger docker-scan") is False
-        assert mp._is_link_github_request("what is github actions") is False
-        assert mp._is_link_github_request("link my jira account") is False
+        assert mp._has_identity_mapping("U123") is True
+
+    @patch.dict(os.environ, {"ENVIRONMENT": "dev", "SLACK_WORKSPACE_IDS": "W1"})
+    @patch("slack_handler.message_processor.boto3")
+    def test_returns_false_when_no_active_mapping(self, mock_boto3):
+        table = Mock()
+        table.query.return_value = {"Items": [{"status": "revoked"}]}
+        mock_boto3.resource.return_value.Table.return_value = table
+
+        mp = _make_processor()
+        assert mp._has_identity_mapping("U123") is False
+
+    @patch.dict(os.environ, {"ENVIRONMENT": "dev", "SLACK_WORKSPACE_IDS": "W1"})
+    @patch("slack_handler.message_processor.boto3")
+    def test_returns_false_when_no_items(self, mock_boto3):
+        table = Mock()
+        table.query.return_value = {"Items": []}
+        mock_boto3.resource.return_value.Table.return_value = table
+
+        mp = _make_processor()
+        assert mp._has_identity_mapping("U123") is False
+
+
+class TestHandleLinkGithubViaDm:
+
+    @patch.dict(os.environ, {"ENVIRONMENT": ""})
+    def test_not_configured(self):
+        mp = _make_processor(reaction_manager=Mock())
+        say = Mock()
+        mp._handle_link_github_via_dm("U1", "C1", "ts1", "rts1", say)
+        say.assert_called_once()
+        assert "not configured" in say.call_args[1]["text"]
+
+    @patch.dict(os.environ, {"ENVIRONMENT": "dev", "SLACK_WORKSPACE_IDS": "W1"})
+    @patch("slack_handler.message_processor.boto3")
+    def test_already_linked(self, mock_boto3):
+        table = Mock()
+        table.query.return_value = {"Items": [{"status": "active", "github_handle": "octocat"}]}
+        mock_boto3.resource.return_value.Table.return_value = table
+
+        mp = _make_processor(reaction_manager=Mock())
+        say = Mock()
+        mp._handle_link_github_via_dm("U1", "C1", "ts1", "rts1", say)
+        assert "octocat" in say.call_args[1]["text"]
+        mp.reaction_manager.manage_reactions.assert_called_with(
+            "C1", "rts1", add_reaction="white_check_mark", remove_reaction="thinking_face"
+        )
+
+    @patch.dict(os.environ, {"ENVIRONMENT": "dev", "SLACK_WORKSPACE_IDS": "W1"})
+    @patch("slack_handler.message_processor.boto3")
+    @patch("slack_handler.message_processor.WebClient" if False else "slack_sdk.WebClient")
+    def test_sends_oauth_link_via_dm(self, mock_webclient_cls, mock_boto3):
+        table = Mock()
+        table.query.return_value = {"Items": []}
+        mock_boto3.resource.return_value.Table.return_value = table
+
+        # Patch WebClient inside the method's import
+        mock_client = Mock()
+        with patch("slack_sdk.WebClient", return_value=mock_client):
+            mp = _make_processor(reaction_manager=Mock())
+            mock_config.github_oauth_client_id = "test-client-id"
+            mock_config.oauth_callback_url = "https://example.com/callback"
+            mock_config.oauth_state_secret = "test-signing-secret"
+            mock_config.slack_bot_token = "xoxb-test"
+            say = Mock()
+            mp._handle_link_github_via_dm("U1", "C1", "ts1", "rts1", say)
+
+        assert "DMs" in say.call_args[1]["text"] or "Check" in say.call_args[1]["text"]
+
+    @patch.dict(os.environ, {"ENVIRONMENT": "dev", "SLACK_WORKSPACE_IDS": "W1"})
+    @patch("slack_handler.message_processor.boto3")
+    def test_dm_failure_fallback(self, mock_boto3):
+        table = Mock()
+        table.query.return_value = {"Items": []}
+        mock_boto3.resource.return_value.Table.return_value = table
+
+        with patch("slack_sdk.WebClient") as mock_wc:
+            mock_wc.return_value.chat_postMessage.side_effect = Exception("DM failed")
+            mp = _make_processor(reaction_manager=Mock())
+            mock_config.github_oauth_client_id = "cid"
+            mock_config.oauth_callback_url = "https://cb.com"
+            mock_config.oauth_state_secret = "test-signing-secret"
+            mock_config.slack_bot_token = "xoxb-test"
+            say = Mock()
+            mp._handle_link_github_via_dm("U1", "C1", "ts1", "rts1", say)
+
+        assert "Failed" in say.call_args[1]["text"] or "oscar-link-github" in say.call_args[1]["text"]
+        mp.reaction_manager.manage_reactions.assert_called_with(
+            "C1", "rts1", add_reaction="x", remove_reaction="thinking_face"
+        )
+
+
+class TestProcessMessageIdentityGate:
+
+    def _setup_with_identity(self, has_mapping=True):
+        storage = Mock()
+        storage.get_context.return_value = {'session_id': 'sess1'}
+        storage.get_context_for_query.return_value = ''
+
+        timeout_handler = Mock()
+        timeout_handler.query_agent_with_timeout.return_value = ('response', 'sess2')
+
+        mp = _make_processor(storage=storage, reaction_manager=Mock(), timeout_handler=timeout_handler)
+        mp._has_identity_mapping = Mock(return_value=has_mapping)
+        mp._handle_link_github_via_dm = Mock()
+        return mp
+
+    def test_unlinked_user_triggers_link_flow(self):
+        mp = self._setup_with_identity(has_mapping=False)
+        say = Mock()
+        mp.process_message('C_ALLOWED', 'tts', 'U_ADMIN', '<@BOT> hello', say, message_ts='mts')
+        mp._handle_link_github_via_dm.assert_called_once_with('U_ADMIN', 'C_ALLOWED', 'tts', 'mts', say)
+
+    def test_linked_user_proceeds_to_agent(self):
+        mp = self._setup_with_identity(has_mapping=True)
+        say = Mock()
+        mp.process_message('C_ALLOWED', 'tts', 'U_ADMIN', '<@BOT> hello', say, message_ts='mts')
+        mp._handle_link_github_via_dm.assert_not_called()
+        mp.timeout_handler.query_agent_with_timeout.assert_called_once()
+

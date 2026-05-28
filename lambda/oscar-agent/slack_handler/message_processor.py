@@ -94,45 +94,68 @@ class MessageProcessor:
         logger.debug(f"User {user_id} authorization check: {is_authorized}")
         return is_authorized
 
-    def _is_link_github_request(self, query: str) -> bool:
-        """Check if the query is asking to link a GitHub account."""
-        q = query.lower()
-        return "link" in q and "github" in q
+    def _get_identity_tables(self):
+        if not hasattr(self, '_identity_tables'):
+            environment = os.environ.get("ENVIRONMENT", "")
+            workspace_ids = [w.strip() for w in os.environ.get("SLACK_WORKSPACE_IDS", "").split(",") if w.strip()]
+            if not environment or not workspace_ids:
+                self._identity_tables = []
+                self._workspace_id = None
+            else:
+                self._workspace_id = workspace_ids[0]
+                dynamodb_resource = boto3.resource("dynamodb", region_name=os.environ.get("AWS_REGION", "us-east-1"))
+                self._identity_tables = [
+                    dynamodb_resource.Table(f"oscar-identity-{wid}-{environment}")
+                    for wid in workspace_ids
+                ]
+        return self._identity_tables
+
+    def _has_identity_mapping(self, user_id: str) -> bool:
+        tables = self._get_identity_tables()
+        if not tables:
+            return True
+
+        for table in tables:
+            resp = table.query(
+                IndexName="slack-user-index",
+                KeyConditionExpression="slack_user_id = :uid",
+                ExpressionAttributeValues={":uid": user_id},
+            )
+            items = resp.get("Items", [])
+            if any(i.get("status") == "active" for i in items):
+                return True
+        return False
 
     def _handle_link_github_via_dm(self, user_id: str, channel: str, thread_ts: str, reaction_ts: str, say: Callable) -> None:
         """Handle link-github request by sending OAuth link via DM."""
-        import json as _json
-
         from slack_sdk import WebClient
 
-        workspace_tables = _json.loads(os.environ.get("WORKSPACE_TABLES", "{}"))
-        if not workspace_tables:
+        tables = self._get_identity_tables()
+        if not tables:
             say(text="Identity linking is not configured.", thread_ts=thread_ts)
             self.reaction_manager.manage_reactions(channel, reaction_ts, add_reaction="x", remove_reaction="thinking_face")
             return
 
-        # Pick the first workspace table to check existing mapping
-        workspace_id = next(iter(workspace_tables))
-        dynamodb = boto3.resource("dynamodb", region_name=os.environ.get("AWS_REGION", "us-east-1"))
-        table = dynamodb.Table(workspace_tables[workspace_id])
+        # Check existing mapping across all workspace tables
+        for table in tables:
+            resp = table.query(
+                IndexName="slack-user-index",
+                KeyConditionExpression="slack_user_id = :uid",
+                ExpressionAttributeValues={":uid": user_id},
+            )
+            items = resp.get("Items", [])
+            active = next((i for i in items if i.get("status") == "active"), None)
+            if active:
+                say(text=f"You're already linked to GitHub account *@{active.get('github_handle')}*.", thread_ts=thread_ts)
+                self.reaction_manager.manage_reactions(channel, reaction_ts, add_reaction="white_check_mark", remove_reaction="thinking_face")
+                return
 
-        # Check existing mapping
-        resp = table.query(
-            IndexName="slack-user-index",
-            KeyConditionExpression="slack_user_id = :uid",
-            ExpressionAttributeValues={":uid": user_id},
-        )
-        items = resp.get("Items", [])
-        active = next((i for i in items if i.get("status") == "active"), None)
-        if active:
-            say(text=f"You're already linked to GitHub account *@{active.get('github_handle')}*.", thread_ts=thread_ts)
-            self.reaction_manager.manage_reactions(channel, reaction_ts, add_reaction="white_check_mark", remove_reaction="thinking_face")
-            return
+        # Build OAuth URL with HMAC-signed state
+        from oauth_state import generate_state
 
-        # Build OAuth URL
         client_id = config.github_oauth_client_id
         callback_url = config.oauth_callback_url
-        state = f"{user_id}:{workspace_id}"
+        state = generate_state(user_id, self._workspace_id, config.oauth_state_secret)
         oauth_url = (
             f"https://github.com/login/oauth/authorize"
             f"?client_id={client_id}"
@@ -148,7 +171,7 @@ class MessageProcessor:
                 channel=user_id,
                 text=f"<{oauth_url}|Click here to link your GitHub account>"
             )
-            say(text="Check your DMs for the GitHub linking instructions.", thread_ts=thread_ts)
+            say(text="Check your DM for Slack-GitHub linking instructions.", thread_ts=thread_ts)
             self.reaction_manager.manage_reactions(channel, reaction_ts, add_reaction="white_check_mark", remove_reaction="thinking_face")
         except Exception as e:
             logger.error(f"Failed to send DM for GitHub linking: {e}")
@@ -203,8 +226,7 @@ class MessageProcessor:
                 say(text=e.user_message, thread_ts=thread_ts)
                 return
 
-            # Intercept "link github" requests — send OAuth link via DM
-            if self._is_link_github_request(query):
+            if not self._has_identity_mapping(user_id):
                 self._handle_link_github_via_dm(user_id, channel, thread_ts, reaction_ts, say)
                 return
 

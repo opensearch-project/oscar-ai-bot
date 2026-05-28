@@ -20,7 +20,6 @@ from agents.jenkins import JenkinsAgent
 from agents.metrics import MetricsAgent
 from stacks.api_gateway_stack import OscarApiGatewayStack
 from stacks.bedrock_agents_stack import OscarAgentsStack
-from stacks.identity_stack import OscarIdentityStack
 from stacks.knowledge_base_stack import OscarKnowledgeBaseStack
 from stacks.lambda_stack import OscarLambdaStack
 from stacks.permissions_stack import OscarPermissionsStack
@@ -86,21 +85,13 @@ def main() -> None:
         agents=agents
     )
 
-    # 3. Storage (DynamoDB tables)
+    # 3. Storage (DynamoDB tables + identity tables)
+    workspace_ids = os.environ.get("SLACK_WORKSPACE_IDS", "").split(",")
+    workspace_ids = [w.strip() for w in workspace_ids if w.strip()]
     storage_stack = OscarStorageStack(
         app, f"OscarStorageStack-{environment}",
         env=env,
         description="OSCAR DynamoDB storage",
-        environment=environment
-    )
-
-    # 3b. Identity storage (Slack-GitHub mappings)
-    workspace_ids = os.environ.get("SLACK_WORKSPACE_IDS", "").split(",")
-    workspace_ids = [w.strip() for w in workspace_ids if w.strip()]
-    identity_stack = OscarIdentityStack(
-        app, f"OscarIdentityStack-{environment}",
-        env=env,
-        description="OSCAR identity mapping storage",
         environment=environment,
         workspace_ids=workspace_ids
     )
@@ -131,7 +122,6 @@ def main() -> None:
         secrets_stack=secrets_stack,
         vpc_stack=vpc_stack,
         storage_stack=storage_stack,
-        identity_stack=identity_stack,
         env=env,
         environment=environment,
         agents=agents,
@@ -141,7 +131,6 @@ def main() -> None:
     lambda_stack.add_dependency(secrets_stack)
     lambda_stack.add_dependency(vpc_stack)
     lambda_stack.add_dependency(storage_stack)
-    lambda_stack.add_dependency(identity_stack)
 
     # 7. API Gateway
     api_gateway_stack = OscarApiGatewayStack(
