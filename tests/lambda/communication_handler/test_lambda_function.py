@@ -113,3 +113,103 @@ class TestCommunicationHandlerLambda:
             mod.lambda_handler(event, None)
 
             mock_rb.create_error_response.assert_called_once()
+
+
+def _load_message_handler():
+    """Load message_handler module by file path with mocked external deps."""
+    sys.path.insert(0, _COMM_DIR)
+    try:
+        for name in ['message_handler', 'channel_utils', 'context_storage',
+                     'message_formatter', 'response_builder', 'slack_client', 'config']:
+            sys.modules.pop(name, None)
+        # Provide a stub config module so message_handler import doesn't try to load real secrets
+        stub_config = MagicMock()
+        sys.modules['config'] = stub_config
+        spec = importlib.util.spec_from_file_location(
+            'comm_msg_handler',
+            os.path.join(_COMM_DIR, 'message_handler.py'),
+        )
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        return mod, stub_config
+    finally:
+        sys.path.remove(_COMM_DIR)
+
+
+class TestSendMessageTwoPersonApproval:
+    """Test ENABLE_2PR enforcement in MessageHandler.handle_send_message."""
+
+    def _build_handler(self, mod):
+        # Bypass __init__ which constructs Slack client / storage / etc.
+        handler = mod.MessageHandler.__new__(mod.MessageHandler)
+        handler.slack_client = MagicMock()
+        handler.storage = MagicMock()
+        handler.channel_utils = MagicMock()
+        handler.channel_utils.validate_channel.return_value = True
+        handler.message_formatter = MagicMock()
+        handler.response_builder = MagicMock()
+        handler.response_builder.create_error_response.side_effect = lambda ag, fn, msg: {'error': True, 'message': msg}
+        handler.response_builder.create_success_response.side_effect = lambda ag, fn, msg: {'success': True, 'message': msg}
+        return handler
+
+    def _base_params(self, **extra):
+        params = {
+            'query': 'send to #release',
+            'message_content': 'Release 2.19.0 is ready',
+            'target_channel': 'C123',
+            'confirmed': True,
+        }
+        params.update(extra)
+        return params
+
+    def test_2pr_enabled_missing_user_ids_rejected(self):
+        mod, stub_cfg = _load_message_handler()
+        stub_cfg.config.enable_2pr = True
+        handler = self._build_handler(mod)
+
+        result = handler.handle_send_message(self._base_params(), 'comm', 'send_automated_message')
+
+        assert result['error'] is True
+        assert 'requester_user_id' in result['message']
+        handler.slack_client.send_message.assert_not_called()
+
+    def test_2pr_enabled_self_approval_rejected(self):
+        mod, stub_cfg = _load_message_handler()
+        stub_cfg.config.enable_2pr = True
+        handler = self._build_handler(mod)
+
+        result = handler.handle_send_message(
+            self._base_params(requester_user_id='U_SAME', approver_user_id='U_SAME'),
+            'comm', 'send_automated_message',
+        )
+
+        assert result['error'] is True
+        assert 'Self-approval' in result['message']
+        assert 'U_SAME' in result['message']
+        handler.slack_client.send_message.assert_not_called()
+
+    def test_2pr_enabled_distinct_users_proceeds(self):
+        mod, stub_cfg = _load_message_handler()
+        stub_cfg.config.enable_2pr = True
+        handler = self._build_handler(mod)
+        handler.slack_client.send_message.return_value = {'success': True, 'message_ts': '1.2'}
+
+        result = handler.handle_send_message(
+            self._base_params(requester_user_id='U_REQ', approver_user_id='U_APP'),
+            'comm', 'send_automated_message',
+        )
+
+        assert result['success'] is True
+        handler.slack_client.send_message.assert_called_once()
+
+    def test_2pr_disabled_skips_check(self):
+        """When ENABLE_2PR is off, missing/equal user IDs do not block sending."""
+        mod, stub_cfg = _load_message_handler()
+        stub_cfg.config.enable_2pr = False
+        handler = self._build_handler(mod)
+        handler.slack_client.send_message.return_value = {'success': True, 'message_ts': '1.2'}
+
+        result = handler.handle_send_message(self._base_params(), 'comm', 'send_automated_message')
+
+        assert result['success'] is True
+        handler.slack_client.send_message.assert_called_once()

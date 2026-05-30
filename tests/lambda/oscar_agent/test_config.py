@@ -140,6 +140,18 @@ class TestConfig:
             cfg = mod.Config(validate_required=False)
             assert cfg.enable_dm is True
 
+    def test_enable_2pr_default_false(self):
+        with patch.dict(os.environ, BASE_ENV, clear=False):
+            mod = _load_real_config_module()
+            cfg = mod.Config(validate_required=False)
+            assert cfg.enable_2pr is False
+
+    def test_enable_2pr_true_from_env(self):
+        with patch.dict(os.environ, {**BASE_ENV, 'ENABLE_2PR': 'true'}, clear=False):
+            mod = _load_real_config_module()
+            cfg = mod.Config(validate_required=False)
+            assert cfg.enable_2pr is True
+
     def test_agent_timeout_default_90(self):
         with patch.dict(os.environ, BASE_ENV, clear=False):
             mod = _load_real_config_module()

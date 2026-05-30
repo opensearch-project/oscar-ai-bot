@@ -41,6 +41,9 @@ class JenkinsConfig:
         self.request_timeout = int(os.getenv('JENKINS_REQUEST_TIMEOUT', '30'))
         self.verify_ssl = os.getenv('JENKINS_VERIFY_SSL', 'true').lower() != 'false'
 
+        # Feature flags
+        self.enable_2pr = os.environ.get('ENABLE_2PR', 'false').lower() == 'true'
+
         # GitHub Configuration (for Jenkinsfile discovery)
         self.github_repo = os.environ.get('JENKINSFILE_GITHUB_REPO', '')
         self.github_branch = os.getenv('JENKINSFILE_GITHUB_BRANCH', 'main')

@@ -54,6 +54,16 @@ def get_action_groups(lambda_arn: str) -> List[bedrock.CfnAgent.AgentActionGroup
                                 description="REQUIRED: Must be 'true' to execute the job. Set to 'true' ONLY after user explicitly confirms job execution. Never set to 'true' without user confirmation. Accepts: 'true', 'false', true, false.",
                                 required=True,
                             ),
+                            "requester_user_id": bedrock.CfnAgent.ParameterDetailProperty(
+                                type="string",
+                                description="Slack user ID (e.g., 'U12345') of the user whose original message asked to trigger this job. Take this from the [USER_ID: ...] tag of the request turn. MUST be different from approver_user_id (two-person review); the Lambda rejects the call if they are equal.",
+                                required=True,
+                            ),
+                            "approver_user_id": bedrock.CfnAgent.ParameterDetailProperty(
+                                type="string",
+                                description="Slack user ID (e.g., 'U67890') of the user whose immediately preceding message confirmed execution. Take this from the [USER_ID: ...] tag of the confirmation turn. MUST be different from requester_user_id; the Lambda rejects the call if they are equal.",
+                                required=True,
+                            ),
                         },
                     ),
                     bedrock.CfnAgent.FunctionProperty(

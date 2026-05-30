@@ -185,6 +185,30 @@ def handle_trigger_job(jenkins_client: JenkinsClient, params: Dict[str, Any]) ->
             'confirmed': False
         }
 
+    # Two-person review (only when ENABLE_2PR is on)
+    requester_user_id = params.get('requester_user_id')
+    approver_user_id = params.get('approver_user_id')
+    if config.enable_2pr:
+        if not requester_user_id or not approver_user_id:
+            return {
+                'status': 'error',
+                'message': 'SECURITY ERROR: requester_user_id and approver_user_id are required for two-person approval.',
+                'job_name': job_name,
+            }
+        if requester_user_id.strip() == approver_user_id.strip():
+            return {
+                'status': 'error',
+                'message': (
+                    f'SECURITY ERROR: Self-approval is not permitted. The user who requested this job '
+                    f'({requester_user_id.strip()}) cannot also approve it. A different authorized user must confirm.'
+                ),
+                'job_name': job_name,
+            }
+        logger.info(
+            f'JENKINS_TWO_PERSON_APPROVAL: requester={requester_user_id.strip()}, '
+            f'approver={approver_user_id.strip()}, job={job_name}'
+        )
+
     if not job_name:
         return {
             'status': 'error',
@@ -192,8 +216,11 @@ def handle_trigger_job(jenkins_client: JenkinsClient, params: Dict[str, Any]) ->
             'available_jobs': jenkins_client.job_registry.list_jobs()
         }
 
-    # Extract job parameters (all params except job_name and confirmed)
-    job_params = {k: v for k, v in params.items() if k not in ['job_name', 'confirmed']}
+    # Extract job parameters (all params except job_name, confirmed, and two-person review IDs)
+    job_params = {
+        k: v for k, v in params.items()
+        if k not in ['job_name', 'confirmed', 'requester_user_id', 'approver_user_id']
+    }
 
     # Handle legacy job_parameters JSON string if provided
     job_parameters_json = params.get('job_parameters')

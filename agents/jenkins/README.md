@@ -155,14 +155,15 @@ The Jenkins user associated with this token needs permission to:
 - View and trigger the jobs you want OSCAR to execute
 - Read the build queue and build results
 
-## Security: Two-Phase Execution
+## Security: Three-Rule Execution
 
-All job executions follow a mandatory two-phase workflow:
+All job executions follow a mandatory workflow:
 
-1. **Inform** — The agent calls `get_job_info`, presents job details, and asks the user to confirm.
+1. **Inform** — The agent calls `get_job_info`, presents job details, and asks for confirmation.
 2. **Execute** — Only after explicit user confirmation, the agent calls `trigger_job` with `confirmed=true`.
+3. **Two-person review** — When the global `ENABLE_2PR` feature flag is on, the user who confirms MUST be a different authorized user from the one who requested the job. Self-approval is rejected. The agent passes both `requester_user_id` and `approver_user_id` to `trigger_job`; the Lambda rejects the call if they are equal or missing.
 
-The agent will never execute a job without user confirmation. This is enforced both in the agent instructions and in the Lambda handler (the `confirmed` parameter is checked server-side).
+Enforcement lives in two places: the agent instructions (UX) and the Lambda handler (authoritative — the `confirmed`, `requester_user_id`, and `approver_user_id` parameters are checked server-side). Set `ENABLE_2PR=true` in your `.env` to enable rule 3.
 
 ## Architecture
 

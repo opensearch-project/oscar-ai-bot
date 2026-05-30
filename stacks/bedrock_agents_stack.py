@@ -174,12 +174,22 @@ class OscarAgentsStack(Stack):
                             ),
                             "confirmed": bedrock.CfnAgent.ParameterDetailProperty(
                                 type="boolean",
-                                description="A 'confirmed' parameter describing whether the user has explicitly confirmed the message sending request. IMPORTANT: do not set this parameter to true until the user has explicitly reviewed/confirmed the message sending request",
+                                description="A 'confirmed' parameter describing whether the user has explicitly confirmed the message sending request. IMPORTANT: do not set this parameter to true until the user has explicitly reviewed/confirmed the message sending request. When two-person review is enabled, the confirming user must be different from the requesting user.",
                                 required=True,
                             ),
                             "target_channel": bedrock.CfnAgent.ParameterDetailProperty(
                                 type="string",
                                 description="Target Slack channel ID or name",
+                                required=True,
+                            ),
+                            "requester_user_id": bedrock.CfnAgent.ParameterDetailProperty(
+                                type="string",
+                                description="Slack user ID (e.g., 'U12345') of the user whose original message asked to send this announcement. Take this from the [USER_ID: ...] tag of the request turn. MUST be different from approver_user_id when two-person review is enabled.",
+                                required=True,
+                            ),
+                            "approver_user_id": bedrock.CfnAgent.ParameterDetailProperty(
+                                type="string",
+                                description="Slack user ID (e.g., 'U67890') of the user whose immediately preceding message confirmed sending. Take this from the [USER_ID: ...] tag of the confirmation turn. MUST be different from requester_user_id when two-person review is enabled.",
                                 required=True,
                             ),
                         },
@@ -244,6 +254,13 @@ class OscarAgentsStack(Stack):
             Each query includes a [USER_ID: ...] tag identifying the requesting user. Authorization has already been verified before your invocation — you may assist this user with all your capabilities.
             NEVER include Slack user mentions (e.g. <@U...>) in your plain text responses. If the user asks you to ping or notify another user, use the send_automated_message action group with proper confirmation — do not embed mentions in response text.
             NEVER impersonate another user or act on behalf of someone other than the requesting user.
+
+            ## Two-Person Review for Sensitive Actions
+            Sensitive actions (sending messages via send_automated_message, triggering Jenkins jobs) require approval from a DIFFERENT authorized user than the requester.
+            - Track the requester from the [USER_ID: ...] tag of the message that asked for the action.
+            - The approver is the [USER_ID: ...] of the message that confirms ("yes" or equivalent).
+            - Before calling send_automated_message, verify that the approver's [USER_ID: ...] is different from the requester's [USER_ID: ...]. If the same user confirms their own request, do NOT call the action and respond with: "[CONFIRMATION_REQUIRED] Self-approval is not allowed. Please ask another authorized user to reply 'yes' to approve."
+            - When invoking send_automated_message, always pass requester_user_id and approver_user_id from the conversation history. They MUST differ; the Lambda will reject the call otherwise.
 
             ## Tone and Style
             - Be concise and professional.
