@@ -65,42 +65,52 @@ def get_opensearch_session():
 
 
 def get_latest_scans_index() -> str:
-    """Get the concrete index that the ``scans`` alias points to.
+    """Get the most recently created concrete index behind the ``scans`` alias.
 
-    Queries the OpenSearch ``_alias/scans`` API to resolve the alias to
-    its underlying concrete index name. This avoids wildcards in the
-    request (which cause SigV4 encoding issues) and avoids passing an
-    alias directly to agentic search (which can't resolve mappings from
-    aliases).
+    Queries the OpenSearch ``_settings/index.creation_date`` API to
+    retrieve the creation date for each concrete index backing the
+    ``scans`` alias, then returns the one with the highest (most recent)
+    creation date.
+
+    Note: The ``filter_path`` parameter is intentionally omitted because
+    the wildcard (``*``) causes SigV4 signing issues when URL-encoded.
 
     Returns:
-        The concrete index name (e.g. ``scans-000003``).
+        The most recently created concrete index name (e.g. ``scans-000003``).
 
     Raises:
-        RuntimeError: If the alias cannot be resolved to a concrete index.
+        RuntimeError: If no scans indices are found or the request fails.
     """
     try:
-        path = '/_alias/scans'
+        path = '/scans/_settings/index.creation_date'
         response = opensearch_request('GET', path)
 
         if response and isinstance(response, dict):
-            # Response is {concrete_index_name: {"aliases": {"scans": {...}}}}
-            indices = list(response.keys())
-            if indices:
-                latest_index = indices[0]
-                logger.info(f'Latest scans index resolved via alias: {latest_index}')
-                return latest_index
+            # Response shape:
+            # {
+            #   "scans-000001": {"settings": {"index": {"creation_date": "1712016000000"}}},
+            #   "scans-000003": {"settings": {"index": {"creation_date": "1717200000000"}}},
+            #   ...
+            # }
+            latest_index = max(
+                response.keys(),
+                key=lambda idx: int(
+                    response[idx]['settings']['index']['creation_date'],
+                ),
+            )
+            logger.info(f'Latest scans index resolved via _settings: {latest_index}')
+            return latest_index
     except Exception as e:
         logger.error(
             f'SECURITY_ADVISORIES_INDEX_LOOKUP_FAILED: '
-            f'Could not resolve scans alias: {e}',
+            f'Could not resolve latest scans index: {e}',
         )
         raise RuntimeError(
-            f'Failed to resolve scans alias: {e}',
+            f'Failed to resolve latest scans index: {e}',
         ) from e
 
     raise RuntimeError(
-        'Could not resolve scans alias: alias response was empty or invalid',
+        'No scans indices found',
     )
 
 
