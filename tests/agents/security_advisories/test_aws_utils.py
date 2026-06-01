@@ -347,22 +347,24 @@ class TestOpensearchRequest:
 
 
 class TestGetLatestScansIndexHappyPath:
-    """Test get_latest_scans_index returns the most recently created index."""
+    """Test get_latest_scans_index returns the index with the most recent scan."""
 
-    def test_returns_most_recent_index_from_settings(self):
+    def test_returns_index_from_most_recent_scan_document(self):
         mod = _load_aws_utils()
         cfg = _make_config_mock(cross_account_role_arn='')
 
-        # Real-world response shape: indices returned in arbitrary order
-        settings_response = {
-            'scans-000057': {'settings': {'index': {'creation_date': '1777931057912'}}},
-            'scans-000163': {'settings': {'index': {'creation_date': '1780334844670'}}},
-            'scans-000041': {'settings': {'index': {'creation_date': '1777931488119'}}},
-            'scans-000162': {'settings': {'index': {'creation_date': '1780332004704'}}},
-            'scans-000164': {'settings': {'index': {'creation_date': '1780337686739'}}},
-            'scans-000161': {'settings': {'index': {'creation_date': '1780249397381'}}},
-            'scans-000160': {'settings': {'index': {'creation_date': '1780246672301'}}},
-            'scans-000050': {'settings': {'index': {'creation_date': '1777930886666'}}},
+        search_response = {
+            'hits': {
+                'total': {'value': 164},
+                'hits': [
+                    {
+                        '_index': 'scans-000164',
+                        '_id': 'abc123',
+                        '_score': None,
+                        'sort': [1780337686739],
+                    },
+                ],
+            },
         }
 
         mock_session = MagicMock()
@@ -371,7 +373,7 @@ class TestGetLatestScansIndexHappyPath:
 
         mock_response = MagicMock()
         mock_response.status_code = 200
-        mock_response.json.return_value = settings_response
+        mock_response.json.return_value = search_response
 
         with patch.object(mod, 'config', cfg), \
              patch.object(mod, 'boto3') as mock_boto3, \
@@ -386,11 +388,18 @@ class TestGetLatestScansIndexHappyPath:
 
 
 class TestGetLatestScansIndexEmptyResponse:
-    """Test get_latest_scans_index raises when no indices are found."""
+    """Test get_latest_scans_index raises when no documents are found."""
 
-    def test_raises_runtime_error_on_empty_response(self):
+    def test_raises_runtime_error_on_empty_hits(self):
         mod = _load_aws_utils()
         cfg = _make_config_mock(cross_account_role_arn='')
+
+        search_response = {
+            'hits': {
+                'total': {'value': 0},
+                'hits': [],
+            },
+        }
 
         mock_session = MagicMock()
         mock_creds = MagicMock()
@@ -398,7 +407,7 @@ class TestGetLatestScansIndexEmptyResponse:
 
         mock_response = MagicMock()
         mock_response.status_code = 200
-        mock_response.json.return_value = {}
+        mock_response.json.return_value = search_response
 
         with patch.object(mod, 'config', cfg), \
              patch.object(mod, 'boto3') as mock_boto3, \
@@ -407,5 +416,5 @@ class TestGetLatestScansIndexEmptyResponse:
             mock_boto3.Session.return_value = mock_session
             mock_requests.request.return_value = mock_response
 
-            with pytest.raises(RuntimeError, match='No scans indices found'):
+            with pytest.raises(RuntimeError, match='No scan documents found'):
                 mod.get_latest_scans_index()

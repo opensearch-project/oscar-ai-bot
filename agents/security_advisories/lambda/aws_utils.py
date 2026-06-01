@@ -65,40 +65,35 @@ def get_opensearch_session():
 
 
 def get_latest_scans_index() -> str:
-    """Get the most recently created concrete index behind the ``scans`` alias.
+    """Get the concrete index containing the most recent scan document.
 
-    Queries the OpenSearch ``_settings/index.creation_date`` API to
-    retrieve the creation date for each concrete index backing the
-    ``scans`` alias, then returns the one with the highest (most recent)
-    creation date.
-
-    Note: The ``filter_path`` parameter is intentionally omitted because
-    the wildcard (``*``) causes SigV4 signing issues when URL-encoded.
+    Queries the ``scans`` alias with a descending sort on
+    ``timestamp.scan`` and ``size: 1`` to retrieve only the single most
+    recent document.  The ``_index`` field from the hit identifies the
+    concrete index name.
 
     Returns:
-        The most recently created concrete index name (e.g. ``scans-000003``).
+        The concrete index name (e.g. ``scans-000164``).
 
     Raises:
-        RuntimeError: If no scans indices are found or the request fails.
+        RuntimeError: If no scan documents are found or the request fails.
     """
-    try:
-        path = '/scans/_settings/index.creation_date'
-        response = opensearch_request('GET', path)
+    import json
 
-        if response and isinstance(response, dict):
-            # Response shape:
-            # {
-            #   "scans-000001": {"settings": {"index": {"creation_date": "1712016000000"}}},
-            #   "scans-000003": {"settings": {"index": {"creation_date": "1717200000000"}}},
-            #   ...
-            # }
-            latest_index = max(
-                response.keys(),
-                key=lambda idx: int(
-                    response[idx]['settings']['index']['creation_date'],
-                ),
-            )
-            logger.info(f'Latest scans index resolved via _settings: {latest_index}')
+    body = json.dumps({
+        'size': 1,
+        'sort': [{'timestamp.scan': {'order': 'desc'}}],
+        '_source': False,
+    })
+
+    try:
+        path = '/scans/_search'
+        response = opensearch_request('GET', path, body=body)
+
+        hits = response.get('hits', {}).get('hits', [])
+        if hits:
+            latest_index = hits[0]['_index']
+            logger.info(f'Latest scans index resolved via _search: {latest_index}')
             return latest_index
     except Exception as e:
         logger.error(
@@ -110,7 +105,7 @@ def get_latest_scans_index() -> str:
         ) from e
 
     raise RuntimeError(
-        'No scans indices found',
+        'No scan documents found',
     )
 
 
