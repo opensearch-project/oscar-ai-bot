@@ -171,9 +171,8 @@ class TestAgenticSearchLogsDSL:
             test_mod = importlib.util.module_from_spec(spec)
             spec.loader.exec_module(test_mod)
 
-            with patch.object(
-                sys.modules['aws_utils'], 'opensearch_request', return_value=mock_response,
-            ):
+            # Patch the module-level name directly (from-import binds a local reference)
+            with patch.object(test_mod, 'opensearch_request', return_value=mock_response):
                 with caplog.at_level(logging.INFO):
                     test_mod.agentic_search('oscar-agentic-pipeline', 'test query')
 
@@ -196,9 +195,8 @@ class TestAgenticSearchLogsDSL:
             test_mod = importlib.util.module_from_spec(spec)
             spec.loader.exec_module(test_mod)
 
-            with patch.object(
-                sys.modules['aws_utils'], 'opensearch_request', return_value=mock_response,
-            ):
+            # Patch the module-level name directly (from-import binds a local reference)
+            with patch.object(test_mod, 'opensearch_request', return_value=mock_response):
                 with caplog.at_level(logging.INFO):
                     test_mod.agentic_search('oscar-agentic-pipeline', 'test query')
 

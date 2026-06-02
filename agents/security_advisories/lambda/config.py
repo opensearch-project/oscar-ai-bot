@@ -57,10 +57,6 @@ class SecurityAdvisoriesConfig:
         self.opensearch_service = os.environ.get('OPENSEARCH_SERVICE', 'es')
         self.request_timeout = int(os.environ.get('OPENSEARCH_REQUEST_TIMEOUT', '60'))
 
-        # Index names (set by CDK)
-        self.scans_index = os.environ.get('SCANS_INDEX', 'scans-000001')
-        self.advisories_index = os.environ.get('ADVISORIES_INDEX', 'advisories')
-
         # Response configuration
         self.bedrock_message_version = os.environ.get(
             'BEDROCK_RESPONSE_MESSAGE_VERSION', '1.0',

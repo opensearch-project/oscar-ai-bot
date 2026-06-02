@@ -9,9 +9,11 @@ cross-account role assumption, and OpenSearch request handling.
 
 Functions:
     get_opensearch_session: Get boto3 session with optional cross-account role
+    get_latest_scans_index: Resolve the scans alias to its concrete index
     opensearch_request: Make signed HTTP request to OpenSearch
 """
 
+import json
 import logging
 
 import boto3
@@ -61,6 +63,50 @@ def get_opensearch_session():
     # No cross-account role configured — use Lambda execution role
     logger.info('Using Lambda execution role credentials')
     return boto3.Session()
+
+
+def get_latest_scans_index() -> str:
+    """Get the concrete index containing the most recent scan document.
+
+    Queries the ``scans`` alias with a descending sort on
+    ``timestamp.scan`` and ``size: 1`` to retrieve only the single most
+    recent document.  The ``_index`` field from the hit identifies the
+    concrete index name.
+
+    Returns:
+        The concrete index name (e.g. ``scans-000164``).
+
+    Raises:
+        RuntimeError: If no scan documents are found or the request fails.
+    """
+
+    body = json.dumps({
+        'size': 1,
+        'sort': [{'timestamp.scan': {'order': 'desc'}}],
+        '_source': False,
+    })
+
+    try:
+        path = '/scans/_search'
+        response = opensearch_request('GET', path, body=body)
+
+        hits = response.get('hits', {}).get('hits', [])
+        if hits:
+            latest_index = hits[0]['_index']
+            logger.info(f'Latest scans index resolved via _search: {latest_index}')
+            return latest_index
+    except Exception as e:
+        logger.error(
+            f'SECURITY_ADVISORIES_INDEX_LOOKUP_FAILED: '
+            f'Could not resolve latest scans index: {e}',
+        )
+        raise RuntimeError(
+            f'Failed to resolve latest scans index: {e}',
+        ) from e
+
+    raise RuntimeError(
+        'No scan documents found',
+    )
 
 
 def opensearch_request(method, path, body=None):

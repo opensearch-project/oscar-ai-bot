@@ -5,7 +5,7 @@
 
 These tests verify cross-account role assumption, direct credentials,
 SigV4-signed OpenSearch requests, TLS enforcement, timeout configuration,
-and error log markers.
+error log markers, and latest scans index resolution.
 """
 
 import importlib
@@ -339,3 +339,82 @@ class TestOpensearchRequest:
 
             result = mod.opensearch_request('GET', '/_search')
             assert result == expected
+
+
+# ---------------------------------------------------------------------------
+# get_latest_scans_index tests
+# ---------------------------------------------------------------------------
+
+
+class TestGetLatestScansIndexHappyPath:
+    """Test get_latest_scans_index returns the index with the most recent scan."""
+
+    def test_returns_index_from_most_recent_scan_document(self):
+        mod = _load_aws_utils()
+        cfg = _make_config_mock(cross_account_role_arn='')
+
+        search_response = {
+            'hits': {
+                'total': {'value': 164},
+                'hits': [
+                    {
+                        '_index': 'scans-000164',
+                        '_id': 'abc123',
+                        '_score': None,
+                        'sort': [1780337686739],
+                    },
+                ],
+            },
+        }
+
+        mock_session = MagicMock()
+        mock_creds = MagicMock()
+        mock_session.get_credentials.return_value = mock_creds
+
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = search_response
+
+        with patch.object(mod, 'config', cfg), \
+             patch.object(mod, 'boto3') as mock_boto3, \
+             patch.object(mod, 'requests') as mock_requests, \
+             patch.object(mod, 'SigV4Auth'):
+            mock_boto3.Session.return_value = mock_session
+            mock_requests.request.return_value = mock_response
+
+            result = mod.get_latest_scans_index()
+
+        assert result == 'scans-000164'
+
+
+class TestGetLatestScansIndexEmptyResponse:
+    """Test get_latest_scans_index raises when no documents are found."""
+
+    def test_raises_runtime_error_on_empty_hits(self):
+        mod = _load_aws_utils()
+        cfg = _make_config_mock(cross_account_role_arn='')
+
+        search_response = {
+            'hits': {
+                'total': {'value': 0},
+                'hits': [],
+            },
+        }
+
+        mock_session = MagicMock()
+        mock_creds = MagicMock()
+        mock_session.get_credentials.return_value = mock_creds
+
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = search_response
+
+        with patch.object(mod, 'config', cfg), \
+             patch.object(mod, 'boto3') as mock_boto3, \
+             patch.object(mod, 'requests') as mock_requests, \
+             patch.object(mod, 'SigV4Auth'):
+            mock_boto3.Session.return_value = mock_session
+            mock_requests.request.return_value = mock_response
+
+            with pytest.raises(RuntimeError, match='No scan documents found'):
+                mod.get_latest_scans_index()
