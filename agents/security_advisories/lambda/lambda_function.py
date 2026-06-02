@@ -28,7 +28,7 @@ from vulnerabilities_handler import handle_query_vulnerabilities
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
-AVAILABLE_FUNCTIONS = ['query_vulnerabilities', 'list_projects']
+AVAILABLE_FUNCTIONS = ['query_vulnerabilities', 'list_projects', 'get_advisory_summary']
 
 
 def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
@@ -81,6 +81,8 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             result = handle_query_vulnerabilities(params, request_id)
         elif function_name == 'list_projects':
             result = handle_list_projects(request_id)
+        elif function_name == 'get_advisory_summary':
+            result = _handle_advisory_summary()
         else:
             result = {
                 'status': 'error',
@@ -96,6 +98,21 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         return create_response(
             event, {'status': 'error', 'message': str(e)},
         )
+
+
+def _handle_advisory_summary() -> Dict[str, Any]:
+    """Handle limited-user advisory summary requests.
+
+    Always returns the dashboard link regardless of access tier — this function
+    is exclusively routed from the limited-user action group.
+    """
+    return {
+        'status': 'success',
+        'access_tier': 'limited',
+        'message': LIMITED_ACCESS_MESSAGE,
+        'dashboard_url': DASHBOARD_URL,
+        'results': [],
+    }
 
 
 def _parse_parameters(parameters: List[Dict[str, Any]]) -> Dict[str, str]:

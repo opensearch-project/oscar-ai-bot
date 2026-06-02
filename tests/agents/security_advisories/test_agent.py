@@ -40,7 +40,7 @@ class TestActionGroups:
     def test_action_group_returns_list(self, agent):
         groups = agent.get_action_groups("arn:aws:lambda:us-east-1:123456789012:function:placeholder")
         assert isinstance(groups, list)
-        assert len(groups) == 1
+        assert len(groups) == 2
 
     def test_action_group_has_query_vulnerabilities(self, agent):
         groups = agent.get_action_groups("arn:aws:lambda:us-east-1:123456789012:function:placeholder")
@@ -94,6 +94,40 @@ class TestActionGroups:
         functions = group.function_schema.functions
         func_names = [f.name for f in functions]
         assert "get_vulnerabilities" not in func_names
+
+
+class TestLimitedActionGroup:
+    """Limited action group defines get_advisory_summary for non-privileged users."""
+
+    def test_limited_action_group_exists(self, agent):
+        groups = agent.get_action_groups("arn:aws:lambda:us-east-1:123456789012:function:placeholder")
+        assert len(groups) == 2
+        limited_group = groups[1]
+        assert limited_group.action_group_name == "securityAdvisoriesLimitedActions"
+
+    def test_limited_action_group_has_get_advisory_summary(self, agent):
+        groups = agent.get_action_groups("arn:aws:lambda:us-east-1:123456789012:function:placeholder")
+        limited_group = groups[1]
+        functions = limited_group.function_schema.functions
+        func_names = [f.name for f in functions]
+        assert "get_advisory_summary" in func_names
+
+    def test_get_advisory_summary_has_required_query_param(self, agent):
+        groups = agent.get_action_groups("arn:aws:lambda:us-east-1:123456789012:function:placeholder")
+        limited_group = groups[1]
+        functions = limited_group.function_schema.functions
+        func = next(f for f in functions if f.name == "get_advisory_summary")
+        assert "query" in func.parameters
+        assert func.parameters["query"].required is True
+
+    def test_limited_group_does_not_have_privileged_functions(self, agent):
+        """Limited group should NOT contain query_vulnerabilities or list_projects."""
+        groups = agent.get_action_groups("arn:aws:lambda:us-east-1:123456789012:function:placeholder")
+        limited_group = groups[1]
+        functions = limited_group.function_schema.functions
+        func_names = [f.name for f in functions]
+        assert "query_vulnerabilities" not in func_names
+        assert "list_projects" not in func_names
 
 
 class TestInstructions:

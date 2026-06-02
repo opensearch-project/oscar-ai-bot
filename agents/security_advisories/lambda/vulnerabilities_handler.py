@@ -74,18 +74,27 @@ def _parse_age_days(raw: Optional[str]) -> Optional[int]:
         return None
 
 
-def _parse_bool(raw: Optional[str]) -> Optional[bool]:
-    """Parse a string boolean value.
+def _map_age_days_to_age(age_days: Optional[int]) -> Optional[str]:
+    """Map an integer age-in-days value to the nearest valid neglected page bucket.
+
+    The neglected page only supports discrete values: 15d, 30d, 45d, 60d.
+    This maps the user's numeric threshold to the closest valid bucket.
 
     Args:
-        raw: String representation of a boolean (e.g. ``"true"``, ``"false"``).
+        age_days: Numeric age threshold from the action group parameter.
 
     Returns:
-        ``True`` or ``False`` if parseable, ``None`` if *raw* is empty/None.
+        A valid age bucket string (e.g. ``"30d"``), or ``None`` if not applicable.
     """
-    if raw is None:
+    if age_days is None:
         return None
-    return str(raw).lower().strip() in ('true', '1', 'yes')
+
+    buckets = [15, 30, 45, 60]
+    # Pick the smallest bucket >= age_days, or the largest if age_days exceeds all
+    for bucket in buckets:
+        if age_days <= bucket:
+            return f"{bucket}d"
+    return f"{buckets[-1]}d"
 
 
 def _is_within_age(timestamp: Dict[str, Any], age_days: int) -> bool:
@@ -224,13 +233,12 @@ def handle_query_vulnerabilities(params: Dict[str, Any], request_id: str) -> Dic
 
     logger.info(f"[{request_id}] Returning {len(results)} result entries")
 
-    # Build neglected page URL with the user's original query filters
+    # Build neglected page URL derived from available action-group parameters
     neglected_url = build_neglected_page_url(
-        age=params.get('age'),
-        severe=_parse_bool(params.get('severe')),
-        releases=_parse_bool(params.get('releases')),
-        critical=_parse_bool(params.get('critical')),
-        tag=params.get('tag'),
+        age=_map_age_days_to_age(age_days),
+        severe='HIGH' in severity if severity else None,
+        critical='CRITICAL' in severity if severity else None,
+        tag=version,
     )
 
     return {

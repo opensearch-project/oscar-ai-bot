@@ -40,8 +40,9 @@ Scan results are stored per project/tag/hash combination. Each scan document con
 
 | Function | Purpose | When to use |
 |----------|---------|-------------|
-| `query_vulnerabilities` | Query CVEs using natural language via the agentic pipeline | Any vulnerability query |
-| `list_projects` | List available components and tags | When user needs to discover what's available |
+| `query_vulnerabilities` | Query CVEs using natural language via the agentic pipeline | Any vulnerability query (privileged access only) |
+| `list_projects` | List available components and tags | When user needs to discover what's available (privileged access only) |
+| `get_advisory_summary` | Return dashboard link for limited-access users | Any security advisory query from non-privileged users |
 
 ### query_vulnerabilities parameters
 | Parameter | Required | Description |

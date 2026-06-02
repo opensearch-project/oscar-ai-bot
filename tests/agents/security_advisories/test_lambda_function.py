@@ -77,6 +77,14 @@ def _load_lambda_function(
 
     with patch.dict('sys.modules', {
         'config': mock_config,
+        'constants': MagicMock(
+            DASHBOARD_URL='https://advisories.opensearch.org',
+            LIMITED_ACCESS_MESSAGE=(
+                'For detailed vulnerability information and to explore the complete '
+                'security advisory data, please visit the '
+                '**[Security Advisory Dashboard](https://advisories.opensearch.org)**.'
+            ),
+        ),
         'vulnerabilities_handler': mock_vuln_handler,
         'projects_handler': mock_proj_handler,
         'response_builder': mock_response_builder,
@@ -185,6 +193,97 @@ class TestRoutingToListProjects:
 
 
 # ---------------------------------------------------------------------------
+# Limited action group routing tests
+# ---------------------------------------------------------------------------
+
+
+class TestRoutingToGetAdvisorySummary:
+    """Test routing to get_advisory_summary (limited user action group)."""
+
+    def test_returns_limited_response(self):
+        mod, _, _, _ = _load_lambda_function()
+
+        event = {
+            'function': 'get_advisory_summary',
+            'actionGroup': 'securityAdvisoriesLimitedActions',
+            'parameters': [
+                {'name': 'query', 'value': 'Are there any critical CVEs?'},
+            ],
+            'sessionAttributes': {'access_tier': 'limited'},
+        }
+        response = mod.lambda_handler(event, None)
+
+        import json
+        body = json.loads(
+            response['response']['functionResponse']['responseBody']['TEXT']['body'],
+        )
+        assert body['status'] == 'success'
+        assert body['access_tier'] == 'limited'
+        assert body['dashboard_url'] == 'https://advisories.opensearch.org'
+        assert body['results'] == []
+
+    def test_returns_limited_even_if_session_says_privileged(self):
+        """get_advisory_summary always returns limited response regardless of session."""
+        mod, _, _, _ = _load_lambda_function()
+
+        event = {
+            'function': 'get_advisory_summary',
+            'actionGroup': 'securityAdvisoriesLimitedActions',
+            'parameters': [
+                {'name': 'query', 'value': 'Show me critical CVEs'},
+            ],
+            'sessionAttributes': {'access_tier': 'privileged'},
+        }
+        response = mod.lambda_handler(event, None)
+
+        import json
+        body = json.loads(
+            response['response']['functionResponse']['responseBody']['TEXT']['body'],
+        )
+        assert body['access_tier'] == 'limited'
+
+    def test_does_not_call_vulnerability_handler(self):
+        """get_advisory_summary should never invoke the vulnerability handler."""
+        mock_vuln = MagicMock()
+        mock_vuln.handle_query_vulnerabilities = MagicMock(
+            return_value={'status': 'success', 'results': []},
+        )
+        mod, _, _, _ = _load_lambda_function(mock_vuln_handler=mock_vuln)
+
+        event = {
+            'function': 'get_advisory_summary',
+            'actionGroup': 'securityAdvisoriesLimitedActions',
+            'parameters': [
+                {'name': 'query', 'value': 'Show CVEs'},
+            ],
+            'sessionAttributes': {},
+        }
+        mod.lambda_handler(event, None)
+
+        mock_vuln.handle_query_vulnerabilities.assert_not_called()
+
+    def test_does_not_call_projects_handler(self):
+        """get_advisory_summary should never invoke the projects handler."""
+        mock_proj = MagicMock()
+        mock_proj.handle_list_projects = MagicMock(
+            return_value={'status': 'success', 'projects': []},
+        )
+        mod, _, _, _ = _load_lambda_function(mock_proj_handler=mock_proj)
+
+        event = {
+            'function': 'get_advisory_summary',
+            'actionGroup': 'securityAdvisoriesLimitedActions',
+            'parameters': [
+                {'name': 'query', 'value': 'list projects'},
+            ],
+            'sessionAttributes': {},
+        }
+        mod.lambda_handler(event, None)
+
+        mock_proj.handle_list_projects.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
 # Unknown function handling
 # ---------------------------------------------------------------------------
 
@@ -226,6 +325,7 @@ class TestUnknownFunctionHandling:
         assert 'available_functions' in body
         assert 'query_vulnerabilities' in body['available_functions']
         assert 'list_projects' in body['available_functions']
+        assert 'get_advisory_summary' in body['available_functions']
 
     def test_empty_function_name_returns_error(self):
         mod, _, _, _ = _load_lambda_function()
