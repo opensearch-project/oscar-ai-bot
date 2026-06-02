@@ -18,6 +18,8 @@ import json
 import logging
 from typing import Any, Dict, Optional
 
+from aws_utils import get_latest_scans_index, opensearch_request
+
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
@@ -75,7 +77,6 @@ def agentic_search(pipeline: str, query_text: str, index: str = None) -> Dict[st
     Raises:
         AgenticSearchError: On request failure with status code and reason.
     """
-    from aws_utils import get_latest_scans_index, opensearch_request
 
     if index is None:
         index = get_latest_scans_index()
