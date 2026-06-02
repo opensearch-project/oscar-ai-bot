@@ -13,6 +13,7 @@ Functions:
     opensearch_request: Make signed HTTP request to OpenSearch
 """
 
+import json
 import logging
 
 import boto3
@@ -78,7 +79,6 @@ def get_latest_scans_index() -> str:
     Raises:
         RuntimeError: If no scan documents are found or the request fails.
     """
-    import json
 
     body = json.dumps({
         'size': 1,
