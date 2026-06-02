@@ -80,6 +80,13 @@ NEGLECTED_PAGE_BASE = "https://advisories.opensearch.org/advisories/neglected/"
 VALID_AGE_VALUES = {"15d", "30d", "45d", "60d"}
 
 
+_DEFAULT_AGE = "60d"
+_DEFAULT_SEVERE = False
+_DEFAULT_RELEASES = False
+_DEFAULT_CRITICAL = False
+_DEFAULT_TAG = "origin/main"
+
+
 def build_neglected_page_url(
     age: Optional[str] = None,
     severe: Optional[bool] = None,
@@ -89,29 +96,35 @@ def build_neglected_page_url(
 ) -> str:
     """Build a neglected-page URL with query parameters matching the user's filters.
 
+    When a parameter is not provided (None), a sensible default is used so the
+    URL always contains a complete set of query parameters.
+
+    Defaults:
+        age="60d", severe=false, releases=false, critical=false, tag="origin/main"
+
     Parameters:
         age: Age threshold for neglected advisories. Valid values: "15d", "30d", "45d", "60d".
         severe: If True, only show high-severity advisories.
         releases: If True, only show release components.
         critical: If True, only show critical CVEs.
-        tag: Branch or tag in the CVE (e.g., "1.2.0.1", "2.x").
+        tag: Branch or tag in the CVE (e.g., "1.2.0.1", "2.x", "origin/main").
 
     Returns:
         Full URL to the neglected vulnerabilities page with applicable query params.
     """
-    params = {}
-    if age and age in VALID_AGE_VALUES:
-        params["age"] = age
-    if severe is not None:
-        params["severe"] = str(severe).lower()
-    if releases is not None:
-        params["releases"] = str(releases).lower()
-    if critical is not None:
-        params["critical"] = str(critical).lower()
-    if tag:
-        params["tag"] = tag
+    effective_age = age if (age and age in VALID_AGE_VALUES) else _DEFAULT_AGE
+    effective_severe = severe if severe is not None else _DEFAULT_SEVERE
+    effective_releases = releases if releases is not None else _DEFAULT_RELEASES
+    effective_critical = critical if critical is not None else _DEFAULT_CRITICAL
+    effective_tag = tag if tag else _DEFAULT_TAG
 
-    if params:
-        query_string = urlencode(sorted(params.items()))
-        return f"{NEGLECTED_PAGE_BASE}?{query_string}"
-    return NEGLECTED_PAGE_BASE
+    params = {
+        "age": effective_age,
+        "critical": str(effective_critical).lower(),
+        "releases": str(effective_releases).lower(),
+        "severe": str(effective_severe).lower(),
+        "tag": effective_tag,
+    }
+
+    query_string = urlencode(sorted(params.items()))
+    return f"{NEGLECTED_PAGE_BASE}?{query_string}"

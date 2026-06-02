@@ -13,12 +13,36 @@ Functions:
 
 import json
 import logging
-from typing import Any, Dict
+import re
+from typing import Any, Dict, List, Tuple
 
 from aws_utils import get_latest_scans_index, opensearch_request
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
+
+
+def _semver_sort_key(tag: str) -> Tuple:
+    """Generate a sort key for semantic version comparison.
+
+    Parses version strings like "2.19.6" or "2.9.0" into numeric tuples
+    so that sorting is numerically correct rather than lexicographic.
+
+    Non-version tags (e.g., "origin/main") sort to the end.
+
+    Args:
+        tag: Version tag string to parse.
+
+    Returns:
+        Tuple suitable for reverse sorting (version tags first, highest first).
+    """
+    match = re.match(r'^(\d+)(?:\.(\d+))?(?:\.(\d+))?(?:\.(\d+))?', tag)
+    if match:
+        parts = tuple(int(p) for p in match.groups() if p is not None)
+        # Return (1, version_parts) so version tags sort before non-version tags
+        return (1, parts)
+    # Non-version tags get (0,) so they sort after version tags in reverse
+    return (0, (tag,))
 
 
 def handle_list_projects(request_id: str) -> Dict[str, Any]:
@@ -84,9 +108,19 @@ def handle_list_projects(request_id: str) -> Dict[str, Any]:
         tag_buckets = bucket.get('tags', {}).get('buckets', [])
         tags = sorted(
             [tb['key'] for tb in tag_buckets],
+            key=_semver_sort_key,
             reverse=True,
         )
-        projects.append({'name': project_name, 'tags': tags})
+
+        # Determine the latest release version (highest semver, excluding branch tags)
+        version_tags = [t for t in tags if re.match(r'^\d+', t)]
+        latest_version = version_tags[0] if version_tags else None
+
+        project_entry: Dict[str, Any] = {'name': project_name, 'tags': tags}
+        if latest_version:
+            project_entry['latest_version'] = latest_version
+
+        projects.append(project_entry)
 
     # Sort projects alphabetically by name
     projects.sort(key=lambda p: p['name'])

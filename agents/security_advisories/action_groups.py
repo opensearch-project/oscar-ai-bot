@@ -84,7 +84,9 @@ def _privileged_action_group(
                     name="list_projects",
                     description=(
                         "List all projects and their available tags/versions in the scans index. "
-                        "Use to discover what components and release versions are available."
+                        "Use to discover what components and release versions are available. "
+                        "Each project includes a 'latest_version' field with the highest "
+                        "semantic version — use this when resolving 'most recent release' queries."
                     ),
                     parameters={},
                 ),

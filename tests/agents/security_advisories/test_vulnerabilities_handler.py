@@ -470,8 +470,8 @@ class TestPrivilegedResponseEnrichment:
         assert 'critical=true' in result['neglected_page_url']
         assert 'severe=true' in result['neglected_page_url']
 
-    def test_neglected_url_base_when_no_filter_params(self):
-        """Neglected URL is the base URL when no filter params are provided."""
+    def test_neglected_url_defaults_when_no_filter_params(self):
+        """Neglected URL uses defaults when no filter params are provided."""
         mock_agentic = _make_mock_agentic_search()
         mock_agentic.agentic_search.return_value = {
             'hits': {'hits': [SAMPLE_HIT]},
@@ -482,7 +482,13 @@ class TestPrivilegedResponseEnrichment:
             {'query': 'Show CVEs', '_access_tier': 'privileged'}, 'test-046',
         )
 
-        assert result['neglected_page_url'] == 'https://advisories.opensearch.org/advisories/neglected/'
+        url = result['neglected_page_url']
+        assert url.startswith('https://advisories.opensearch.org/advisories/neglected/')
+        assert 'age=60d' in url
+        assert 'severe=false' in url
+        assert 'releases=false' in url
+        assert 'critical=false' in url
+        assert 'tag=origin' in url
 
     def test_empty_results_still_has_neglected_url(self):
         """Even with no hits, privileged response includes neglected_page_url."""

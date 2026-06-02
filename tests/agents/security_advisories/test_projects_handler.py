@@ -137,10 +137,11 @@ class TestProjectsSortedAlphabetically:
 class TestTagsSortedDescending:
     """**Validates Property 7: List projects output ordering**
 
-    Each project's tags SHALL be sorted in descending order.
+    Each project's tags SHALL be sorted in descending semantic version order,
+    with version tags before non-version (branch) tags.
     """
 
-    def test_tags_sorted_descending(self):
+    def test_version_tags_before_branch_tags(self):
         mock_aws = MagicMock()
         mock_aws.opensearch_request.return_value = SAMPLE_AGG_RESPONSE
         mod, _ = _load_projects_handler(mock_aws_utils=mock_aws)
@@ -149,9 +150,16 @@ class TestTagsSortedDescending:
 
         for project in result['projects']:
             tags = project['tags']
-            assert tags == sorted(tags, reverse=True), (
-                f"Tags for {project['name']} not sorted descending: {tags}"
-            )
+            # Version tags (starting with a digit) should come before branch tags
+            saw_branch = False
+            for tag in tags:
+                if not tag[0].isdigit():
+                    saw_branch = True
+                elif saw_branch:
+                    assert False, (
+                        f"Version tag '{tag}' found after branch tag in "
+                        f"{project['name']}: {tags}"
+                    )
 
     def test_opensearch_tags_sorted_descending(self):
         mock_aws = MagicMock()
@@ -174,7 +182,8 @@ class TestTagsSortedDescending:
         osd_project = next(
             (p for p in result['projects'] if p['name'] == 'OpenSearch Dashboards'),
         )
-        assert osd_project['tags'] == ['origin/main', '2.19.6', '2.19.5']
+        # Version tags sorted descending by semver, branch tags at the end
+        assert osd_project['tags'] == ['2.19.6', '2.19.5', 'origin/main']
 
 
 # ---------------------------------------------------------------------------
