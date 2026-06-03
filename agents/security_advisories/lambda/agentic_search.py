@@ -39,6 +39,10 @@ def enhance_query(
 ) -> str:
     """Append version and project context to the natural language query.
 
+    Only appends version context if the version string is not already
+    present in the query, avoiding duplication like
+    "Show me CVEs for 2.2.0 for version 2.2.0".
+
     Args:
         query: Original natural language query.
         version: Optional version to scope the query (e.g., '2.19.6').
@@ -49,7 +53,7 @@ def enhance_query(
     """
     parts = [query]
 
-    if version:
+    if version and version not in query:
         parts.append(f'for version {version}')
 
     if project_name:

@@ -14,7 +14,7 @@ Functions:
 import json
 import logging
 import re
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, Tuple
 
 from aws_utils import get_latest_scans_index, opensearch_request
 
