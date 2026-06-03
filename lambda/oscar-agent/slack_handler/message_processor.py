@@ -167,11 +167,14 @@ class MessageProcessor:
             # The LLM cannot be reliably constrained via prompt instructions alone, so
             # we enforce the limited-tier response at the application layer: if the user
             # is not privileged AND the response contains the advisory dashboard link
-            # (indicating the security advisories collaborator was invoked), replace the
-            # entire response with the canonical dashboard-only message.
-            if not privilege and response and 'advisories.opensearch.org' in response:
-                response = LIMITED_ACCESS_MESSAGE
-                logger.info("Limited-tier override applied — replaced LLM response with canonical dashboard message")
+            # or CVE identifiers (indicating security advisory data leaked through —
+            # e.g. via conversation context), replace the entire response with the
+            # canonical dashboard-only message.
+            if not privilege and response:
+                cve_pattern = re.compile(r'CVE-\d{4}-\d+|GHSA-[a-z0-9]{4}-[a-z0-9]{4}-[a-z0-9]{4}')
+                if ('advisories.opensearch.org' in response or cve_pattern.search(response)):
+                    response = LIMITED_ACCESS_MESSAGE
+                    logger.info("Limited-tier override applied — replaced LLM response with canonical dashboard message")
 
             # Handle confirmation detection and warning reaction
             response = self._handle_confirmation_detection(response, channel, thread_ts)
