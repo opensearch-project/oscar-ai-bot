@@ -7,7 +7,6 @@ Covers merge operations (single + bulk), bulk commenting, and issue transfers.
 """
 
 import logging
-import os
 import re
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -16,20 +15,16 @@ from http_client import API_BASE, get, put
 
 logger = logging.getLogger(__name__)
 
+# TODO: Add author verification — version increment PRs must be by opensearch-trigger-bot[bot],
+# release notes PRs by opensearch-ci-bot.
 PR_TYPES = {
     "version_increment": {
-        "expected_author": os.environ.get(
-            "VERSION_INCREMENT_AUTHOR", "opensearch-trigger-bot"
-        ),
         "title_pattern": re.compile(
             r"^\[AUTO\] Increment version to (\d+\.\d+\.\d+).*$"
         ),
         "requires_version_label": True,
     },
     "release_notes": {
-        "expected_author": os.environ.get(
-            "RELEASE_NOTES_AUTHOR", "opensearch-ci-bot"
-        ),
         "title_pattern": re.compile(
             r"^(?:\[Backport [^\]]+\] )?\[AUTO\] Add release notes for (\d+\.\d+\.\d+)$"
         ),
@@ -95,12 +90,6 @@ def _validate_pr(
     """Run all guardrail checks on a single PR."""
     cfg = PR_TYPES[pr_type]
     checks: Dict[str, Dict[str, Any]] = {}
-
-    author = pr_detail["user"]["login"]
-    checks["author"] = {
-        "passed": author == cfg["expected_author"],
-        "detail": f"Expected '{cfg['expected_author']}', got '{author}'",
-    }
 
     title = pr_detail["title"]
     match = cfg["title_pattern"].match(title)

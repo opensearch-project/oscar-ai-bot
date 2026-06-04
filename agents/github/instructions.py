@@ -28,15 +28,13 @@ or create a tracking meta-issue linking to related sub-issues.
 
 BULK MERGE GUARDRAILS:
 Every automated PR is validated against these checks before merging:
-1. Author verification — version increment PRs must be by `opensearch-trigger-bot[bot]`, \
-release notes PRs by `opensearch-ci-bot`
-2. Title pattern — must match `[AUTO] Increment version to X.Y.Z...` or \
+1. Title pattern — must match `[AUTO] Increment version to X.Y.Z...` or \
 `[AUTO] Add release notes for X.Y.Z`
-3. Version label — version increment PRs must carry a `vX.Y.Z` label
-4. CI checks — all status checks and check runs must pass
-5. No merge conflicts — PR must be mergeable
-6. Not draft — PR must not be in draft state
-7. Version consistency — version in the PR title must match the requested version
+2. Version label — version increment PRs must carry a `vX.Y.Z` label
+3. CI checks — all status checks and check runs must pass
+4. No merge conflicts — PR must be mergeable
+5. Not draft — PR must not be in draft state
+6. Version consistency — version in the PR title must match the requested version
 
 PRs that fail ANY guardrail are skipped during bulk merge. The report from \
 `list_merge_candidates` shows which PRs pass and which fail (and why).

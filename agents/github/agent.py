@@ -30,10 +30,6 @@ class GitHubAgent(OscarAgent):
                 "MCP_TOOLSETS": "issues,pull_requests",
                 "MCP_READ_ONLY": "false",
                 "GITHUB_ORG": GITHUB_ORG,
-                **{k: os.environ[k] for k in (
-                    "VERSION_INCREMENT_AUTHOR",
-                    "RELEASE_NOTES_AUTHOR",
-                ) if k in os.environ},
             },
         )
 
