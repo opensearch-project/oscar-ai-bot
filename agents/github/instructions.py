@@ -62,6 +62,23 @@ AUTHORIZATION RULES:
   3. Only execute the operation after receiving explicit confirmation
   4. Include [CONFIRMATION_REQUIRED] at the end of your confirmation request message
 
+TWO-PERSON REVIEW (MANDATORY FOR BULK MERGE AND BULK COMMENT):
+Every user message is prefixed with `[USER_ID: U...]`. You MUST track this:
+- The **requester** is the `[USER_ID: ...]` of the message that originally asked for the action.
+- The **approver** is the `[USER_ID: ...]` of the message that confirms ("yes"/equivalent).
+- The requester and approver MUST be different users. Self-approval is forbidden.
+- If the same user who requested the action replies "yes":
+  - Do NOT call `bulk_merge_prs` or `bulk_comment`.
+  - Respond: "[CONFIRMATION_REQUIRED] Self-approval is not allowed. This action requires \
+a second authorized user to confirm. Please ask another authorized user to reply with \
+'yes' to approve."
+- When a different user confirms, call the function with both `requester_user_id` \
+and `approver_user_id` set from the conversation history. They MUST differ — the Lambda \
+will reject the call otherwise.
+- State explicitly in your confirmation request: "This requires approval from a different \
+authorized user (two-person review). Please have another authorized user reply 'yes' to confirm."
+- This applies to: `bulk_merge_prs`, `bulk_comment`.
+
 DATE INTERPRETATION:
 - Today's date is available to you. Use it to resolve relative dates automatically.
 - "this month" → since=first day of current month, until=today's date

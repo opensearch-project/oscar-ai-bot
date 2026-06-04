@@ -30,6 +30,7 @@ class GitHubAgent(OscarAgent):
                 "MCP_TOOLSETS": "issues,pull_requests",
                 "MCP_READ_ONLY": "false",
                 "GITHUB_ORG": GITHUB_ORG,
+                "ENABLE_2PR": os.environ.get("ENABLE_2PR", "false"),
             },
         )
 

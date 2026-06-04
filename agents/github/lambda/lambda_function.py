@@ -173,6 +173,35 @@ def _handle_direct_api(
         issue_numbers_str = params.get("issue_numbers", "")
         issue_numbers = [int(n.strip()) for n in issue_numbers_str.split(",") if n.strip()]
         body = params.get("body", "")
+
+        # Two-person review (only when ENABLE_2PR is on)
+        enable_2pr = os.environ.get("ENABLE_2PR", "false").lower() == "true"
+        requester_user_id = params.get("requester_user_id")
+        approver_user_id = params.get("approver_user_id")
+        if enable_2pr:
+            if not requester_user_id or not approver_user_id:
+                return json.dumps({
+                    "status": "error",
+                    "message": (
+                        "SECURITY ERROR: requester_user_id and approver_user_id are "
+                        "required for two-person approval."
+                    ),
+                })
+            if requester_user_id.strip() == approver_user_id.strip():
+                return json.dumps({
+                    "status": "error",
+                    "message": (
+                        f"SECURITY ERROR: Self-approval is not permitted. The user who "
+                        f"requested this comment ({requester_user_id.strip()}) cannot also "
+                        f"approve it. A different authorized user must confirm."
+                    ),
+                })
+            logger.info(
+                "GITHUB [%s]: TWO_PERSON_APPROVAL: requester=%s, approver=%s, "
+                "action=bulk_comment, repo=%s",
+                request_id, requester_user_id.strip(), approver_user_id.strip(), repo,
+            )
+
         logger.info(
             "GITHUB [%s]: Direct API bulk_comment on %s issues %s",
             request_id, repo, issue_numbers,
@@ -211,6 +240,34 @@ def _handle_direct_api(
                 "status": "error",
                 "message": "Bulk merge cancelled. confirmed=false.",
             })
+
+        # Two-person review (only when ENABLE_2PR is on)
+        enable_2pr = os.environ.get("ENABLE_2PR", "false").lower() == "true"
+        requester_user_id = params.get("requester_user_id")
+        approver_user_id = params.get("approver_user_id")
+        if enable_2pr:
+            if not requester_user_id or not approver_user_id:
+                return json.dumps({
+                    "status": "error",
+                    "message": (
+                        "SECURITY ERROR: requester_user_id and approver_user_id are "
+                        "required for two-person approval."
+                    ),
+                })
+            if requester_user_id.strip() == approver_user_id.strip():
+                return json.dumps({
+                    "status": "error",
+                    "message": (
+                        f"SECURITY ERROR: Self-approval is not permitted. The user who "
+                        f"requested this merge ({requester_user_id.strip()}) cannot also "
+                        f"approve it. A different authorized user must confirm."
+                    ),
+                })
+            logger.info(
+                "GITHUB [%s]: TWO_PERSON_APPROVAL: requester=%s, approver=%s, "
+                "action=bulk_merge_prs, version=%s",
+                request_id, requester_user_id.strip(), approver_user_id.strip(), version,
+            )
 
         logger.info(
             "GITHUB [%s]: bulk_merge_prs version=%s org=%s",

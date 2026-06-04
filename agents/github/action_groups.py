@@ -229,6 +229,18 @@ def get_action_groups(lambda_arn: str) -> List[bedrock.CfnAgent.AgentActionGroup
                                 True,
                             ),
                             "body": _param("string", "Comment body text (supports markdown)", True),
+                            "requester_user_id": _param(
+                                "string",
+                                "Slack user ID (e.g., 'U12345') of the user whose original message asked "
+                                "to post this comment. Take this from the [USER_ID: ...] tag of the request turn. "
+                                "MUST be different from approver_user_id (two-person review).",
+                            ),
+                            "approver_user_id": _param(
+                                "string",
+                                "Slack user ID (e.g., 'U67890') of the user whose immediately preceding "
+                                "message confirmed the comment. Take this from the [USER_ID: ...] tag of "
+                                "the confirmation turn. MUST be different from requester_user_id.",
+                            ),
                         },
                     ),
                 ]
@@ -278,6 +290,18 @@ def get_action_groups(lambda_arn: str) -> List[bedrock.CfnAgent.AgentActionGroup
                                 "string",
                                 "REQUIRED: Must be 'true' to execute. Set to 'true' ONLY after user explicitly confirms.",
                                 True,
+                            ),
+                            "requester_user_id": _param(
+                                "string",
+                                "Slack user ID (e.g., 'U12345') of the user whose original message asked "
+                                "to merge PRs. Take this from the [USER_ID: ...] tag of the request turn. "
+                                "MUST be different from approver_user_id (two-person review).",
+                            ),
+                            "approver_user_id": _param(
+                                "string",
+                                "Slack user ID (e.g., 'U67890') of the user whose immediately preceding "
+                                "message confirmed the merge. Take this from the [USER_ID: ...] tag of "
+                                "the confirmation turn. MUST be different from requester_user_id.",
                             ),
                         },
                     ),
