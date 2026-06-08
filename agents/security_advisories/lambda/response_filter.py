@@ -80,8 +80,8 @@ NEGLECTED_PAGE_BASE = "https://advisories.opensearch.org/advisories/neglected/"
 VALID_AGE_VALUES = {"15d", "30d", "45d", "60d"}
 
 
-_DEFAULT_AGE = "60d"
-_DEFAULT_SEVERE = False
+_DEFAULT_AGE = "30d"
+_DEFAULT_SEVERE = True
 _DEFAULT_RELEASES = False
 _DEFAULT_CRITICAL = False
 _DEFAULT_TAG = "origin/main"
@@ -100,7 +100,7 @@ def build_neglected_page_url(
     URL always contains a complete set of query parameters.
 
     Defaults:
-        age="60d", severe=false, releases=false, critical=false, tag="origin/main"
+        age="30d", severe=true, releases=false, critical=false, tag="origin/main"
 
     Parameters:
         age: Age threshold for neglected advisories. Valid values: "15d", "30d", "45d", "60d".

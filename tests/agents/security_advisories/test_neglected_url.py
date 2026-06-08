@@ -187,8 +187,8 @@ class TestNeglectedPageUrlUnitTests:
         """No parameters returns a URL with all defaults applied."""
         url = build_neglected_page_url()
         expected = (
-            f"{NEGLECTED_PAGE_BASE}?age=60d&critical=false"
-            f"&releases=false&severe=false&tag=origin%2Fmain"
+            f"{NEGLECTED_PAGE_BASE}?age=30d&critical=false"
+            f"&releases=false&severe=true&tag=origin%2Fmain"
         )
         assert url == expected
 
@@ -198,8 +198,8 @@ class TestNeglectedPageUrlUnitTests:
             age=None, severe=None, releases=None, critical=None, tag=None,
         )
         expected = (
-            f"{NEGLECTED_PAGE_BASE}?age=60d&critical=false"
-            f"&releases=false&severe=false&tag=origin%2Fmain"
+            f"{NEGLECTED_PAGE_BASE}?age=30d&critical=false"
+            f"&releases=false&severe=true&tag=origin%2Fmain"
         )
         assert url == expected
 
@@ -245,13 +245,13 @@ class TestNeglectedPageUrlUnitTests:
         assert 'tag=2.19.6' in url
 
     def test_default_url_matches_expected(self):
-        """Default URL matches the expected defaults: age=60d&severe=false&releases=false&critical=false&tag=origin/main."""
+        """Default URL matches the expected defaults: age=30d&severe=true&releases=false&critical=false&tag=origin/main."""
         url = build_neglected_page_url()
         parsed = urlparse(url)
         params = parse_qs(parsed.query)
 
-        assert params['age'] == ['60d']
-        assert params['severe'] == ['false']
+        assert params['age'] == ['30d']
+        assert params['severe'] == ['true']
         assert params['releases'] == ['false']
         assert params['critical'] == ['false']
         assert params['tag'] == ['origin/main']

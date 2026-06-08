@@ -409,7 +409,7 @@ class TestPrivilegedResponseEnrichment:
 
         assert 'neglected_page_url' in result
         assert result['neglected_page_url'].startswith(
-            'https://advisories.opensearch.org/advisories/neglected/',
+            'https://advisories.opensearch.org/advisories/neglected/?',
         )
 
     def test_neglected_url_includes_age_param_from_age_days(self):
@@ -483,9 +483,9 @@ class TestPrivilegedResponseEnrichment:
         )
 
         url = result['neglected_page_url']
-        assert url.startswith('https://advisories.opensearch.org/advisories/neglected/')
-        assert 'age=60d' in url
-        assert 'severe=false' in url
+        assert url.startswith('https://advisories.opensearch.org/advisories/neglected/?')
+        assert 'age=30d' in url
+        assert 'severe=true' in url
         assert 'releases=false' in url
         assert 'critical=false' in url
         assert 'tag=origin' in url
