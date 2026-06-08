@@ -339,36 +339,36 @@ def validate_comment(
 
 
 def validate_bulk_comment(
-    token: str, org: str, repo: str, issue_numbers: List[int], body: str,
+    token: str, org: str, issue_targets: List[tuple], body: str,
 ) -> Dict[str, Any]:
-    if len(issue_numbers) > BULK_COMMENT_MAX_ISSUES:
+    if len(issue_targets) > BULK_COMMENT_MAX_ISSUES:
         return {
             "status": "error", "all_passed": False,
             "message": (
-                f"Bulk comment rejected: {len(issue_numbers)} issues exceeds "
+                f"Bulk comment rejected: {len(issue_targets)} issues exceeds "
                 f"the maximum of {BULK_COMMENT_MAX_ISSUES}."
             ),
         }
 
-    allowed: List[int] = []
+    allowed: List[Dict] = []
     blocked: List[Dict] = []
-    for num in issue_numbers:
+    for repo, num in issue_targets:
         result = validate_comment(token, org, repo, num, body)
         if result["all_passed"]:
-            allowed.append(num)
+            allowed.append({"repo": repo, "issue_number": num})
         else:
             failed_names = [n for n, chk in result["checks"].items() if not chk["passed"]]
-            blocked.append({"issue_number": num, "reasons": failed_names})
+            blocked.append({"repo": repo, "issue_number": num, "reasons": failed_names})
 
     return {
         "status": "success" if not blocked else "partial",
         "all_passed": len(blocked) == 0,
-        "total": len(issue_numbers),
+        "total": len(issue_targets),
         "allowed": allowed, "allowed_count": len(allowed),
         "blocked": blocked, "blocked_count": len(blocked),
         "message": (
             f"Bulk comment validation: {len(allowed)} allowed, {len(blocked)} blocked "
-            f"out of {len(issue_numbers)} issues."
+            f"out of {len(issue_targets)} issues."
         ),
     }
 

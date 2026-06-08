@@ -91,20 +91,27 @@ def add_comment(
 
 
 def bulk_comment(
-    token: str, owner: str, repo: str, issue_numbers: List[int], body: str,
+    token: str, owner: str, issue_targets: List[tuple], body: str,
 ) -> str:
-    """Add the same comment to multiple issues/PRs. Returns per-issue results."""
+    """Add the same comment to multiple issues/PRs across repos.
+
+    Args:
+        token: GitHub auth token
+        owner: Organization name
+        issue_targets: List of (repo, issue_number) tuples
+        body: Comment body text
+    """
     results = []
-    for num in issue_numbers:
+    for repo, num in issue_targets:
         try:
             resp = post(token, f"/repos/{owner}/{repo}/issues/{num}/comments",
                         json_body={"body": body})
-            results.append({"issue_number": num, "status": "success", "url": resp.get("html_url", "")})
+            results.append({"repo": repo, "issue_number": num, "status": "success", "url": resp.get("html_url", "")})
         except (GitHubAPIError, Exception) as e:
-            results.append({"issue_number": num, "status": "error", "error": str(e)})
+            results.append({"repo": repo, "issue_number": num, "status": "error", "error": str(e)})
     return json.dumps({
         "results": results,
-        "total": len(issue_numbers),
+        "total": len(issue_targets),
         "succeeded": sum(1 for r in results if r["status"] == "success"),
     })
 

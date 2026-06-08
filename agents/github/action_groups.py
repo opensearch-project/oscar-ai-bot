@@ -154,6 +154,18 @@ def get_action_groups(lambda_arn: str) -> List[bedrock.CfnAgent.AgentActionGroup
                                 "Set to 'true' to override guardrail failures for automated PRs. "
                                 "Only use when the user explicitly requests a force merge.",
                             ),
+                            "requester_user_id": _param(
+                                "string",
+                                "Slack user ID (U...) of the user who originally requested "
+                                "the merge. Extract from [USER_ID: ...] prefix. "
+                                "MUST be different from approver_user_id (two-person review).",
+                            ),
+                            "approver_user_id": _param(
+                                "string",
+                                "Slack user ID (U...) of the user who confirmed/approved "
+                                "the merge. Extract from [USER_ID: ...] prefix of "
+                                "the confirmation turn. MUST be different from requester_user_id.",
+                            ),
                         },
                     ),
                     bedrock.CfnAgent.FunctionProperty(
@@ -217,15 +229,17 @@ def get_action_groups(lambda_arn: str) -> List[bedrock.CfnAgent.AgentActionGroup
                     bedrock.CfnAgent.FunctionProperty(
                         name="bulk_comment",
                         description=(
-                            "Add the same comment to multiple issues or pull requests at once. "
+                            "Add the same comment to multiple issues or pull requests at once, "
+                            "even across different repositories. "
                             "Useful for announcements, release notes, or campaign-style updates. "
                             "Requires explicit user confirmation before execution."
                         ),
                         parameters={
-                            "repo": _param("string", "Repository name", True),
-                            "issue_numbers": _param(
+                            "issues": _param(
                                 "string",
-                                "Comma-separated issue or PR numbers to comment on",
+                                "Comma-separated list of repo#number pairs identifying the issues to comment on. "
+                                "Format: 'repo1#1,repo2#2,repo3#5'. Each entry is repo_name#issue_number. "
+                                "Example: 'opensearch-build#1,flow-framework#2,reporting#2'",
                                 True,
                             ),
                             "body": _param("string", "Comment body text (supports markdown)", True),

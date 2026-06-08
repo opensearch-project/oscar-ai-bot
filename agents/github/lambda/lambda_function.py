@@ -170,9 +170,23 @@ def _handle_direct_api(
         return add_comment(token, ORG, repo, issue_number, body)
 
     elif function_name == "bulk_comment":
-        issue_numbers_str = params.get("issue_numbers", "")
-        issue_numbers = [int(n.strip()) for n in issue_numbers_str.split(",") if n.strip()]
         body = params.get("body", "")
+
+        # Parse issues parameter (format: "repo1#1,repo2#2,repo3#5")
+        issues_str = params.get("issues", "")
+        # Also support legacy single-repo format for backward compatibility
+        if not issues_str:
+            legacy_repo = params.get("repo", repo)
+            issue_numbers_str = params.get("issue_numbers", "")
+            issue_numbers = [int(n.strip()) for n in issue_numbers_str.split(",") if n.strip()]
+            issue_targets = [(legacy_repo, num) for num in issue_numbers]
+        else:
+            issue_targets = []
+            for entry in issues_str.split(","):
+                entry = entry.strip()
+                if "#" in entry:
+                    r, num = entry.rsplit("#", 1)
+                    issue_targets.append((r.strip(), int(num.strip())))
 
         # Two-person review (only when ENABLE_2PR is on)
         enable_2pr = os.environ.get("ENABLE_2PR", "false").lower() == "true"
@@ -198,15 +212,15 @@ def _handle_direct_api(
                 })
             logger.info(
                 "GITHUB [%s]: TWO_PERSON_APPROVAL: requester=%s, approver=%s, "
-                "action=bulk_comment, repo=%s",
-                request_id, requester_user_id.strip(), approver_user_id.strip(), repo,
+                "action=bulk_comment, issues=%s",
+                request_id, requester_user_id.strip(), approver_user_id.strip(), issue_targets,
             )
 
         logger.info(
-            "GITHUB [%s]: Direct API bulk_comment on %s issues %s",
-            request_id, repo, issue_numbers,
+            "GITHUB [%s]: Direct API bulk_comment on %d issues",
+            request_id, len(issue_targets),
         )
-        return bulk_comment(token, ORG, repo, issue_numbers, body)
+        return bulk_comment(token, ORG, issue_targets, body)
 
     elif function_name == "list_merge_candidates":
         version = params.get("version", "")
@@ -325,6 +339,36 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             repo = params.get("repo", "")
             pr_number = int(params.get("pr_number", "0"))
             force = str(params.get("force", "")).strip().lower() in ("true", "1", "yes")
+
+            # Two-person review (only when ENABLE_2PR is on)
+            enable_2pr = os.environ.get("ENABLE_2PR", "false").lower() == "true"
+            requester_user_id = params.get("requester_user_id")
+            approver_user_id = params.get("approver_user_id")
+            if enable_2pr:
+                if not requester_user_id or not approver_user_id:
+                    return create_response(event, json.dumps({
+                        "status": "error",
+                        "message": (
+                            "SECURITY ERROR: requester_user_id and approver_user_id are "
+                            "required for two-person approval."
+                        ),
+                    }))
+                if requester_user_id.strip() == approver_user_id.strip():
+                    return create_response(event, json.dumps({
+                        "status": "error",
+                        "message": (
+                            f"SECURITY ERROR: Self-approval is not permitted. The user who "
+                            f"requested this merge ({requester_user_id.strip()}) cannot also "
+                            f"approve it. A different authorized user must confirm."
+                        ),
+                    }))
+                logger.info(
+                    "GITHUB [%s]: TWO_PERSON_APPROVAL: requester=%s, approver=%s, "
+                    "action=merge_pr, repo=%s, pr=%d",
+                    request_id, requester_user_id.strip(), approver_user_id.strip(),
+                    repo, pr_number,
+                )
+
             guardrail_result = validate_single_pr(token, ORG, repo, pr_number)
             if guardrail_result.get("is_auto_pr") and not guardrail_result.get("all_passed"):
                 if force:
@@ -355,11 +399,21 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
                 return create_response(event, guardrail_result)
 
         elif function_name == "bulk_comment":
-            repo = params.get("repo", "")
-            issue_numbers_str = params.get("issue_numbers", "")
-            issue_numbers = [int(n.strip()) for n in issue_numbers_str.split(",") if n.strip()]
             body = params.get("body", "")
-            guardrail_result = validate_bulk_comment(token, ORG, repo, issue_numbers, body)
+            issues_str = params.get("issues", "")
+            if issues_str:
+                issue_targets = []
+                for entry in issues_str.split(","):
+                    entry = entry.strip()
+                    if "#" in entry:
+                        r, num = entry.rsplit("#", 1)
+                        issue_targets.append((r.strip(), int(num.strip())))
+            else:
+                legacy_repo = params.get("repo", "")
+                issue_numbers_str = params.get("issue_numbers", "")
+                issue_numbers = [int(n.strip()) for n in issue_numbers_str.split(",") if n.strip()]
+                issue_targets = [(legacy_repo, num) for num in issue_numbers]
+            guardrail_result = validate_bulk_comment(token, ORG, issue_targets, body)
             if not guardrail_result["all_passed"]:
                 logger.warning(
                     "GITHUB [%s]: bulk_comment blocked by guardrails: %d/%d issues blocked",
