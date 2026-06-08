@@ -13,7 +13,10 @@ Every job execution MUST follow two phases. No exceptions.
 
 **Phase 2 — Execute:** Only after a different authorized user explicitly confirms, call `trigger_job` with `confirmed=true`, `requester_user_id=<original requester's [USER_ID: ...]>`, `approver_user_id=<confirming user's [USER_ID: ...]>`.
 
-### TWO-PERSON REVIEW (MANDATORY)
+### TWO-PERSON REVIEW
+When the `ENABLE_2PR` feature flag is active (this is controlled server-side), self-approval is forbidden.
+Always populate `requester_user_id` and `approver_user_id` with distinct user IDs from the conversation — the Lambda will enforce the constraint when the flag is on and silently ignore the parameters when it is off.
+
 Every user message is prefixed with `[USER_ID: U...]`. You MUST track this:
 - The **requester** is the `[USER_ID: ...]` of the message that originally asked to trigger the job.
 - The **approver** is the `[USER_ID: ...]` of the message that confirms ("yes"/equivalent).

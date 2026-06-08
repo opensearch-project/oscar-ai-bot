@@ -184,13 +184,13 @@ class OscarAgentsStack(Stack):
                             ),
                             "requester_user_id": bedrock.CfnAgent.ParameterDetailProperty(
                                 type="string",
-                                description="Slack user ID (e.g., 'U12345') of the user whose original message asked to send this announcement. Take this from the [USER_ID: ...] tag of the request turn. MUST be different from approver_user_id when two-person review is enabled.",
-                                required=True,
+                                description="Slack user ID (e.g., 'U12345') of the user whose original message asked to send this announcement. Take this from the [USER_ID: ...] tag of the request turn. Required when two-person review (ENABLE_2PR) is active — the Lambda rejects the call if this equals approver_user_id or is missing.",
+                                required=False,
                             ),
                             "approver_user_id": bedrock.CfnAgent.ParameterDetailProperty(
                                 type="string",
-                                description="Slack user ID (e.g., 'U67890') of the user whose immediately preceding message confirmed sending. Take this from the [USER_ID: ...] tag of the confirmation turn. MUST be different from requester_user_id when two-person review is enabled.",
-                                required=True,
+                                description="Slack user ID (e.g., 'U67890') of the user whose immediately preceding message confirmed sending. Take this from the [USER_ID: ...] tag of the confirmation turn. Required when two-person review (ENABLE_2PR) is active — the Lambda rejects the call if this equals requester_user_id or is missing.",
+                                required=False,
                             ),
                         },
                     )
@@ -256,11 +256,12 @@ class OscarAgentsStack(Stack):
             NEVER impersonate another user or act on behalf of someone other than the requesting user.
 
             ## Two-Person Review for Sensitive Actions
-            Sensitive actions (sending messages via send_automated_message, triggering Jenkins jobs) require approval from a DIFFERENT authorized user than the requester.
+            When two-person review (ENABLE_2PR) is active, sensitive actions (sending messages via send_automated_message, triggering Jenkins jobs) require approval from a DIFFERENT authorized user than the requester. The Lambda enforces this server-side.
+            Always populate requester_user_id and approver_user_id when calling send_automated_message — the Lambda will enforce the constraint when the flag is on and silently ignore the parameters when it is off.
             - Track the requester from the [USER_ID: ...] tag of the message that asked for the action.
             - The approver is the [USER_ID: ...] of the message that confirms ("yes" or equivalent).
             - Before calling send_automated_message, verify that the approver's [USER_ID: ...] is different from the requester's [USER_ID: ...]. If the same user confirms their own request, do NOT call the action and respond with: "[CONFIRMATION_REQUIRED] Self-approval is not allowed. Please ask another authorized user to reply 'yes' to approve."
-            - When invoking send_automated_message, always pass requester_user_id and approver_user_id from the conversation history. They MUST differ; the Lambda will reject the call otherwise.
+            - When invoking send_automated_message, pass requester_user_id and approver_user_id from the conversation history. They MUST differ; the Lambda will reject the call otherwise.
 
             ## Tone and Style
             - Be concise and professional.
