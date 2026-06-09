@@ -10,6 +10,8 @@ from unittest.mock import MagicMock, patch
 
 # Add jenkins directory to path for imports
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', '..', 'agents', 'jenkins', 'lambda'))
+# Add shared layer to path (simulates Lambda layer at runtime)
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', '..', 'lambda', 'shared-layer', 'python'))
 
 from jenkins_client import JenkinsClient, JenkinsCredentials  # noqa: E402
 from job_definitions import (JobDefinition, JobParameter,  # noqa: E402

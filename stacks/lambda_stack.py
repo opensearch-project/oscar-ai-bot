@@ -61,6 +61,14 @@ class OscarLambdaStack(Stack):
 
         self.lambda_functions: Dict[str, PythonFunction] = {}
 
+        # Shared layer for common utilities (e.g. two-person approval guard)
+        self.shared_layer = aws_lambda.LayerVersion(
+            self, "OscarSharedLayer",
+            code=aws_lambda.Code.from_asset("lambda/shared-layer"),
+            compatible_runtimes=[aws_lambda.Runtime.PYTHON_3_12],
+            description="Shared utilities for OSCAR Lambda functions",
+        )
+
         # Core lambdas
         self._create_supervisor_agent_lambda()
         self._create_communication_handler_lambda()
@@ -87,6 +95,7 @@ class OscarLambdaStack(Stack):
             role=execution_role,
             description="Main OSCAR agent with Slack event processing capabilities",
             reserved_concurrent_executions=10,
+            layers=[self.shared_layer],
         )
         function.add_permission(
             "AllowBedrockInvoke",
@@ -119,6 +128,7 @@ class OscarLambdaStack(Stack):
             role=execution_role,
             description="Communication handler for OSCAR Bedrock action groups",
             reserved_concurrent_executions=20,
+            layers=[self.shared_layer],
         )
         function.add_permission(
             "AllowBedrockInvoke",
@@ -166,6 +176,7 @@ class OscarLambdaStack(Stack):
                 role=role,
                 description=f"OSCAR {agent.name} agent lambda function",
                 reserved_concurrent_executions=config.reserved_concurrency,
+                layers=[self.shared_layer],
             )
 
             if config.needs_vpc and self.vpc_stack:

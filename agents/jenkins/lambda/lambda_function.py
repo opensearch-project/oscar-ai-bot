@@ -20,6 +20,7 @@ from typing import Any, Dict
 from config import config
 from jenkins_client import JenkinsClient
 from jenkinsfile_fetcher import get_job_registry
+from oscar_shared.approval_guard import validate_two_person_approval
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -186,28 +187,10 @@ def handle_trigger_job(jenkins_client: JenkinsClient, params: Dict[str, Any]) ->
         }
 
     # Two-person review (only when ENABLE_2PR is on)
-    requester_user_id = params.get('requester_user_id')
-    approver_user_id = params.get('approver_user_id')
-    if config.enable_2pr:
-        if not requester_user_id or not approver_user_id:
-            return {
-                'status': 'error',
-                'message': 'SECURITY ERROR: requester_user_id and approver_user_id are required for two-person approval.',
-                'job_name': job_name,
-            }
-        if requester_user_id.strip() == approver_user_id.strip():
-            return {
-                'status': 'error',
-                'message': (
-                    f'SECURITY ERROR: Self-approval is not permitted. The user who requested this job '
-                    f'({requester_user_id.strip()}) cannot also approve it. A different authorized user must confirm.'
-                ),
-                'job_name': job_name,
-            }
-        logger.info(
-            f'JENKINS_TWO_PERSON_APPROVAL: requester={requester_user_id.strip()}, '
-            f'approver={approver_user_id.strip()}, job={job_name}'
-        )
+    approval_error = validate_two_person_approval(params, config.enable_2pr, f'job={job_name}')
+    if approval_error:
+        approval_error['job_name'] = job_name
+        return approval_error
 
     if not job_name:
         return {

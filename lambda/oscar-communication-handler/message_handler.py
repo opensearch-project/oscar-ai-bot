@@ -13,6 +13,7 @@ from channel_utils import ChannelUtils
 from config import config
 from context_storage import get_storage
 from message_formatter import MessageFormatter
+from oscar_shared.approval_guard import validate_two_person_approval
 from response_builder import ResponseBuilder
 from slack_client import SlackClientManager
 
@@ -54,23 +55,10 @@ class MessageHandler:
                 return self.response_builder.create_error_response(action_group, function_name, 'Confirmed was not True')
 
             # Two-person review (only when ENABLE_2PR is on)
-            requester_user_id = params.get('requester_user_id')
-            approver_user_id = params.get('approver_user_id')
-            if config.enable_2pr:
-                if not requester_user_id or not approver_user_id:
-                    return self.response_builder.create_error_response(
-                        action_group, function_name,
-                        'SECURITY ERROR: requester_user_id and approver_user_id are required for two-person approval.'
-                    )
-                if requester_user_id.strip() == approver_user_id.strip():
-                    return self.response_builder.create_error_response(
-                        action_group, function_name,
-                        f'SECURITY ERROR: Self-approval is not permitted. The user who requested this message '
-                        f'({requester_user_id.strip()}) cannot also approve it. A different authorized user must confirm.'
-                    )
-                logger.info(
-                    f'COMMUNICATION_TWO_PERSON_APPROVAL: requester={requester_user_id.strip()}, '
-                    f'approver={approver_user_id.strip()}, channel={target_channel}'
+            approval_error = validate_two_person_approval(params, config.enable_2pr, f'channel={target_channel}')
+            if approval_error:
+                return self.response_builder.create_error_response(
+                    action_group, function_name, approval_error['message']
                 )
 
             logger.info(f"Processing message request: query='{query}', channel='{target_channel}'")

@@ -14,6 +14,9 @@ from unittest.mock import MagicMock, patch
 _COMM_DIR = os.path.abspath(os.path.join(
     os.path.dirname(__file__), '..', '..', '..', 'lambda', 'oscar-communication-handler',
 ))
+_SHARED_LAYER_DIR = os.path.abspath(os.path.join(
+    os.path.dirname(__file__), '..', '..', '..', 'lambda', 'shared-layer', 'python',
+))
 
 
 def _load_comm_handler():
@@ -117,6 +120,7 @@ class TestCommunicationHandlerLambda:
 
 def _load_message_handler():
     """Load message_handler module by file path with mocked external deps."""
+    sys.path.insert(0, _SHARED_LAYER_DIR)
     sys.path.insert(0, _COMM_DIR)
     try:
         for name in ['message_handler', 'channel_utils', 'context_storage',
@@ -134,6 +138,7 @@ def _load_message_handler():
         return mod, stub_config
     finally:
         sys.path.remove(_COMM_DIR)
+        sys.path.remove(_SHARED_LAYER_DIR)
 
 
 class TestSendMessageTwoPersonApproval:
