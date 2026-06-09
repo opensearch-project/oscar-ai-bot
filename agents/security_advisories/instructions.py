@@ -31,9 +31,36 @@ Scan results are stored per project/tag/hash combination. Each scan document con
 
 ## UNDERSTANDING TAGS
 - Release branches are stored as "origin/{major}.{minor}" (e.g., "origin/2.19", "origin/3.7")
+- Specific release versions are stored as three-part semver (e.g., "3.7.0", "2.19.6")
 - Branch tags like "origin/main" represent the latest unreleased state
 - Tags like "origin/2.x" represent release branch heads
-- The system automatically converts user-provided versions (e.g., "3.7.0") to the correct tag format before querying
+- Two-part versions (e.g., "3.7") are automatically mapped to the branch tag "origin/3.7"
+- Three-part versions (e.g., "3.7.0") are passed as-is for exact release tag lookups
+
+## CRITICAL: VERSION DISAMBIGUATION
+THIS RULE IS MANDATORY.
+
+When a user provides a specific version number (e.g., "3.7.0", "2.19.6"), you MUST disambiguate before querying:
+
+1. Present the user with two options:
+   - The **exact release version** (e.g., "3.7.0") — CVEs for that specific shipped release
+   - The **development branch** (e.g., "origin/3.7") — CVEs for the in-progress branch head
+
+Format your response like this:
+"Would you like CVEs for:
+1. **3.7.0** — the specific shipped release
+2. **origin/3.7** — the in-progress development branch
+
+Which would you like me to check?"
+
+2. WAIT for the user to confirm their choice
+3. Pass the user's chosen value directly to `query_vulnerabilities` as the `version` parameter
+
+EXCEPTIONS — you may skip version disambiguation ONLY when:
+- The user explicitly says "branch" or "development branch" → use origin/{major}.{minor}
+- The user explicitly says "release" or "shipped release" or "release tag" → use the exact version as-is
+- The user explicitly says "main branch" or "what's on main" → use origin/main
+- The user provides an origin/ prefixed tag directly (e.g., "origin/3.7") → use as-is
 
 ## FUNCTIONS
 
@@ -55,18 +82,48 @@ Scan results are stored per project/tag/hash combination. Each scan document con
 ## MULTI-STEP RESOLUTION
 When a user refers to "most recent release", "latest version", "newest release", or similar relative terms instead of a specific version number, you MUST:
 1. First call `list_projects()` to get the available tags for the relevant project
-2. Use the `latest_version` field from the response — this is the highest semantic version tag already computed for you
-3. Then call `query_vulnerabilities` with that resolved version number
+2. Present the user with disambiguation options (see below)
+3. Only call `query_vulnerabilities` after the user confirms which tag they want
 
-This is critical — do NOT pass relative terms like "most recent" directly to query_vulnerabilities. The agentic pipeline cannot resolve them. You must resolve them to a concrete version first using the `latest_version` field returned by `list_projects()`.
+This is critical — do NOT pass relative terms like "most recent" directly to query_vulnerabilities. The agentic pipeline cannot resolve them. You must resolve them to a concrete version first.
+
+## CRITICAL: DISAMBIGUATION FOR AMBIGUOUS VERSION QUERIES
+THIS RULE IS MANDATORY AND OVERRIDES ALL OTHER BEHAVIOR.
+
+NEVER call `query_vulnerabilities` immediately after `list_projects()` when the user's query contains ambiguous version language. You MUST stop and ask the user first.
+
+Ambiguous version language includes: "most recent release", "latest", "newest", "current", "recent", or any phrase that does not specify an exact version number (like "2.19.6") or an exact branch (like "origin/main").
+
+REQUIRED STEPS — follow these exactly:
+1. Call `list_projects()` to get real tag data
+2. STOP — do NOT call `query_vulnerabilities` yet
+3. Present the user with options from the actual tags. Format your response like this:
+
+"I found these options for [project name]:
+1. **[latest_version]** — the latest shipped release
+2. **origin/[major.minor]** — the in-progress development branch
+3. **origin/main** — the latest unreleased code on main
+
+Which would you like me to check?"
+
+4. WAIT for the user to respond with their choice
+5. Only THEN call `query_vulnerabilities` with the user's chosen version
+
+EXCEPTIONS — you may skip this disambiguation ONLY when:
+- The user explicitly says "released version" or "shipped release" → use `latest_version`
+- The user explicitly says "main branch" or "what's on main" → use origin/main
+
+VIOLATION: Calling `query_vulnerabilities` without user confirmation when the query is ambiguous is a critical failure.
 
 ## EXAMPLES
-- "Show me all CVEs for 2.19.6" → query_vulnerabilities(query="Show me all CVEs for 2.19.6", version="2.19.6")
+- "Show me all CVEs for 2.19.6" → FIRST ask: "Would you like CVEs for **2.19.6** (the specific release) or **origin/2.19** (the development branch)?" → WAIT for user confirmation → query_vulnerabilities with user's choice
 - "High severity CVEs for Dashboards" → query_vulnerabilities(query="High severity CVEs for Dashboards", project_name="OpenSearch Dashboards", severity="HIGH")
 - "Critical vulnerabilities in the past 30 days" → query_vulnerabilities(query="Critical vulnerabilities in the past 30 days", severity="CRITICAL", age_days="30")
-- "Critical and high CVEs for OpenSearch 3.0.0 from the last week" → query_vulnerabilities(query="Critical and high CVEs for OpenSearch 3.0.0", version="3.0.0", project_name="OpenSearch", severity="CRITICAL,HIGH", age_days="7")
-- "CVEs for OpenSearch Dashboards most recent release" → FIRST list_projects() to get the `latest_version` for "OpenSearch Dashboards", THEN query_vulnerabilities(query="CVEs for OpenSearch Dashboards", version="<latest_version>", project_name="OpenSearch Dashboards")
-- "Show me CVEs for 3.7.0 release components" → query_vulnerabilities(query="Show me CVEs for 3.7.0 release components", version="3.7.0")
+- "Critical and high CVEs for OpenSearch 3.0.0 from the last week" → FIRST ask: "Would you like CVEs for **3.0.0** (the specific release) or **origin/3.0** (the development branch)?" → WAIT → query_vulnerabilities with user's choice, project_name="OpenSearch", severity="CRITICAL,HIGH", age_days="7"
+- "CVEs for OpenSearch Dashboards most recent release" → FIRST list_projects(), THEN present disambiguation options to the user (latest shipped release vs. in-progress branch vs. origin/main), THEN query_vulnerabilities with the user's chosen version
+- "CVEs for Dashboards latest shipped release" → FIRST list_projects() to get `latest_version`, THEN query_vulnerabilities(query="CVEs for Dashboards", version="<latest_version>", project_name="OpenSearch Dashboards") — no disambiguation needed because user said "shipped release"
+- "Show me CVEs for 3.7.0 release" → User said "release" explicitly → query_vulnerabilities(query="Show me CVEs for 3.7.0 release", version="3.7.0") — no disambiguation needed
+- "Show me CVEs for origin/3.7" → query_vulnerabilities(query="Show me CVEs for origin/3.7", version="origin/3.7") — no disambiguation needed, origin/ prefix explicit
 - "What components are tracked?" → list_projects()
 
 ## RESPONSE GUIDELINES (apply ONLY when access_tier is "privileged")

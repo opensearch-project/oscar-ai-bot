@@ -16,6 +16,8 @@ import logging
 import re
 from typing import Any, Dict, Tuple
 
+import semver
+
 from aws_utils import get_latest_scans_index, opensearch_request
 
 logger = logging.getLogger(__name__)
@@ -25,9 +27,7 @@ logger.setLevel(logging.INFO)
 def _semver_sort_key(tag: str) -> Tuple:
     """Generate a sort key for semantic version comparison.
 
-    Parses version strings like "2.19.6" or "2.9.0" into numeric tuples
-    so that sorting is numerically correct rather than lexicographic.
-
+    Handles standard semver (e.g., "2.19.6", "3.7.0").
     Non-version tags (e.g., "origin/main") sort to the end.
 
     Args:
@@ -36,11 +36,12 @@ def _semver_sort_key(tag: str) -> Tuple:
     Returns:
         Tuple suitable for reverse sorting (version tags first, highest first).
     """
-    match = re.match(r'^(\d+)(?:\.(\d+))?(?:\.(\d+))?(?:\.(\d+))?', tag)
-    if match:
-        parts = tuple(int(p) for p in match.groups() if p is not None)
-        # Return (1, version_parts) so version tags sort before non-version tags
-        return (1, parts)
+    try:
+        version = semver.Version.parse(tag, optional_minor_and_patch=True)
+        return (1, version)
+    except ValueError:
+        pass
+
     # Non-version tags get (0,) so they sort after version tags in reverse
     return (0, (tag,))
 
@@ -116,9 +117,15 @@ def handle_list_projects(request_id: str) -> Dict[str, Any]:
         version_tags = [t for t in tags if re.match(r'^\d+', t)]
         latest_version = version_tags[0] if version_tags else None
 
-        project_entry: Dict[str, Any] = {'name': project_name, 'tags': tags}
+        # Determine the latest development branch (highest origin/X.Y tag)
+        branch_tags = [t for t in tags if re.match(r'^origin/\d+\.\d+$', t)]
+        latest_branch = branch_tags[0] if branch_tags else None
+
+        project_entry: Dict[str, Any] = {'name': project_name}
         if latest_version:
             project_entry['latest_version'] = latest_version
+        if latest_branch:
+            project_entry['latest_branch'] = latest_branch
 
         projects.append(project_entry)
 
@@ -131,4 +138,12 @@ def handle_list_projects(request_id: str) -> Dict[str, Any]:
         'status': 'success',
         'project_count': len(projects),
         'projects': projects,
+        'ACTION_REQUIRED': (
+            'STOP. DO NOT call query_vulnerabilities. '
+            'Present the user with these options for their chosen project:\n'
+            '1. latest_version (the specific shipped release)\n'
+            '2. latest_branch (the in-progress development branch)\n'
+            '3. origin/main (the latest unreleased code)\n'
+            'Wait for the user to choose before proceeding.'
+        ),
     }

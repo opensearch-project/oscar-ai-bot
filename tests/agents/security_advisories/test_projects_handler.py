@@ -134,56 +134,88 @@ class TestProjectsSortedAlphabetically:
         assert result['project_count'] == 3
 
 
-class TestTagsSortedDescending:
-    """**Validates Property 7: List projects output ordering**
+class TestLatestVersionAndBranch:
+    """**Validates Property 7: List projects output includes correct latest fields**
 
-    Each project's tags SHALL be sorted in descending semantic version order,
-    with version tags before non-version (branch) tags.
+    Each project SHALL have a latest_version (highest semver release tag)
+    and latest_branch (highest origin/X.Y branch tag) when available.
     """
 
-    def test_version_tags_before_branch_tags(self):
+    def test_latest_version_is_highest_semver(self):
         mock_aws = MagicMock()
         mock_aws.opensearch_request.return_value = SAMPLE_AGG_RESPONSE
         mod, _ = _load_projects_handler(mock_aws_utils=mock_aws)
 
         result = mod.handle_list_projects('test-010')
 
-        for project in result['projects']:
-            tags = project['tags']
-            # Version tags (starting with a digit) should come before branch tags
-            saw_branch = False
-            for tag in tags:
-                if not tag[0].isdigit():
-                    saw_branch = True
-                elif saw_branch:
-                    assert False, (
-                        f"Version tag '{tag}' found after branch tag in "
-                        f"{project['name']}: {tags}"
-                    )
+        os_project = next(p for p in result['projects'] if p['name'] == 'OpenSearch')
+        assert os_project['latest_version'] == '2.19.6'
 
-    def test_opensearch_tags_sorted_descending(self):
+    def test_latest_branch_is_highest_origin_branch(self):
         mock_aws = MagicMock()
-        mock_aws.opensearch_request.return_value = SAMPLE_AGG_RESPONSE
+        # Add branch tags to the sample response
+        agg_with_branches = {
+            'aggregations': {
+                'projects': {
+                    'buckets': [
+                        {
+                            'key': 'OpenSearch',
+                            'doc_count': 15,
+                            'tags': {
+                                'buckets': [
+                                    {'key': '2.19.6', 'doc_count': 8},
+                                    {'key': 'origin/2.19', 'doc_count': 5},
+                                    {'key': 'origin/3.7', 'doc_count': 3},
+                                    {'key': 'origin/main', 'doc_count': 2},
+                                ],
+                            },
+                        },
+                    ],
+                },
+            },
+        }
+        mock_aws.opensearch_request.return_value = agg_with_branches
         mod, _ = _load_projects_handler(mock_aws_utils=mock_aws)
 
         result = mod.handle_list_projects('test-011')
 
-        # Find the OpenSearch project
-        os_project = next(p for p in result['projects'] if p['name'] == 'OpenSearch')
-        assert os_project['tags'] == ['2.19.6', '2.19.5', '2.18.0']
+        os_project = result['projects'][0]
+        assert os_project['latest_branch'] == 'origin/3.7'
 
-    def test_dashboards_tags_sorted_descending(self):
+    def test_no_tags_array_in_response(self):
+        """Response should not include the full tags array."""
         mock_aws = MagicMock()
         mock_aws.opensearch_request.return_value = SAMPLE_AGG_RESPONSE
         mod, _ = _load_projects_handler(mock_aws_utils=mock_aws)
 
         result = mod.handle_list_projects('test-012')
 
+        for project in result['projects']:
+            assert 'tags' not in project
+
+    def test_no_branch_tags_omits_latest_branch(self):
+        """Projects without origin/X.Y tags should not have latest_branch."""
+        mock_aws = MagicMock()
+        mock_aws.opensearch_request.return_value = SAMPLE_AGG_RESPONSE
+        mod, _ = _load_projects_handler(mock_aws_utils=mock_aws)
+
+        result = mod.handle_list_projects('test-013')
+
+        # OpenSearch in the sample data has no origin/X.Y branch tags
+        os_project = next(p for p in result['projects'] if p['name'] == 'OpenSearch')
+        assert 'latest_branch' not in os_project
+
+    def test_dashboards_latest_version(self):
+        mock_aws = MagicMock()
+        mock_aws.opensearch_request.return_value = SAMPLE_AGG_RESPONSE
+        mod, _ = _load_projects_handler(mock_aws_utils=mock_aws)
+
+        result = mod.handle_list_projects('test-014')
+
         osd_project = next(
-            (p for p in result['projects'] if p['name'] == 'OpenSearch Dashboards'),
+            p for p in result['projects'] if p['name'] == 'OpenSearch Dashboards'
         )
-        # Version tags sorted descending by semver, branch tags at the end
-        assert osd_project['tags'] == ['2.19.6', '2.19.5', 'origin/main']
+        assert osd_project['latest_version'] == '2.19.6'
 
 
 # ---------------------------------------------------------------------------

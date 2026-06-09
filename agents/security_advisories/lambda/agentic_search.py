@@ -38,14 +38,13 @@ def resolve_version_tag(version: str) -> str:
     """Map a user-provided version string to the canonical project.tag format.
 
     The scans index stores release branch tags as ``origin/{major}.{minor}``
-    (e.g., ``origin/2.19``, ``origin/3.7``). Users typically provide full
-    semver versions like ``"2.19.6"`` or ``"3.7.0"``. This function maps
-    user input to the canonical tag format used in the index.
+    and specific release version tags as three-part semver (e.g., ``2.19.6``).
 
     Mapping rules:
-      - Semver input (e.g., ``"2.19.6"``, ``"3.7.0"``) → ``"origin/2.19"``, ``"origin/3.7"``
-      - ``"main"`` or ``"latest"`` → ``"origin/main"``
       - Already prefixed with ``"origin/"`` → returned as-is
+      - ``"main"`` or ``"latest"`` → ``"origin/main"``
+      - Two-part version (e.g., ``"3.7"``) → ``"origin/3.7"`` (branch tag)
+      - Three-part version (e.g., ``"3.7.0"``, ``"2.19.6"``) → returned as-is (release tag)
       - Non-parseable input → returned as-is (for exact tag lookups)
 
     Args:
@@ -68,14 +67,18 @@ def resolve_version_tag(version: str) -> str:
         logger.info(f"RESOLVE_TAG: '{version}' -> '{resolved}'")
         return resolved
 
-    # Semver: extract major.minor → origin/{major}.{minor}
-    match = re.match(r'^(\d+)\.(\d+)(?:\.\d+)*$', version)
-    if match:
-        major = match.group(1)
-        minor = match.group(2)
-        resolved = f'origin/{major}.{minor}'
+    # Two-part version (e.g., "3.7") → origin/{major}.{minor} (branch tag)
+    # Bare two-part versions don't exist as release tags in the index
+    two_part_match = re.match(r'^(\d+\.\d+)$', version)
+    if two_part_match:
+        resolved = f'origin/{two_part_match.group(1)}'
         logger.info(f"RESOLVE_TAG: '{version}' -> '{resolved}'")
         return resolved
+
+    # Three-part version (e.g., "3.7.0", "2.19.6") — return as-is for exact release tag lookup
+    if re.match(r'^\d+\.\d+\.\d+$', version):
+        logger.info(f"RESOLVE_TAG: '{version}' is a specific version, using as-is")
+        return version
 
     # Non-parseable — return as-is (exact tag lookup)
     logger.info(f"RESOLVE_TAG: Cannot parse '{version}', using as-is")
@@ -83,38 +86,35 @@ def resolve_version_tag(version: str) -> str:
 
 
 def enhance_query(
-    query: str,
+    query: str = '',
     version: Optional[str] = None,
     resolved_tag: Optional[str] = None,
     project_name: Optional[str] = None,
 ) -> str:
-    """Enhance a natural language query with version/project context.
+    """Build a standardized query string for the agentic pipeline.
 
-    When a ``resolved_tag`` is provided and differs from the user's
-    ``version``, the version string in the query text is replaced with
-    the resolved tag so the agentic pipeline sees a single, unambiguous
-    tag reference.
+    Produces a consistent format that the pipeline can reliably parse:
+    ``"Show me CVEs tag: {tag} project: {project_name}"``
+
+    This avoids passing arbitrary user phrasing (like "all CVEs", "critical
+    vulnerabilities", etc.) which can confuse the pipeline's NL→DSL translation.
 
     Args:
-        query: Original natural language query.
+        query: Original natural language query (used only for logging, not in output).
         version: Original user-provided version (e.g., ``'3.7.0'``).
-        resolved_tag: The actual tag in the index (e.g., ``'origin/3.7'``).
+        resolved_tag: The actual tag to query (e.g., ``'origin/3.7'`` or ``'3.7.0'``).
                       If ``None``, falls back to ``version``.
         project_name: Optional project name to scope the query.
 
     Returns:
-        Enhanced query string with resolved tag and project context.
+        Standardized query string for the agentic pipeline.
     """
     tag_to_use = resolved_tag or version
 
-    # If we resolved to a different tag, replace the original version in the query
-    if version and tag_to_use and tag_to_use != version and version in query:
-        query = query.replace(version, tag_to_use)
+    parts = ['Show me CVEs']
 
-    parts = [query]
-
-    if tag_to_use and tag_to_use not in query:
-        parts.append(f'for version {tag_to_use}')
+    if tag_to_use:
+        parts.append(f'tag: {tag_to_use}')
 
     if project_name:
         parts.append(f'project: {project_name}')

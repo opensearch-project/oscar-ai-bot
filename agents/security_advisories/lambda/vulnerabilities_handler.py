@@ -30,6 +30,10 @@ logger.setLevel(logging.INFO)
 def _build_limited_response() -> Dict[str, Any]:
     """Build the dashboard-link-only response for limited-access users.
 
+    NOTE: This is a defensive fallback. The router in lambda_function.py
+    short-circuits limited-access requests before they reach this handler.
+    Kept for safety in case the router logic changes.
+
     Returns:
         Response dict containing only the dashboard URL and advisory message.
         No CVE identifiers, severity levels, component names, or counts.

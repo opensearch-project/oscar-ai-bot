@@ -38,32 +38,34 @@ def _load_agentic_search():
 
 
 # ---------------------------------------------------------------------------
-# resolve_version_tag — semver to origin/ mapping
+# resolve_version_tag — numeric versions returned as-is
 # ---------------------------------------------------------------------------
 
 
 class TestResolveVersionTagSemver:
-    """Semver versions are mapped to origin/{major}.{minor}."""
+    """Numeric versions are returned as-is for exact release tag lookups."""
 
     def test_three_part_version(self):
         mod = _load_agentic_search()
-        assert mod.resolve_version_tag('3.7.0') == 'origin/3.7'
+        assert mod.resolve_version_tag('3.7.0') == '3.7.0'
 
     def test_three_part_version_with_patch(self):
         mod = _load_agentic_search()
-        assert mod.resolve_version_tag('2.19.6') == 'origin/2.19'
+        assert mod.resolve_version_tag('2.19.6') == '2.19.6'
 
     def test_four_part_version(self):
+        """Four-part versions are not a valid user input — treated as non-parseable."""
         mod = _load_agentic_search()
-        assert mod.resolve_version_tag('1.2.0.1') == 'origin/1.2'
+        assert mod.resolve_version_tag('1.2.0.1') == '1.2.0.1'
 
     def test_two_part_version(self):
+        """Two-part versions map to origin/ branch since they don't exist as release tags."""
         mod = _load_agentic_search()
         assert mod.resolve_version_tag('3.7') == 'origin/3.7'
 
     def test_major_zero(self):
         mod = _load_agentic_search()
-        assert mod.resolve_version_tag('0.9.0') == 'origin/0.9'
+        assert mod.resolve_version_tag('0.9.0') == '0.9.0'
 
 
 # ---------------------------------------------------------------------------
@@ -143,27 +145,27 @@ class TestResolveVersionTagPassthrough:
 
 
 class TestEnhanceQueryWithResolvedTag:
-    """Test that enhance_query replaces version with resolved_tag in query text."""
+    """Test that enhance_query produces standardized output."""
 
     def test_replaces_version_in_query_with_resolved_tag(self):
+        """Output uses resolved_tag, not the original version."""
         mod = _load_agentic_search()
         result = mod.enhance_query(
             'Show me CVEs for 3.7.0 release components',
             version='3.7.0',
             resolved_tag='origin/3.7',
         )
-        assert 'origin/3.7' in result
-        assert '3.7.0' not in result
+        assert result == 'Show me CVEs tag: origin/3.7'
 
     def test_no_replacement_when_resolved_tag_same_as_version(self):
+        """When resolved_tag equals version, tag appears once."""
         mod = _load_agentic_search()
         result = mod.enhance_query(
-            'Show me CVEs for origin/3.7',
-            version='origin/3.7',
-            resolved_tag='origin/3.7',
+            'Show me CVEs for 3.7.0',
+            version='3.7.0',
+            resolved_tag='3.7.0',
         )
-        assert 'origin/3.7' in result
-        assert result.count('origin/3.7') == 1
+        assert result == 'Show me CVEs tag: 3.7.0'
 
     def test_appends_resolved_tag_when_not_in_query(self):
         mod = _load_agentic_search()
@@ -172,7 +174,7 @@ class TestEnhanceQueryWithResolvedTag:
             version='3.7.0',
             resolved_tag='origin/3.7',
         )
-        assert 'origin/3.7' in result
+        assert result == 'Show me CVEs tag: origin/3.7'
 
     def test_falls_back_to_version_when_resolved_tag_none(self):
         mod = _load_agentic_search()
@@ -181,7 +183,7 @@ class TestEnhanceQueryWithResolvedTag:
             version='2.19.6',
             resolved_tag=None,
         )
-        assert '2.19.6' in result
+        assert result == 'Show me CVEs tag: 2.19.6'
 
     def test_project_name_still_appended(self):
         mod = _load_agentic_search()
@@ -191,11 +193,19 @@ class TestEnhanceQueryWithResolvedTag:
             resolved_tag='origin/3.7',
             project_name='OpenSearch',
         )
-        assert 'origin/3.7' in result
-        assert 'OpenSearch' in result
-        assert '3.7.0' not in result
+        assert result == 'Show me CVEs tag: origin/3.7 project: OpenSearch'
 
     def test_no_version_no_resolved_tag(self):
         mod = _load_agentic_search()
         result = mod.enhance_query('Show me CVEs')
         assert result == 'Show me CVEs'
+
+    def test_specific_release_version_passed_through(self):
+        """When user confirms specific release, version passes through unchanged."""
+        mod = _load_agentic_search()
+        result = mod.enhance_query(
+            'Show me CVEs for 3.7.0',
+            version='3.7.0',
+            resolved_tag='3.7.0',
+        )
+        assert result == 'Show me CVEs tag: 3.7.0'
