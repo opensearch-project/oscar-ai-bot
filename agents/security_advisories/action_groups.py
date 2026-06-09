@@ -11,7 +11,6 @@ from aws_cdk import aws_bedrock as bedrock
 def get_action_groups(lambda_arn: str) -> List[bedrock.CfnAgent.AgentActionGroupProperty]:
     return [
         _privileged_action_group(lambda_arn),
-        _limited_action_group(lambda_arn),
     ]
 
 
@@ -89,44 +88,6 @@ def _privileged_action_group(
                         "semantic version — use this when resolving 'most recent release' queries."
                     ),
                     parameters={},
-                ),
-            ]
-        ),
-    )
-
-
-def _limited_action_group(
-    lambda_arn: str,
-) -> bedrock.CfnAgent.AgentActionGroupProperty:
-    """Action group for limited users — returns dashboard link only."""
-    return bedrock.CfnAgent.AgentActionGroupProperty(
-        action_group_name="securityAdvisoriesLimitedActions",
-        description=(
-            "Limited-access security advisory responses for non-privileged users. "
-            "Returns a link to the Security Advisory Dashboard."
-        ),
-        action_group_state="ENABLED",
-        action_group_executor=bedrock.CfnAgent.ActionGroupExecutorProperty(lambda_=lambda_arn),
-        function_schema=bedrock.CfnAgent.FunctionSchemaProperty(
-            functions=[
-                bedrock.CfnAgent.FunctionProperty(
-                    name="get_advisory_summary",
-                    description=(
-                        "Get a summary response for security advisory queries. "
-                        "Returns a link to the Security Advisory Dashboard where "
-                        "users can explore vulnerability data directly."
-                    ),
-                    parameters={
-                        "query": bedrock.CfnAgent.ParameterDetailProperty(
-                            type="string",
-                            description=(
-                                "The user's security advisory question "
-                                "(e.g., 'Are there any critical CVEs?', "
-                                "'Show me vulnerabilities for OpenSearch 2.19.6')"
-                            ),
-                            required=True,
-                        ),
-                    },
                 ),
             ]
         ),

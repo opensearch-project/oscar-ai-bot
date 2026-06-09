@@ -19,32 +19,11 @@ from typing import Any, Dict, Optional, Set
 from agentic_search import (AgenticSearchError, agentic_search, enhance_query,
                             resolve_version_tag)
 from config import config
-from constants import DASHBOARD_URL, LIMITED_ACCESS_MESSAGE
 from response_filter import (build_neglected_page_url, build_summary,
                              filter_vulnerabilities)
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
-
-
-def _build_limited_response() -> Dict[str, Any]:
-    """Build the dashboard-link-only response for limited-access users.
-
-    NOTE: This is a defensive fallback. The router in lambda_function.py
-    short-circuits limited-access requests before they reach this handler.
-    Kept for safety in case the router logic changes.
-
-    Returns:
-        Response dict containing only the dashboard URL and advisory message.
-        No CVE identifiers, severity levels, component names, or counts.
-    """
-    return {
-        'status': 'success',
-        'access_tier': 'limited',
-        'message': LIMITED_ACCESS_MESSAGE,
-        'dashboard_url': DASHBOARD_URL,
-        'results': [],
-    }
 
 
 def _parse_severity(raw: Optional[str]) -> Optional[Set[str]]:
@@ -164,12 +143,6 @@ def handle_query_vulnerabilities(params: Dict[str, Any], request_id: str) -> Dic
     severity = _parse_severity(params.get('severity'))
     age_days = _parse_age_days(params.get('age_days'))
 
-    # Access-tier check — short-circuit before any data retrieval for limited users
-    access_tier = params.get('_access_tier', 'limited')
-    if access_tier != 'privileged':
-        logger.info(f"[{request_id}] Limited access — returning dashboard link only")
-        return _build_limited_response()
-
     logger.info(
         f"[{request_id}] QUERY_VULNERABILITIES: query='{query}', "
         f"version={version}, project_name={project_name}, "
@@ -259,7 +232,6 @@ def handle_query_vulnerabilities(params: Dict[str, Any], request_id: str) -> Dic
 
     return {
         'status': 'success',
-        'access_tier': 'privileged',
         'result_count': len(results),
         'results': results,
         'neglected_page_url': neglected_url,

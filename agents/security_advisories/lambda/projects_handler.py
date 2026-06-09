@@ -17,7 +17,6 @@ import re
 from typing import Any, Dict, Tuple
 
 import semver
-
 from aws_utils import get_latest_scans_index, opensearch_request
 
 logger = logging.getLogger(__name__)

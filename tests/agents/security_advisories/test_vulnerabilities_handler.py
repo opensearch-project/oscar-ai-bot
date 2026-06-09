@@ -382,20 +382,6 @@ class TestPrivilegedResponseEnrichment:
     _Validates: Requirements 2.1, 3.1, 5.2_
     """
 
-    def test_privileged_response_has_access_tier(self):
-        """Privileged response includes access_tier: 'privileged'."""
-        mock_agentic = _make_mock_agentic_search()
-        mock_agentic.agentic_search.return_value = {
-            'hits': {'hits': [SAMPLE_HIT]},
-        }
-        mod, _ = _load_vulnerabilities_handler(mock_agentic=mock_agentic)
-
-        result = mod.handle_query_vulnerabilities(
-            {'query': 'Show CVEs', '_access_tier': 'privileged'}, 'test-040',
-        )
-
-        assert result['access_tier'] == 'privileged'
-
     def test_privileged_response_has_neglected_page_url(self):
         """Privileged response includes neglected_page_url field."""
         mock_agentic = _make_mock_agentic_search()

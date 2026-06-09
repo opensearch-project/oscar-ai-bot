@@ -28,7 +28,7 @@ class TestSecurityAdvisoriesAgentInterface:
         assert isinstance(config, LambdaConfig)
 
     def test_get_access_level_returns_privileged(self, agent):
-        assert agent.get_access_level() == "both"
+        assert agent.get_access_level() == "privileged"
 
     def test_uses_knowledge_base_returns_false(self, agent):
         assert agent.uses_knowledge_base() is False
@@ -40,7 +40,7 @@ class TestActionGroups:
     def test_action_group_returns_list(self, agent):
         groups = agent.get_action_groups("arn:aws:lambda:us-east-1:123456789012:function:placeholder")
         assert isinstance(groups, list)
-        assert len(groups) == 2
+        assert len(groups) == 1
 
     def test_action_group_has_query_vulnerabilities(self, agent):
         groups = agent.get_action_groups("arn:aws:lambda:us-east-1:123456789012:function:placeholder")
@@ -96,40 +96,6 @@ class TestActionGroups:
         assert "get_vulnerabilities" not in func_names
 
 
-class TestLimitedActionGroup:
-    """Limited action group defines get_advisory_summary for non-privileged users."""
-
-    def test_limited_action_group_exists(self, agent):
-        groups = agent.get_action_groups("arn:aws:lambda:us-east-1:123456789012:function:placeholder")
-        assert len(groups) == 2
-        limited_group = groups[1]
-        assert limited_group.action_group_name == "securityAdvisoriesLimitedActions"
-
-    def test_limited_action_group_has_get_advisory_summary(self, agent):
-        groups = agent.get_action_groups("arn:aws:lambda:us-east-1:123456789012:function:placeholder")
-        limited_group = groups[1]
-        functions = limited_group.function_schema.functions
-        func_names = [f.name for f in functions]
-        assert "get_advisory_summary" in func_names
-
-    def test_get_advisory_summary_has_required_query_param(self, agent):
-        groups = agent.get_action_groups("arn:aws:lambda:us-east-1:123456789012:function:placeholder")
-        limited_group = groups[1]
-        functions = limited_group.function_schema.functions
-        func = next(f for f in functions if f.name == "get_advisory_summary")
-        assert "query" in func.parameters
-        assert func.parameters["query"].required is True
-
-    def test_limited_group_does_not_have_privileged_functions(self, agent):
-        """Limited group should NOT contain query_vulnerabilities or list_projects."""
-        groups = agent.get_action_groups("arn:aws:lambda:us-east-1:123456789012:function:placeholder")
-        limited_group = groups[1]
-        functions = limited_group.function_schema.functions
-        func_names = [f.name for f in functions]
-        assert "query_vulnerabilities" not in func_names
-        assert "list_projects" not in func_names
-
-
 class TestInstructions:
     """Agent and collaborator instructions contain required content."""
 
@@ -162,56 +128,25 @@ class TestInstructions:
 
 
 class TestAccessTierInstructions:
-    """Agent instructions contain access-tier-aware formatting guidance."""
+    """Agent instructions contain response formatting guidance."""
 
-    def test_agent_instruction_mentions_access_tier(self, agent):
-        """Agent instruction references access_tier field."""
-        instruction = agent.get_agent_instruction()
-        assert "access_tier" in instruction
-
-    def test_agent_instruction_contains_limited_prohibition(self, agent):
-        """Agent instruction prohibits CVE details for limited-access responses."""
-        instruction = agent.get_agent_instruction()
-        lower = instruction.lower()
-        # Must contain prohibition language for limited access
-        assert "limited" in lower
-        assert "do not" in lower or "shall not" in lower or "do not add" in lower
-
-    def test_agent_instruction_contains_dashboard_link_guidance(self, agent):
-        """Agent instruction mentions dashboard link for limited users."""
-        instruction = agent.get_agent_instruction()
-        assert "dashboard" in instruction.lower()
-        # The instruction tells the agent to use the message field which contains the link
-        assert "message" in instruction.lower()
-
-    def test_agent_instruction_contains_privileged_guidance(self, agent):
-        """Agent instruction describes full inline CVE details for privileged users."""
-        instruction = agent.get_agent_instruction()
-        lower = instruction.lower()
-        assert "privileged" in lower
-        assert "neglected" in lower or "neglected_page_url" in lower
-
-    def test_agent_instruction_prohibits_cve_ids_for_limited(self, agent):
-        """Agent instruction explicitly prohibits CVE identifiers for limited access."""
-        instruction = agent.get_agent_instruction()
-        # The instruction should mention not including CVE identifiers for limited
-        assert "cve" in instruction.lower()
-        # Check that there's prohibition language near limited-access section
-        limited_section_start = instruction.lower().find('access_tier: "limited"')
-        if limited_section_start == -1:
-            limited_section_start = instruction.lower().find("access_tier: \"limited\"")
-        assert limited_section_start != -1, "Instruction must have a limited access_tier section"
-
-    def test_agent_instruction_mentions_neglected_page_link_for_privileged(self, agent):
-        """Agent instruction tells agent to include neglected page link for privileged."""
+    def test_agent_instruction_contains_neglected_page_link_guidance(self, agent):
+        """Agent instruction tells agent to include neglected page link."""
         instruction = agent.get_agent_instruction()
         assert "neglected" in instruction.lower()
 
-    def test_collaborator_instruction_mentions_limited_access(self, agent):
-        """Collaborator instruction mentions dashboard-link-only for limited users."""
+    def test_agent_instruction_contains_response_guidelines(self, agent):
+        """Agent instruction describes full inline CVE details in response guidelines."""
+        instruction = agent.get_agent_instruction()
+        lower = instruction.lower()
+        assert "response guidelines" in lower
+        assert "cve" in lower
+
+    def test_collaborator_instruction_describes_capabilities(self, agent):
+        """Collaborator instruction mentions security vulnerability capabilities."""
         instruction = agent.get_collaborator_instruction()
         lower = instruction.lower()
-        assert "limited" in lower or "dashboard" in lower
+        assert "security" in lower or "vulnerabilit" in lower
 
 
 @pytest.mark.skip(reason="Monitoring config temporarily disabled until log group exists")
