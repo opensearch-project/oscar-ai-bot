@@ -16,7 +16,8 @@ import logging
 from datetime import datetime, timezone
 from typing import Any, Dict, Optional, Set
 
-from agentic_search import AgenticSearchError, agentic_search, enhance_query
+from agentic_search import (AgenticSearchError, agentic_search, enhance_query,
+                            resolve_version_tag)
 from config import config
 from constants import DASHBOARD_URL, LIMITED_ACCESS_MESSAGE
 from response_filter import (build_neglected_page_url, build_summary,
@@ -171,8 +172,19 @@ def handle_query_vulnerabilities(params: Dict[str, Any], request_id: str) -> Dic
         f"severity={severity}, age_days={age_days}",
     )
 
-    # Enhance the NL query with version/project context
-    enhanced_query = enhance_query(query, version=version, project_name=project_name)
+    # Resolve version to canonical project.tag format
+    resolved_tag = None
+    if version:
+        resolved_tag = resolve_version_tag(version)
+        if resolved_tag != version:
+            logger.info(
+                f"[{request_id}] TAG_RESOLVED: '{version}' -> '{resolved_tag}'"
+            )
+
+    # Enhance the NL query with resolved tag/project context
+    enhanced_query = enhance_query(
+        query, version=version, resolved_tag=resolved_tag, project_name=project_name,
+    )
     logger.info(f"[{request_id}] Enhanced query: '{enhanced_query}'")
 
     # Execute agentic search
@@ -238,7 +250,7 @@ def handle_query_vulnerabilities(params: Dict[str, Any], request_id: str) -> Dic
         age=_map_age_days_to_age(age_days),
         severe='HIGH' in severity if severity else None,
         critical='CRITICAL' in severity if severity else None,
-        tag=version,
+        tag=resolved_tag or version,
     )
 
     return {

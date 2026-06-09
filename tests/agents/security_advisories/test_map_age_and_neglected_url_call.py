@@ -37,6 +37,7 @@ def _make_mock_agentic_search():
     mock_mod = MagicMock()
     mock_mod.enhance_query = MagicMock(side_effect=lambda q, **kw: q)
     mock_mod.agentic_search = MagicMock(return_value={'hits': {'hits': []}})
+    mock_mod.resolve_version_tag = MagicMock(side_effect=lambda v: v)
     mock_mod.AgenticSearchError = type('AgenticSearchError', (Exception,), {
         '__init__': lambda self, msg, status_code=None: (
             super(type(self), self).__init__(msg),

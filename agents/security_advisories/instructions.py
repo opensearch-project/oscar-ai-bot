@@ -16,7 +16,7 @@ Pipeline: NL query → agentic flow pipeline → OpenSearch DSL → results
 ## DATA MODEL
 Scan results are stored per project/tag/hash combination. Each scan document contains:
 - project.name: Component name (e.g., "OpenSearch Dashboards", "OpenSearch")
-- project.tag: Release version or branch (e.g., "2.19.6", "origin/main")
+- project.tag: Release branch or ref (e.g., "origin/2.19", "origin/main")
 - project.hash: Git commit hash
 - vulnerabilities: Array of matched CVEs, each with:
   - id: Advisory identifier
@@ -30,11 +30,10 @@ Scan results are stored per project/tag/hash combination. Each scan document con
 - timestamp.commit: Commit timestamp
 
 ## UNDERSTANDING TAGS
-- Version tags like "2.19.6" represent release scans
+- Release branches are stored as "origin/{major}.{minor}" (e.g., "origin/2.19", "origin/3.7")
 - Branch tags like "origin/main" represent the latest unreleased state
 - Tags like "origin/2.x" represent release branch heads
-- If a user asks about a release, filter by the version tag
-- If a user asks about "current" or "latest" vulnerabilities, use "origin/main"
+- The system automatically converts user-provided versions (e.g., "3.7.0") to the correct tag format before querying
 
 ## FUNCTIONS
 
@@ -67,6 +66,7 @@ This is critical — do NOT pass relative terms like "most recent" directly to q
 - "Critical vulnerabilities in the past 30 days" → query_vulnerabilities(query="Critical vulnerabilities in the past 30 days", severity="CRITICAL", age_days="30")
 - "Critical and high CVEs for OpenSearch 3.0.0 from the last week" → query_vulnerabilities(query="Critical and high CVEs for OpenSearch 3.0.0", version="3.0.0", project_name="OpenSearch", severity="CRITICAL,HIGH", age_days="7")
 - "CVEs for OpenSearch Dashboards most recent release" → FIRST list_projects() to get the `latest_version` for "OpenSearch Dashboards", THEN query_vulnerabilities(query="CVEs for OpenSearch Dashboards", version="<latest_version>", project_name="OpenSearch Dashboards")
+- "Show me CVEs for 3.7.0 release components" → query_vulnerabilities(query="Show me CVEs for 3.7.0 release components", version="3.7.0")
 - "What components are tracked?" → list_projects()
 
 ## RESPONSE GUIDELINES (apply ONLY when access_tier is "privileged")
