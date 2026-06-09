@@ -187,5 +187,6 @@ Jenkins Lambda
     ├─ job_definitions.py      → JobRegistry + validation
     ├─ jenkins_client.py       → REST API calls to Jenkins
     ├─ config.py               → URL, SSL, timeouts, secrets
-    └─ lambda_function.py      → Bedrock action group handler
+    ├─ lambda_function.py      → Bedrock action group handler
+    └─ [Layer] oscar_shared/   → Two-person approval guard (shared across all Lambdas)
 ```

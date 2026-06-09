@@ -11,6 +11,7 @@ import logging
 from typing import Any, Dict, Optional
 
 logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
 
 
 def validate_two_person_approval(
