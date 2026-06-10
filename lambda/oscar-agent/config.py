@@ -81,6 +81,7 @@ class Config:
 
         # Feature flags
         self.enable_dm = os.environ.get('ENABLE_DM', 'false').lower() == 'true'
+        self.enable_2pr = os.environ.get('ENABLE_2PR', 'false').lower() == 'true'
 
         # Agent timeout and retry settings
         self.agent_timeout = int(os.environ.get('AGENT_TIMEOUT', 90))
