@@ -9,6 +9,12 @@ from aws_cdk.assertions import Template
 from stacks.storage_stack import OscarStorageStack
 
 
+@pytest.fixture(autouse=True)
+def set_create_tables(monkeypatch):
+    """Enable table creation for identity stack tests."""
+    monkeypatch.setenv("CREATE_IDENTITY_TABLES", "true")
+
+
 @pytest.fixture
 def template_with_workspaces():
     """Synthesise storage stack with two workspaces."""

@@ -12,7 +12,7 @@ This module defines the DynamoDB tables used by the OSCAR Slack Bot.
 """
 
 import os
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, cast
 
 from aws_cdk import Duration, RemovalPolicy, Stack
 from aws_cdk import aws_cloudwatch as cloudwatch
@@ -67,10 +67,19 @@ class OscarStorageStack(Stack):
             context_ttl
         )
 
-        # Create identity tables (one per workspace)
+        # Import existing identity tables by default; only create new ones when CREATE_IDENTITY_TABLES=true is explicitly set.
+        create_tables = os.environ.get("CREATE_IDENTITY_TABLES", "false").lower() == "true"
         self.identity_tables: Dict[str, dynamodb.Table] = {}
         for workspace_id in (workspace_ids or []):
-            table = self._create_identity_table(workspace_id, removal_policy)
+            table_name = f"{self.IDENTITY_TABLE_PREFIX}-{workspace_id}-{self.env_name}"
+            if create_tables:
+                table = self._create_identity_table(workspace_id, removal_policy)
+            else:
+                table = cast(dynamodb.Table, dynamodb.Table.from_table_attributes(
+                    self, f"IdentityTable{workspace_id}",
+                    table_name=table_name,
+                    grant_index_permissions=True,
+                ))
             self.identity_tables[workspace_id] = table
 
         # Create monitoring and alerting for context table only
@@ -119,6 +128,7 @@ class OscarStorageStack(Stack):
             partition_key=dynamodb.Attribute(name="github_id", type=dynamodb.AttributeType.NUMBER),
             billing_mode=dynamodb.BillingMode.PAY_PER_REQUEST,
             removal_policy=removal_policy,
+            encryption=dynamodb.TableEncryption.AWS_MANAGED,
             point_in_time_recovery_specification=dynamodb.PointInTimeRecoverySpecification(
                 point_in_time_recovery_enabled=True
             ),

@@ -161,7 +161,6 @@ class MessageProcessor:
             f"?client_id={client_id}"
             f"&redirect_uri={callback_url}"
             f"&state={state}"
-            f"&scope=read:user"
         )
 
         # Send OAuth link via DM

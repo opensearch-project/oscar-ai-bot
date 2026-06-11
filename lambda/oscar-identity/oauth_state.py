@@ -7,7 +7,6 @@ import hashlib
 import hmac
 import time
 
-
 STATE_TTL_SECONDS = 600
 
 

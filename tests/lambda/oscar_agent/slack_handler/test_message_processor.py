@@ -4,7 +4,7 @@
 
 import os
 import sys
-from unittest.mock import Mock, patch, MagicMock
+from unittest.mock import Mock, patch
 
 from slack_handler.message_processor import MessageProcessor
 
@@ -98,6 +98,7 @@ class TestProcessMessage:
             reaction_manager=Mock(),
             timeout_handler=timeout_handler,
         )
+        mp._has_identity_mapping = Mock(return_value=True)
         say = Mock()
         return mp, storage, say
 
@@ -310,4 +311,3 @@ class TestProcessMessageIdentityGate:
         mp.process_message('C_ALLOWED', 'tts', 'U_ADMIN', '<@BOT> hello', say, message_ts='mts')
         mp._handle_link_github_via_dm.assert_not_called()
         mp.timeout_handler.query_agent_with_timeout.assert_called_once()
-

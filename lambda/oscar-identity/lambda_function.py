@@ -66,6 +66,11 @@ def _get_table(workspace_id) -> Optional[object]:
 
 
 def lambda_handler(event, context):
+    # Route: EventBridge scheduled event → run validation
+    if event.get("source") == "aws.events":
+        return _handle_validation()
+
+    # Route: API Gateway OAuth callback
     params = event.get("queryStringParameters") or {}
     # code: the temporary OAuth authorization code returned by GitHub after user consent
     code = params.get("code")
@@ -138,6 +143,115 @@ def lambda_handler(event, context):
     logger.info(f"IDENTITY_LINKED: slack_user={slack_user_id} workspace={workspace_id} github={github_handle} github_id={github_id} affiliation={affiliation}")
 
     return _html(200, "Successfully linked your GitHub account.")
+
+
+def _get_channel_members(bot_token: str, channel_id: str) -> set:
+    """Fetch all members of a channel using cursor-based pagination."""
+    members = set()
+    cursor = None
+    while True:
+        params = {"channel": channel_id, "limit": 1000}
+        if cursor:
+            params["cursor"] = cursor
+        resp = requests.get(
+            "https://slack.com/api/conversations.members",
+            headers={"Authorization": f"Bearer {bot_token}"},
+            params=params,
+            timeout=10,
+        )
+        data = resp.json()
+        if not data.get("ok"):
+            logger.error(f"conversations.members failed for {channel_id}: {data.get('error')}")
+            break
+        members.update(data.get("members", []))
+        cursor = data.get("response_metadata", {}).get("next_cursor")
+        if not cursor:
+            break
+    return members
+
+
+def _handle_validation():
+    """Weekly validation: expire mappings for users no longer in monitored channels."""
+    creds = _get_oauth_creds()
+    bot_token = creds.get("SLACK_BOT_TOKEN", "")
+    channel_ids = [c.strip() for c in creds.get("CHANNEL_ALLOW_LIST", "").split(",") if c.strip()]
+    workspace_ids = [w.strip() for w in os.environ.get("SLACK_WORKSPACE_IDS", "").split(",") if w.strip()]
+
+    if not bot_token:
+        logger.error("SLACK_BOT_TOKEN not found in central secret")
+        return {"expired": 0, "error": "missing bot token"}
+
+    if not channel_ids:
+        logger.error("CHANNEL_ALLOW_LIST not found in central secret")
+        return {"expired": 0, "error": "no channels configured"}
+
+    if not workspace_ids:
+        logger.error("SLACK_WORKSPACE_IDS not configured")
+        return {"expired": 0, "error": "no workspace ids"}
+
+    # Step 1: Fetch active mappings first — skip Slack API if nothing to validate
+    all_active = {}
+    for workspace_id in workspace_ids:
+        table_name = f"{IDENTITY_TABLE_PREFIX}-{workspace_id}-{ENVIRONMENT}"
+        table = dynamodb.Table(table_name)
+
+        active = []
+        scan_kwargs = {
+            "FilterExpression": "#s = :active",
+            "ExpressionAttributeNames": {"#s": "status"},
+            "ExpressionAttributeValues": {":active": "active"},
+            "ProjectionExpression": "github_id, slack_user_id",
+        }
+        while True:
+            response = table.scan(**scan_kwargs)
+            active.extend(response.get("Items", []))
+            last_key = response.get("LastEvaluatedKey")
+            if not last_key:
+                break
+            scan_kwargs["ExclusiveStartKey"] = last_key
+
+        logger.info(f"Workspace {workspace_id}: {len(active)} active mappings")
+        all_active[workspace_id] = active
+
+    # Step 2: Fetch channel members
+    valid_users = set()
+    for channel_id in channel_ids:
+        members = _get_channel_members(bot_token, channel_id)
+        valid_users.update(members)
+        logger.info(f"Channel {channel_id}: {len(members)} members")
+
+    logger.info(f"Total valid users across channels: {len(valid_users)}")
+
+    # Step 3: Expire mappings whose slack_user_id is not in any channel
+    now = datetime.now(timezone.utc).isoformat()
+    total_expired = 0
+
+    for workspace_id, active in all_active.items():
+        table_name = f"{IDENTITY_TABLE_PREFIX}-{workspace_id}-{ENVIRONMENT}"
+        table = dynamodb.Table(table_name)
+
+        for mapping in active:
+            if mapping["slack_user_id"] not in valid_users:
+                try:
+                    table.update_item(
+                        Key={"github_id": mapping["github_id"]},
+                        UpdateExpression="SET #s = :status, expired_at = :ts, expiry_reason = :reason",
+                        ConditionExpression="#s = :active",
+                        ExpressionAttributeNames={"#s": "status"},
+                        ExpressionAttributeValues={
+                            ":status": "expired",
+                            ":ts": now,
+                            ":reason": "not_in_monitored_channel",
+                            ":active": "active",
+                        },
+                    )
+                    total_expired += 1
+                    logger.info(f"IDENTITY_EXPIRED: github_id={mapping['github_id']} slack_user={mapping['slack_user_id']} workspace={workspace_id}")
+                except dynamodb.meta.client.exceptions.ConditionalCheckFailedException:
+                    pass
+
+    logger.info(f"VALIDATION_COMPLETE: expired={total_expired}")
+    return {"expired": total_expired}
 
 
 def _html(status_code, message):

@@ -6,7 +6,6 @@
 Slash command handlers for Slack Handler.
 """
 
-import json
 import logging
 import os
 import time
@@ -183,7 +182,6 @@ class SlashCommandHandlers:
             f"?client_id={client_id}"
             f"&redirect_uri={callback_url}"
             f"&state={state}"
-            f"&scope=read:user"
         )
 
         say(text=f"<{oauth_url}|Click here to link your GitHub account>", response_type="ephemeral")

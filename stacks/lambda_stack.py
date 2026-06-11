@@ -15,6 +15,8 @@ import os
 from typing import Any, Dict, List, Optional
 
 from aws_cdk import Duration, Stack
+from aws_cdk import aws_events as events
+from aws_cdk import aws_events_targets as targets
 from aws_cdk import aws_iam as iam
 from aws_cdk import aws_lambda
 from aws_cdk.aws_lambda_python_alpha import PythonFunction
@@ -66,10 +68,6 @@ class OscarLambdaStack(Stack):
         self._create_communication_handler_lambda()
 
         # Identity lambda
-
-
-
-
         if storage_stack.identity_tables:
             self._create_identity_lambda()
 
@@ -155,19 +153,29 @@ class OscarLambdaStack(Stack):
             handler="lambda_handler",
             entry="lambda/oscar-identity",
             index="lambda_function.py",
-            timeout=Duration.seconds(30),
+            timeout=Duration.seconds(300),
             memory_size=256,
             environment={
                 "ENVIRONMENT": self.env_name,
                 "CENTRAL_SECRET_NAME": self.secrets_stack.central_env_secret.secret_name,
+                "SLACK_WORKSPACE_IDS": ",".join(self.storage_stack.identity_tables.keys()),
             },
             role=role,
-            description="OAuth callback handler for Slack-GitHub identity linking",
+            description="Identity linking and weekly membership validation",
             reserved_concurrent_executions=5,
         )
         for t in self.storage_stack.identity_tables.values():
             t.grant_read_write_data(role)
         self.secrets_stack.grant_read_access(role)
+
+        # Weekly EventBridge schedule for membership validation
+        rule = events.Rule(
+            self, "IdentityValidationSchedule",
+            rule_name=f"oscar-identity-validation-{self.env_name}",
+            schedule=events.Schedule.rate(Duration.days(7)),
+            description="Weekly identity membership validation",
+        )
+        rule.add_target(targets.LambdaFunction(function))
 
         self.lambda_functions["identity"] = function
 

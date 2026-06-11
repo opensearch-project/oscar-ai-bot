@@ -23,6 +23,8 @@ TEST_SECRETS = {
     "GITHUB_OAUTH_CLIENT_SECRET": "test-client-secret",
     "OAUTH_CALLBACK_URL": "https://example.com/oauth/callback",
     "OAUTH_STATE_SECRET": TEST_SIGNING_SECRET,
+    "SLACK_BOT_TOKEN": "xoxb-test-token",
+    "CHANNEL_ALLOW_LIST": "C001,C002",
 }
 
 
@@ -38,6 +40,7 @@ def setup_env(monkeypatch):
     monkeypatch.setenv("ENVIRONMENT", "dev")
     monkeypatch.setenv("CENTRAL_SECRET_NAME", "oscar-central-env-dev")
     monkeypatch.setenv("AWS_REGION", "us-east-1")
+    monkeypatch.setenv("SLACK_WORKSPACE_IDS", "T01INTERNAL")
 
 
 @pytest.fixture(autouse=True)
@@ -94,6 +97,7 @@ class TestValidation:
     def test_tampered_state_returns_400(self):
         """Attacker tries to swap user_id in state."""
         import base64
+
         # Craft a tampered state with wrong user but no valid signature
         tampered = base64.urlsafe_b64encode(b"ATTACKER:T01INTERNAL:9999999999:fakesig").decode()
         result, _, _ = _invoke({"queryStringParameters": {"code": "abc", "state": tampered}})
@@ -202,3 +206,98 @@ class TestOAuthFlow:
 
         assert result["statusCode"] == 400
         assert "authorization failed" in result["body"]
+
+
+class TestWeeklyValidation:
+
+    @patch("requests.get")
+    def test_expires_user_not_in_channel(self, mock_get):
+        """User in identity table but not in any monitored channel gets expired."""
+        mock_get.return_value = MagicMock(json=lambda: {
+            "ok": True,
+            "members": ["U999", "U888"],
+            "response_metadata": {"next_cursor": ""},
+        })
+
+        with patch("boto3.resource") as mock_resource, \
+             patch("boto3.client") as mock_client:
+
+            mock_table = MagicMock()
+            mock_table.scan.return_value = {
+                "Items": [
+                    {"github_id": 111, "slack_user_id": "U123"},
+                ],
+            }
+            mock_table.update_item.return_value = {}
+            mock_resource.return_value.Table.return_value = mock_table
+
+            mock_secrets = MagicMock()
+            mock_secrets.get_secret_value.return_value = {
+                "SecretString": json.dumps(TEST_SECRETS)
+            }
+            mock_client.return_value = mock_secrets
+
+            import lambda_function
+            lambda_function._oauth_creds = None
+            result = lambda_function.lambda_handler(
+                {"source": "aws.events"}, None
+            )
+
+        assert result["expired"] == 1
+        mock_table.update_item.assert_called_once()
+
+    @patch("requests.get")
+    def test_keeps_user_in_channel(self, mock_get):
+        """User present in a monitored channel is not expired."""
+        mock_get.return_value = MagicMock(json=lambda: {
+            "ok": True,
+            "members": ["U123", "U888"],
+            "response_metadata": {"next_cursor": ""},
+        })
+
+        with patch("boto3.resource") as mock_resource, \
+             patch("boto3.client") as mock_client:
+
+            mock_table = MagicMock()
+            mock_table.scan.return_value = {
+                "Items": [
+                    {"github_id": 111, "slack_user_id": "U123"},
+                ],
+            }
+            mock_resource.return_value.Table.return_value = mock_table
+
+            mock_secrets = MagicMock()
+            mock_secrets.get_secret_value.return_value = {
+                "SecretString": json.dumps(TEST_SECRETS)
+            }
+            mock_client.return_value = mock_secrets
+
+            import lambda_function
+            lambda_function._oauth_creds = None
+            result = lambda_function.lambda_handler(
+                {"source": "aws.events"}, None
+            )
+
+        assert result["expired"] == 0
+        mock_table.update_item.assert_not_called()
+
+    def test_validation_fails_without_bot_token(self):
+        """Returns error when SLACK_BOT_TOKEN is missing from secret."""
+        secrets_no_token = {k: v for k, v in TEST_SECRETS.items() if k != "SLACK_BOT_TOKEN"}
+
+        with patch("boto3.resource"), \
+             patch("boto3.client") as mock_client:
+
+            mock_secrets = MagicMock()
+            mock_secrets.get_secret_value.return_value = {
+                "SecretString": json.dumps(secrets_no_token)
+            }
+            mock_client.return_value = mock_secrets
+
+            import lambda_function
+            lambda_function._oauth_creds = None
+            result = lambda_function.lambda_handler(
+                {"source": "aws.events"}, None
+            )
+
+        assert result["error"] == "missing bot token"

@@ -138,7 +138,7 @@ class Config:
         keys_to_extract = {
             'SLACK_BOT_TOKEN', 'SLACK_SIGNING_SECRET',
             'DM_AUTHORIZED_USERS', 'FULLY_AUTHORIZED_USERS', 'CHANNEL_ALLOW_LIST',
-            'GITHUB_OAUTH_CLIENT_ID', 'OAUTH_CALLBACK_URL',
+            'GITHUB_OAUTH_CLIENT_ID', 'OAUTH_CALLBACK_URL', 'OAUTH_STATE_SECRET',
         }
         result: Dict[str, str] = {}
 
