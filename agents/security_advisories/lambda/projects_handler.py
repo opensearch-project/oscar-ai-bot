@@ -13,7 +13,6 @@ Functions:
 
 import json
 import logging
-import re
 from typing import Any, Dict, Tuple
 
 import semver
@@ -51,13 +50,13 @@ def handle_list_projects(request_id: str) -> Dict[str, Any]:
     Builds a terms aggregation on project.name with a nested sub-aggregation
     on project.tag, executes it against the scans index, and returns the
     results sorted alphabetically by project name with tags sorted in
-    descending order.
+    descending semver order.
 
     Args:
         request_id: Short request ID for log correlation.
 
     Returns:
-        Structured result dict with sorted projects and tags.
+        Structured result dict with sorted projects and their available tags.
     """
     logger.info(f"[{request_id}] LIST_PROJECTS: Listing projects and tags")
 
@@ -112,21 +111,10 @@ def handle_list_projects(request_id: str) -> Dict[str, Any]:
             reverse=True,
         )
 
-        # Determine the latest release version (highest semver, excluding branch tags)
-        version_tags = [t for t in tags if re.match(r'^\d+', t)]
-        latest_version = version_tags[0] if version_tags else None
-
-        # Determine the latest development branch (highest origin/X.Y tag)
-        branch_tags = [t for t in tags if re.match(r'^origin/\d+\.\d+$', t)]
-        latest_branch = branch_tags[0] if branch_tags else None
-
-        project_entry: Dict[str, Any] = {'name': project_name}
-        if latest_version:
-            project_entry['latest_version'] = latest_version
-        if latest_branch:
-            project_entry['latest_branch'] = latest_branch
-
-        projects.append(project_entry)
+        projects.append({
+            'name': project_name,
+            'tags': tags,
+        })
 
     # Sort projects alphabetically by name
     projects.sort(key=lambda p: p['name'])
@@ -139,10 +127,8 @@ def handle_list_projects(request_id: str) -> Dict[str, Any]:
         'projects': projects,
         'ACTION_REQUIRED': (
             'STOP. DO NOT call query_vulnerabilities. '
-            'Present the user with these options for their chosen project:\n'
-            '1. latest_version (the specific shipped release)\n'
-            '2. latest_branch (the in-progress development branch)\n'
-            '3. origin/main (the latest unreleased code)\n'
+            'Present the projects and their available tags to the user. '
+            'Ask which project and tag they want to query. '
             'Wait for the user to choose before proceeding.'
         ),
     }
