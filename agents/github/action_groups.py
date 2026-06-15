@@ -200,6 +200,68 @@ def get_action_groups(lambda_arn: str) -> List[bedrock.CfnAgent.AgentActionGroup
                             "body": _param("string", "Comment body text (supports markdown)", True),
                         },
                     ),
+                    bedrock.CfnAgent.FunctionProperty(
+                        name="create_tag",
+                        description=(
+                            "Create a lightweight Git tag on a specific commit in a repository. "
+                            "Requires explicit user confirmation before execution. "
+                            "The commit can be a full or abbreviated SHA. "
+                            "Tag names typically follow semver (e.g., '3.12.0')."
+                        ),
+                        parameters={
+                            "repo": _param("string", "Repository name", True),
+                            "tag_name": _param("string", "Name for the tag (e.g., '3.12.0')", True),
+                            "commit_sha": _param(
+                                "string",
+                                "Commit SHA (full or abbreviated) to tag. "
+                                "If omitted, the HEAD of the default branch is used.",
+                                False,
+                            ),
+                            "requester_user_id": _param(
+                                "string",
+                                "Slack user ID (U...) of the user who originally requested "
+                                "the tag creation. Extract from [USER_ID: ...] prefix. "
+                                "MUST be different from approver_user_id (two-person review).",
+                            ),
+                            "approver_user_id": _param(
+                                "string",
+                                "Slack user ID (U...) of the user who confirmed/approved "
+                                "the tag creation. Extract from [USER_ID: ...] prefix of "
+                                "the confirmation turn. MUST be different from requester_user_id.",
+                            ),
+                        },
+                    ),
+                    bedrock.CfnAgent.FunctionProperty(
+                        name="create_branch",
+                        description=(
+                            "Create a new branch from a specific commit in a repository. "
+                            "Requires explicit user confirmation before execution. "
+                            "The commit can be a full or abbreviated SHA; abbreviated SHAs "
+                            "are resolved to the full SHA automatically."
+                        ),
+                        parameters={
+                            "repo": _param("string", "Repository name", True),
+                            "branch_name": _param("string", "Name for the branch (e.g., '3.12')", True),
+                            "commit_sha": _param(
+                                "string",
+                                "Commit SHA (full or abbreviated) to branch from. "
+                                "If omitted, the HEAD of the default branch is used.",
+                                False,
+                            ),
+                            "requester_user_id": _param(
+                                "string",
+                                "Slack user ID (U...) of the user who originally requested "
+                                "the branch creation. Extract from [USER_ID: ...] prefix. "
+                                "MUST be different from approver_user_id (two-person review).",
+                            ),
+                            "approver_user_id": _param(
+                                "string",
+                                "Slack user ID (U...) of the user who confirmed/approved "
+                                "the branch creation. Extract from [USER_ID: ...] prefix of "
+                                "the confirmation turn. MUST be different from requester_user_id.",
+                            ),
+                        },
+                    ),
                 ]
             ),
         ),

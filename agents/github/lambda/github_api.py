@@ -137,6 +137,44 @@ def bulk_comment(
     })
 
 
+def create_tag(
+    token: str, owner: str, repo: str, tag_name: str, commit_sha: str,
+) -> str:
+    """Create a lightweight Git tag pointing to a specific commit."""
+    ref = f"refs/tags/{tag_name}"
+    result = post(token, f"/repos/{owner}/{repo}/git/refs", json_body={
+        "ref": ref,
+        "sha": commit_sha,
+    })
+    return json.dumps({
+        "status": "success",
+        "tag": tag_name,
+        "commit_sha": commit_sha,
+        "ref": result.get("ref", ref),
+        "url": result.get("url", ""),
+        "repo": f"{owner}/{repo}",
+    })
+
+
+def create_branch(
+    token: str, owner: str, repo: str, branch_name: str, commit_sha: str,
+) -> str:
+    """Create a new branch pointing to a specific commit."""
+    ref = f"refs/heads/{branch_name}"
+    result = post(token, f"/repos/{owner}/{repo}/git/refs", json_body={
+        "ref": ref,
+        "sha": commit_sha,
+    })
+    return json.dumps({
+        "status": "success",
+        "branch": branch_name,
+        "commit_sha": commit_sha,
+        "ref": result.get("ref", ref),
+        "url": result.get("url", ""),
+        "repo": f"{owner}/{repo}",
+    })
+
+
 _MAINTAINERS_LINK_RE = re.compile(
     r"\[([^\]]+)\]\(https?://github\.com/([^)]+)\)",
 )

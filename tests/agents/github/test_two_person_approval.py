@@ -430,5 +430,221 @@ class TestTwoPersonApprovalBulkComment(unittest.TestCase):
         mock_bulk_comment.assert_called_once()
 
 
+def _create_tag_event(session_attrs=None):
+    """Build a create_tag event with optional session attributes."""
+    params = [
+        {'name': 'repo', 'value': 'data-prepper'},
+        {'name': 'tag_name', 'value': '3.12.0'},
+        {'name': 'commit_sha', 'value': '1234abcd'},
+    ]
+    event = {'function': 'create_tag', 'parameters': params}
+    if session_attrs is not None:
+        event['sessionAttributes'] = session_attrs
+    return event
+
+
+class TestTwoPersonApprovalCreateTag(unittest.TestCase):
+    """Test 2PR enforcement in create_tag."""
+
+    @patch.dict(os.environ, {'ENABLE_2PR': 'true', 'GITHUB_SECRET_NAME': 'test-secret'})
+    @patch('boto3.client')
+    def test_2pr_enabled_missing_user_ids_rejected(self, mock_boto):
+        mock_boto.return_value.get_secret_value.return_value = {
+            'SecretString': json.dumps({
+                'GITHUB_APP_ID': '123',
+                'GITHUB_PRIVATE_KEY': 'key',
+                'GITHUB_INSTALLATION_ID': '456',
+            })
+        }
+        mod, _ = _load_lambda_handler()
+        mock_create_tag = sys.modules['github_api'].create_tag
+
+        result = mod.lambda_handler(_create_tag_event(session_attrs={}), None)
+        body = result['response']['functionResponse']['responseBody']['TEXT']['body']
+        parsed = json.loads(body)
+        self.assertEqual(parsed['status'], 'error')
+        self.assertIn('SECURITY ERROR', parsed['message'])
+        mock_create_tag.assert_not_called()
+
+    @patch.dict(os.environ, {'ENABLE_2PR': 'true', 'GITHUB_SECRET_NAME': 'test-secret'})
+    @patch('boto3.client')
+    def test_2pr_enabled_self_approval_rejected(self, mock_boto):
+        mock_boto.return_value.get_secret_value.return_value = {
+            'SecretString': json.dumps({
+                'GITHUB_APP_ID': '123',
+                'GITHUB_PRIVATE_KEY': 'key',
+                'GITHUB_INSTALLATION_ID': '456',
+            })
+        }
+        mod, _ = _load_lambda_handler()
+        mock_create_tag = sys.modules['github_api'].create_tag
+
+        event = _create_tag_event(session_attrs={
+            'requester_user_id': 'U_SAME', 'approver_user_id': 'U_SAME',
+        })
+        result = mod.lambda_handler(event, None)
+        body = result['response']['functionResponse']['responseBody']['TEXT']['body']
+        parsed = json.loads(body)
+        self.assertEqual(parsed['status'], 'error')
+        self.assertIn('Self-approval is not permitted', parsed['message'])
+        mock_create_tag.assert_not_called()
+
+    @patch.dict(os.environ, {'ENABLE_2PR': 'true', 'GITHUB_SECRET_NAME': 'test-secret'})
+    @patch('boto3.client')
+    def test_2pr_enabled_distinct_users_proceeds(self, mock_boto):
+        mock_boto.return_value.get_secret_value.return_value = {
+            'SecretString': json.dumps({
+                'GITHUB_APP_ID': '123',
+                'GITHUB_PRIVATE_KEY': 'key',
+                'GITHUB_INSTALLATION_ID': '456',
+            })
+        }
+        mod, _ = _load_lambda_handler()
+        mock_create_tag = sys.modules['github_api'].create_tag
+        mock_create_tag.return_value = json.dumps({
+            'status': 'success', 'tag': '3.12.0', 'commit_sha': '1234abcd',
+        })
+
+        event = _create_tag_event(session_attrs={
+            'requester_user_id': 'U_REQ', 'approver_user_id': 'U_APP',
+        })
+        result = mod.lambda_handler(event, None)
+        body = result['response']['functionResponse']['responseBody']['TEXT']['body']
+        parsed = json.loads(body)
+        self.assertEqual(parsed['status'], 'success')
+        mock_create_tag.assert_called_once()
+
+    @patch.dict(os.environ, {'ENABLE_2PR': 'false', 'GITHUB_SECRET_NAME': 'test-secret'})
+    @patch('boto3.client')
+    def test_2pr_disabled_skips_check(self, mock_boto):
+        """When ENABLE_2PR is off, missing user IDs should not block tag creation."""
+        mock_boto.return_value.get_secret_value.return_value = {
+            'SecretString': json.dumps({
+                'GITHUB_APP_ID': '123',
+                'GITHUB_PRIVATE_KEY': 'key',
+                'GITHUB_INSTALLATION_ID': '456',
+            })
+        }
+        mod, _ = _load_lambda_handler()
+        mock_create_tag = sys.modules['github_api'].create_tag
+        mock_create_tag.return_value = json.dumps({
+            'status': 'success', 'tag': '3.12.0', 'commit_sha': '1234abcd',
+        })
+
+        result = mod.lambda_handler(_create_tag_event(), None)
+        body = result['response']['functionResponse']['responseBody']['TEXT']['body']
+        parsed = json.loads(body)
+        self.assertEqual(parsed['status'], 'success')
+        mock_create_tag.assert_called_once()
+
+
+def _create_branch_event(session_attrs=None):
+    """Build a create_branch event with optional session attributes."""
+    params = [
+        {'name': 'repo', 'value': 'data-prepper'},
+        {'name': 'branch_name', 'value': '3.12'},
+        {'name': 'commit_sha', 'value': '1234abcd'},
+    ]
+    event = {'function': 'create_branch', 'parameters': params}
+    if session_attrs is not None:
+        event['sessionAttributes'] = session_attrs
+    return event
+
+
+class TestTwoPersonApprovalCreateBranch(unittest.TestCase):
+    """Test 2PR enforcement in create_branch."""
+
+    @patch.dict(os.environ, {'ENABLE_2PR': 'true', 'GITHUB_SECRET_NAME': 'test-secret'})
+    @patch('boto3.client')
+    def test_2pr_enabled_missing_user_ids_rejected(self, mock_boto):
+        mock_boto.return_value.get_secret_value.return_value = {
+            'SecretString': json.dumps({
+                'GITHUB_APP_ID': '123',
+                'GITHUB_PRIVATE_KEY': 'key',
+                'GITHUB_INSTALLATION_ID': '456',
+            })
+        }
+        mod, _ = _load_lambda_handler()
+        mock_create_branch = sys.modules['github_api'].create_branch
+
+        result = mod.lambda_handler(_create_branch_event(session_attrs={}), None)
+        body = result['response']['functionResponse']['responseBody']['TEXT']['body']
+        parsed = json.loads(body)
+        self.assertEqual(parsed['status'], 'error')
+        self.assertIn('SECURITY ERROR', parsed['message'])
+        mock_create_branch.assert_not_called()
+
+    @patch.dict(os.environ, {'ENABLE_2PR': 'true', 'GITHUB_SECRET_NAME': 'test-secret'})
+    @patch('boto3.client')
+    def test_2pr_enabled_self_approval_rejected(self, mock_boto):
+        mock_boto.return_value.get_secret_value.return_value = {
+            'SecretString': json.dumps({
+                'GITHUB_APP_ID': '123',
+                'GITHUB_PRIVATE_KEY': 'key',
+                'GITHUB_INSTALLATION_ID': '456',
+            })
+        }
+        mod, _ = _load_lambda_handler()
+        mock_create_branch = sys.modules['github_api'].create_branch
+
+        event = _create_branch_event(session_attrs={
+            'requester_user_id': 'U_SAME', 'approver_user_id': 'U_SAME',
+        })
+        result = mod.lambda_handler(event, None)
+        body = result['response']['functionResponse']['responseBody']['TEXT']['body']
+        parsed = json.loads(body)
+        self.assertEqual(parsed['status'], 'error')
+        self.assertIn('Self-approval is not permitted', parsed['message'])
+        mock_create_branch.assert_not_called()
+
+    @patch.dict(os.environ, {'ENABLE_2PR': 'true', 'GITHUB_SECRET_NAME': 'test-secret'})
+    @patch('boto3.client')
+    def test_2pr_enabled_distinct_users_proceeds(self, mock_boto):
+        mock_boto.return_value.get_secret_value.return_value = {
+            'SecretString': json.dumps({
+                'GITHUB_APP_ID': '123',
+                'GITHUB_PRIVATE_KEY': 'key',
+                'GITHUB_INSTALLATION_ID': '456',
+            })
+        }
+        mod, _ = _load_lambda_handler()
+        mock_create_branch = sys.modules['github_api'].create_branch
+        mock_create_branch.return_value = json.dumps({
+            'status': 'success', 'branch': '3.12', 'commit_sha': '1234abcd',
+        })
+
+        event = _create_branch_event(session_attrs={
+            'requester_user_id': 'U_REQ', 'approver_user_id': 'U_APP',
+        })
+        result = mod.lambda_handler(event, None)
+        body = result['response']['functionResponse']['responseBody']['TEXT']['body']
+        parsed = json.loads(body)
+        self.assertEqual(parsed['status'], 'success')
+        mock_create_branch.assert_called_once()
+
+    @patch.dict(os.environ, {'ENABLE_2PR': 'false', 'GITHUB_SECRET_NAME': 'test-secret'})
+    @patch('boto3.client')
+    def test_2pr_disabled_skips_check(self, mock_boto):
+        """When ENABLE_2PR is off, missing user IDs should not block branch creation."""
+        mock_boto.return_value.get_secret_value.return_value = {
+            'SecretString': json.dumps({
+                'GITHUB_APP_ID': '123',
+                'GITHUB_PRIVATE_KEY': 'key',
+                'GITHUB_INSTALLATION_ID': '456',
+            })
+        }
+        mod, _ = _load_lambda_handler()
+        mock_create_branch = sys.modules['github_api'].create_branch
+        mock_create_branch.return_value = json.dumps({
+            'status': 'success', 'branch': '3.12', 'commit_sha': '1234abcd',
+        })
+
+        result = mod.lambda_handler(_create_branch_event(), None)
+        body = result['response']['functionResponse']['responseBody']['TEXT']['body']
+        parsed = json.loads(body)
+        self.assertEqual(parsed['status'], 'success')
+        mock_create_branch.assert_called_once()
+
+
 if __name__ == '__main__':
     unittest.main()
