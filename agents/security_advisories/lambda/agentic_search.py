@@ -17,8 +17,9 @@ Functions:
 
 import json
 import logging
-import re
 from typing import Any, Dict, Optional
+
+import semver
 
 from aws_utils import get_latest_scans_index, opensearch_request
 
@@ -67,18 +68,23 @@ def resolve_version_tag(version: str) -> str:
         logger.info(f"RESOLVE_TAG: '{version}' -> '{resolved}'")
         return resolved
 
-    # Two-part version (e.g., "3.7") → origin/{major}.{minor} (branch tag)
-    # Bare two-part versions don't exist as release tags in the index
-    two_part_match = re.match(r'^(\d+\.\d+)$', version)
-    if two_part_match:
-        resolved = f'origin/{two_part_match.group(1)}'
+    # Try parsing as a full semver (three-part: "3.7.0", "2.19.6")
+    try:
+        semver.Version.parse(version)
+        logger.info(f"RESOLVE_TAG: '{version}' is a valid semver version, using as-is")
+        return version
+    except ValueError:
+        pass
+
+    # Validate that the input is a numeric two-part version (e.g., "3.7")
+    # by appending ".0" to form valid semver — rejects non-numeric strings
+    try:
+        semver.Version.parse(f'{version}.0')
+        resolved = f'origin/{version}'
         logger.info(f"RESOLVE_TAG: '{version}' -> '{resolved}'")
         return resolved
-
-    # Three-part version (e.g., "3.7.0", "2.19.6") — return as-is for exact release tag lookup
-    if re.match(r'^\d+\.\d+\.\d+$', version):
-        logger.info(f"RESOLVE_TAG: '{version}' is a specific version, using as-is")
-        return version
+    except ValueError:
+        pass
 
     # Non-parseable — return as-is (exact tag lookup)
     logger.info(f"RESOLVE_TAG: Cannot parse '{version}', using as-is")
