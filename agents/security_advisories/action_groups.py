@@ -46,8 +46,9 @@ def _privileged_action_group(
                         "version": bedrock.CfnAgent.ParameterDetailProperty(
                             type="string",
                             description=(
-                                "OpenSearch version to scope the query "
-                                "(e.g., '2.19.6', '3.0.0')"
+                                "OpenSearch version or branch to scope the query "
+                                "(e.g., '2.19.6', '3.0.0', 'origin/2.19'). "
+                                "Defaults to 'origin/main' if the user does not specify a version."
                             ),
                             required=False,
                         ),

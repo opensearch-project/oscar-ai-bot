@@ -13,7 +13,6 @@ Functions:
 """
 
 import logging
-from datetime import datetime, timezone
 from typing import Any, Dict, Optional, Set
 
 from agentic_search import (AgenticSearchError, agentic_search, enhance_query,
@@ -24,6 +23,9 @@ from response_filter import (build_neglected_page_url, build_summary,
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
+
+# Fields to retain when trimming vulnerability objects for the response.
+_VULN_SUMMARY_FIELDS = ('id', 'severity', 'advisory_url')
 
 
 def _parse_severity(raw: Optional[str]) -> Optional[Set[str]]:
@@ -74,48 +76,51 @@ def _map_age_days_to_age(age_days: Optional[int]) -> Optional[str]:
         return None
 
     buckets = [15, 30, 45, 60]
-    # Pick the smallest bucket >= age_days, or the largest if age_days exceeds all
     for bucket in buckets:
         if age_days <= bucket:
             return f"{bucket}d"
     return f"{buckets[-1]}d"
 
 
-def _is_within_age(timestamp: Dict[str, Any], age_days: int) -> bool:
-    """Check whether a scan timestamp falls within the age threshold.
+def _process_hits(
+    hits: list, severity: Optional[Set[str]], request_id: str,
+) -> list:
+    """Process raw search hits into filtered, trimmed result entries.
 
-    Supports both ISO-8601 strings and epoch-millis integers for the
-    ``scan`` field inside the timestamp dict.
+    Each hit represents a distinct project+tag from the latest scan index.
+    Filtering is applied at the vulnerability level (severity, exclusion status)
+    and results are trimmed to essential fields to reduce payload size.
 
     Args:
-        timestamp: Timestamp dict from the scan document (contains ``scan``).
-        age_days: Maximum age in days.
+        hits: Raw hit list from the agentic search response.
+        severity: Set of severity levels to retain, or ``None`` for all.
+        request_id: Short request ID for log correlation.
 
     Returns:
-        ``True`` if the scan is within the threshold, ``False`` otherwise.
+        List of structured result dicts ready for the response payload.
     """
-    scan_ts = timestamp.get('scan')
-    if scan_ts is None:
-        return True  # No timestamp — don't filter out
+    results = []
+    for hit in hits:
+        source = hit.get('_source', {})
+        project = source.get('project', {})
+        timestamp = source.get('timestamp', {})
 
-    try:
-        if isinstance(scan_ts, (int, float)):
-            # Epoch milliseconds
-            scan_dt = datetime.fromtimestamp(scan_ts / 1000, tz=timezone.utc)
-        else:
-            # ISO-8601 string — handle with/without timezone
-            ts_str = str(scan_ts)
-            if ts_str.endswith('Z'):
-                ts_str = ts_str[:-1] + '+00:00'
-            scan_dt = datetime.fromisoformat(ts_str)
-            if scan_dt.tzinfo is None:
-                scan_dt = scan_dt.replace(tzinfo=timezone.utc)
+        raw_vulns = source.get('vulnerabilities', [])
+        filtered_vulns = filter_vulnerabilities(raw_vulns, severity=severity)
+        trimmed_vulns = [
+            {k: v for k, v in vuln.items() if k in _VULN_SUMMARY_FIELDS}
+            for vuln in filtered_vulns
+        ]
 
-        age = datetime.now(timezone.utc) - scan_dt
-        return age.days <= age_days
-    except (ValueError, TypeError, OSError) as e:
-        logger.warning(f"Could not parse scan timestamp '{scan_ts}': {e}")
-        return True  # Don't filter out on parse errors
+        results.append({
+            'project': project,
+            'timestamp': timestamp,
+            'total_count': source.get('count', {}),
+            'filtered_vulnerabilities': trimmed_vulns,
+            'filtered_count': len(trimmed_vulns),
+            'severity_summary': build_summary(filtered_vulns),
+        })
+    return results
 
 
 def handle_query_vulnerabilities(params: Dict[str, Any], request_id: str) -> Dict[str, Any]:
@@ -192,33 +197,7 @@ def handle_query_vulnerabilities(params: Dict[str, Any], request_id: str) -> Dic
         }
 
     # Process each scan document hit
-    results = []
-    for hit in hits:
-        source = hit.get('_source', {})
-        project = source.get('project', {})
-        raw_vulns = source.get('vulnerabilities', [])
-        count = source.get('count', {})
-        timestamp = source.get('timestamp', {})
-
-        # Apply age threshold filter at the scan-document level
-        if age_days is not None and not _is_within_age(timestamp, age_days):
-            logger.info(
-                f"[{request_id}] Skipping scan for {project.get('name')} "
-                f"tag={project.get('tag')} — older than {age_days} days",
-            )
-            continue
-
-        # Apply post-query filters (severity, exclusion)
-        filtered_vulns = filter_vulnerabilities(raw_vulns, severity=severity)
-
-        results.append({
-            'project': project,
-            'timestamp': timestamp,
-            'total_count': count,
-            'filtered_vulnerabilities': filtered_vulns,
-            'filtered_count': len(filtered_vulns),
-            'severity_summary': build_summary(filtered_vulns),
-        })
+    results = _process_hits(hits, severity, request_id)
 
     logger.info(f"[{request_id}] Returning {len(results)} result entries")
 
