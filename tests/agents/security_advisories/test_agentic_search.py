@@ -43,101 +43,94 @@ def _load_agentic_search():
 # ---------------------------------------------------------------------------
 
 
-class TestEnhanceQueryPreservesOriginal:
-    """Test that enhance_query preserves the original query text."""
+class TestEnhanceQueryStandardOutput:
+    """Test that enhance_query produces standardized 'Show me CVEs' output."""
 
-    def test_original_query_present_in_result(self):
+    def test_no_params_returns_base_query(self):
         mod = _load_agentic_search()
         result = mod.enhance_query('Show me critical CVEs')
-        assert 'Show me critical CVEs' in result
+        assert result == 'Show me CVEs'
 
-    def test_original_query_present_with_version(self):
+    def test_with_version_adds_tag(self):
         mod = _load_agentic_search()
         result = mod.enhance_query('Show me critical CVEs', version='2.19.6')
-        assert 'Show me critical CVEs' in result
+        assert result == 'Show me CVEs tag: 2.19.6'
 
-    def test_original_query_present_with_project_name(self):
+    def test_with_project_name_adds_project(self):
         mod = _load_agentic_search()
         result = mod.enhance_query('Show me critical CVEs', project_name='OpenSearch')
-        assert 'Show me critical CVEs' in result
+        assert result == 'Show me CVEs project: OpenSearch'
 
-    def test_original_query_present_with_all_params(self):
+    def test_with_all_params(self):
         mod = _load_agentic_search()
         result = mod.enhance_query(
             'Show me critical CVEs', version='2.19.6', project_name='OpenSearch',
         )
-        assert 'Show me critical CVEs' in result
+        assert result == 'Show me CVEs tag: 2.19.6 project: OpenSearch'
 
 
-class TestEnhanceQueryAppendsVersion:
-    """Test that enhance_query appends version when provided."""
+class TestEnhanceQueryVersionHandling:
+    """Test that enhance_query handles version/resolved_tag correctly."""
 
-    def test_version_appended(self):
+    def test_version_included_as_tag(self):
         mod = _load_agentic_search()
         result = mod.enhance_query('List CVEs', version='2.19.6')
-        assert '2.19.6' in result
+        assert 'tag: 2.19.6' in result
 
     def test_version_not_present_when_none(self):
         mod = _load_agentic_search()
         result = mod.enhance_query('List CVEs', version=None)
-        assert result == 'List CVEs'
+        assert result == 'Show me CVEs'
 
     def test_version_not_present_when_empty(self):
         mod = _load_agentic_search()
         result = mod.enhance_query('List CVEs', version='')
-        assert result == 'List CVEs'
+        assert result == 'Show me CVEs'
 
 
-class TestEnhanceQueryAppendsProjectName:
-    """Test that enhance_query appends project name when provided."""
+class TestEnhanceQueryProjectNameHandling:
+    """Test that enhance_query handles project name correctly."""
 
     def test_project_name_appended(self):
         mod = _load_agentic_search()
         result = mod.enhance_query('List CVEs', project_name='OpenSearch Dashboards')
-        assert 'OpenSearch Dashboards' in result
+        assert 'project: OpenSearch Dashboards' in result
 
     def test_project_name_not_present_when_none(self):
         mod = _load_agentic_search()
         result = mod.enhance_query('List CVEs', project_name=None)
-        assert result == 'List CVEs'
+        assert result == 'Show me CVEs'
 
     def test_project_name_not_present_when_empty(self):
         mod = _load_agentic_search()
         result = mod.enhance_query('List CVEs', project_name='')
-        assert result == 'List CVEs'
+        assert result == 'Show me CVEs'
 
 
 class TestEnhanceQueryAllParamsAndMissing:
-    """Test enhance_query with all params and with missing optional params.
-
-    **Validates Property 1: Query enhancement preserves all provided context**
-    """
+    """Test enhance_query with all params and with missing optional params."""
 
     def test_all_params_present(self):
         mod = _load_agentic_search()
         result = mod.enhance_query(
             'Show critical CVEs', version='3.0.0', project_name='OpenSearch',
         )
-        assert 'Show critical CVEs' in result
-        assert '3.0.0' in result
-        assert 'OpenSearch' in result
+        assert result == 'Show me CVEs tag: 3.0.0 project: OpenSearch'
 
     def test_only_query(self):
         mod = _load_agentic_search()
         result = mod.enhance_query('Show critical CVEs')
-        assert result == 'Show critical CVEs'
+        assert result == 'Show me CVEs'
 
     def test_query_and_version_only(self):
         mod = _load_agentic_search()
         result = mod.enhance_query('Show critical CVEs', version='2.19.6')
-        assert 'Show critical CVEs' in result
-        assert '2.19.6' in result
+        assert result == 'Show me CVEs tag: 2.19.6'
 
     def test_query_and_project_name_only(self):
         mod = _load_agentic_search()
         result = mod.enhance_query('Show critical CVEs', project_name='OpenSearch')
-        assert 'Show critical CVEs' in result
-        assert 'OpenSearch' in result
+        assert result == 'Show me CVEs project: OpenSearch'
 
     def test_none_optionals_same_as_omitted(self):
         mod = _load_agentic_search()

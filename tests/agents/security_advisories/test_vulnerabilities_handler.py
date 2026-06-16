@@ -35,6 +35,7 @@ def _make_mock_agentic_search():
     mock_mod = MagicMock()
     mock_mod.enhance_query = MagicMock(side_effect=lambda q, **kw: q)
     mock_mod.agentic_search = MagicMock(return_value={'hits': {'hits': []}})
+    mock_mod.resolve_version_tag = MagicMock(side_effect=lambda v: v)
     mock_mod.AgenticSearchError = type('AgenticSearchError', (Exception,), {
         '__init__': lambda self, msg, status_code=None: (
             super(type(self), self).__init__(msg),
@@ -381,20 +382,6 @@ class TestPrivilegedResponseEnrichment:
     _Validates: Requirements 2.1, 3.1, 5.2_
     """
 
-    def test_privileged_response_has_access_tier(self):
-        """Privileged response includes access_tier: 'privileged'."""
-        mock_agentic = _make_mock_agentic_search()
-        mock_agentic.agentic_search.return_value = {
-            'hits': {'hits': [SAMPLE_HIT]},
-        }
-        mod, _ = _load_vulnerabilities_handler(mock_agentic=mock_agentic)
-
-        result = mod.handle_query_vulnerabilities(
-            {'query': 'Show CVEs', '_access_tier': 'privileged'}, 'test-040',
-        )
-
-        assert result['access_tier'] == 'privileged'
-
     def test_privileged_response_has_neglected_page_url(self):
         """Privileged response includes neglected_page_url field."""
         mock_agentic = _make_mock_agentic_search()
@@ -409,11 +396,11 @@ class TestPrivilegedResponseEnrichment:
 
         assert 'neglected_page_url' in result
         assert result['neglected_page_url'].startswith(
-            'https://advisories.opensearch.org/advisories/neglected/',
+            'https://advisories.opensearch.org/advisories/neglected/?',
         )
 
-    def test_neglected_url_includes_age_param(self):
-        """Neglected URL includes age parameter when provided in query."""
+    def test_neglected_url_includes_age_param_from_age_days(self):
+        """Neglected URL includes age parameter derived from age_days."""
         mock_agentic = _make_mock_agentic_search()
         mock_agentic.agentic_search.return_value = {
             'hits': {'hits': [SAMPLE_HIT]},
@@ -421,13 +408,13 @@ class TestPrivilegedResponseEnrichment:
         mod, _ = _load_vulnerabilities_handler(mock_agentic=mock_agentic)
 
         result = mod.handle_query_vulnerabilities(
-            {'query': 'Show CVEs', 'age': '30d', '_access_tier': 'privileged'}, 'test-042',
+            {'query': 'Show CVEs', 'age_days': '30', '_access_tier': 'privileged'}, 'test-042',
         )
 
         assert 'age=30d' in result['neglected_page_url']
 
-    def test_neglected_url_includes_severe_param(self):
-        """Neglected URL includes severe parameter when provided."""
+    def test_neglected_url_includes_severe_when_high_severity(self):
+        """Neglected URL includes severe=true when severity contains HIGH."""
         mock_agentic = _make_mock_agentic_search()
         mock_agentic.agentic_search.return_value = {
             'hits': {'hits': [SAMPLE_HIT]},
@@ -435,13 +422,13 @@ class TestPrivilegedResponseEnrichment:
         mod, _ = _load_vulnerabilities_handler(mock_agentic=mock_agentic)
 
         result = mod.handle_query_vulnerabilities(
-            {'query': 'Show CVEs', 'severe': 'true', '_access_tier': 'privileged'}, 'test-043',
+            {'query': 'Show CVEs', 'severity': 'HIGH', '_access_tier': 'privileged'}, 'test-043',
         )
 
         assert 'severe=true' in result['neglected_page_url']
 
-    def test_neglected_url_includes_tag_param(self):
-        """Neglected URL includes tag parameter when provided."""
+    def test_neglected_url_includes_tag_from_version(self):
+        """Neglected URL includes tag parameter derived from version."""
         mock_agentic = _make_mock_agentic_search()
         mock_agentic.agentic_search.return_value = {
             'hits': {'hits': [SAMPLE_HIT]},
@@ -449,13 +436,13 @@ class TestPrivilegedResponseEnrichment:
         mod, _ = _load_vulnerabilities_handler(mock_agentic=mock_agentic)
 
         result = mod.handle_query_vulnerabilities(
-            {'query': 'Show CVEs', 'tag': '2.19.6', '_access_tier': 'privileged'}, 'test-044',
+            {'query': 'Show CVEs', 'version': '2.19.6', '_access_tier': 'privileged'}, 'test-044',
         )
 
         assert 'tag=2.19.6' in result['neglected_page_url']
 
-    def test_neglected_url_includes_releases_and_critical(self):
-        """Neglected URL includes releases and critical params when provided."""
+    def test_neglected_url_includes_critical_when_critical_severity(self):
+        """Neglected URL includes critical=true when severity contains CRITICAL."""
         mock_agentic = _make_mock_agentic_search()
         mock_agentic.agentic_search.return_value = {
             'hits': {'hits': [SAMPLE_HIT]},
@@ -463,20 +450,15 @@ class TestPrivilegedResponseEnrichment:
         mod, _ = _load_vulnerabilities_handler(mock_agentic=mock_agentic)
 
         result = mod.handle_query_vulnerabilities(
-            {
-                'query': 'Show CVEs',
-                'releases': 'true',
-                'critical': 'false',
-                '_access_tier': 'privileged',
-            },
+            {'query': 'Show CVEs', 'severity': 'CRITICAL,HIGH', '_access_tier': 'privileged'},
             'test-045',
         )
 
-        assert 'releases=true' in result['neglected_page_url']
-        assert 'critical=false' in result['neglected_page_url']
+        assert 'critical=true' in result['neglected_page_url']
+        assert 'severe=true' in result['neglected_page_url']
 
-    def test_neglected_url_base_when_no_filter_params(self):
-        """Neglected URL is the base URL when no filter params are provided."""
+    def test_neglected_url_defaults_when_no_filter_params(self):
+        """Neglected URL uses defaults when no filter params are provided."""
         mock_agentic = _make_mock_agentic_search()
         mock_agentic.agentic_search.return_value = {
             'hits': {'hits': [SAMPLE_HIT]},
@@ -487,7 +469,13 @@ class TestPrivilegedResponseEnrichment:
             {'query': 'Show CVEs', '_access_tier': 'privileged'}, 'test-046',
         )
 
-        assert result['neglected_page_url'] == 'https://advisories.opensearch.org/advisories/neglected/'
+        url = result['neglected_page_url']
+        assert url.startswith('https://advisories.opensearch.org/advisories/neglected/?')
+        assert 'age=30d' in url
+        assert 'severe=true' in url
+        assert 'releases=false' in url
+        assert 'critical=false' in url
+        assert 'tag=origin' in url
 
     def test_empty_results_still_has_neglected_url(self):
         """Even with no hits, privileged response includes neglected_page_url."""

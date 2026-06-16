@@ -13,33 +13,19 @@ Functions:
 """
 
 import logging
-from datetime import datetime, timezone
 from typing import Any, Dict, Optional, Set
 
-from agentic_search import AgenticSearchError, agentic_search, enhance_query
+from agentic_search import (AgenticSearchError, agentic_search, enhance_query,
+                            resolve_version_tag)
 from config import config
-from constants import DASHBOARD_URL, LIMITED_ACCESS_MESSAGE
 from response_filter import (build_neglected_page_url, build_summary,
                              filter_vulnerabilities)
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
-
-def _build_limited_response() -> Dict[str, Any]:
-    """Build the dashboard-link-only response for limited-access users.
-
-    Returns:
-        Response dict containing only the dashboard URL and advisory message.
-        No CVE identifiers, severity levels, component names, or counts.
-    """
-    return {
-        'status': 'success',
-        'access_tier': 'limited',
-        'message': LIMITED_ACCESS_MESSAGE,
-        'dashboard_url': DASHBOARD_URL,
-        'results': [],
-    }
+# Fields to retain when trimming vulnerability objects for the response.
+_VULN_SUMMARY_FIELDS = ('id', 'severity', 'advisory_url')
 
 
 def _parse_severity(raw: Optional[str]) -> Optional[Set[str]]:
@@ -74,55 +60,67 @@ def _parse_age_days(raw: Optional[str]) -> Optional[int]:
         return None
 
 
-def _parse_bool(raw: Optional[str]) -> Optional[bool]:
-    """Parse a string boolean value.
+def _map_age_days_to_age(age_days: Optional[int]) -> Optional[str]:
+    """Map an integer age-in-days value to the nearest valid neglected page bucket.
+
+    The neglected page only supports discrete values: 15d, 30d, 45d, 60d.
+    This maps the user's numeric threshold to the closest valid bucket.
 
     Args:
-        raw: String representation of a boolean (e.g. ``"true"``, ``"false"``).
+        age_days: Numeric age threshold from the action group parameter.
 
     Returns:
-        ``True`` or ``False`` if parseable, ``None`` if *raw* is empty/None.
+        A valid age bucket string (e.g. ``"30d"``), or ``None`` if not applicable.
     """
-    if raw is None:
+    if age_days is None:
         return None
-    return str(raw).lower().strip() in ('true', '1', 'yes')
+
+    buckets = [15, 30, 45, 60]
+    for bucket in buckets:
+        if age_days <= bucket:
+            return f"{bucket}d"
+    return f"{buckets[-1]}d"
 
 
-def _is_within_age(timestamp: Dict[str, Any], age_days: int) -> bool:
-    """Check whether a scan timestamp falls within the age threshold.
+def _process_hits(
+    hits: list, severity: Optional[Set[str]], request_id: str,
+) -> list:
+    """Process raw search hits into filtered, trimmed result entries.
 
-    Supports both ISO-8601 strings and epoch-millis integers for the
-    ``scan`` field inside the timestamp dict.
+    Each hit represents a distinct project+tag from the latest scan index.
+    Filtering is applied at the vulnerability level (severity, exclusion status)
+    and results are trimmed to essential fields to reduce payload size.
 
     Args:
-        timestamp: Timestamp dict from the scan document (contains ``scan``).
-        age_days: Maximum age in days.
+        hits: Raw hit list from the agentic search response.
+        severity: Set of severity levels to retain, or ``None`` for all.
+        request_id: Short request ID for log correlation.
 
     Returns:
-        ``True`` if the scan is within the threshold, ``False`` otherwise.
+        List of structured result dicts ready for the response payload.
     """
-    scan_ts = timestamp.get('scan')
-    if scan_ts is None:
-        return True  # No timestamp — don't filter out
+    results = []
+    for hit in hits:
+        source = hit.get('_source', {})
+        project = source.get('project', {})
+        timestamp = source.get('timestamp', {})
 
-    try:
-        if isinstance(scan_ts, (int, float)):
-            # Epoch milliseconds
-            scan_dt = datetime.fromtimestamp(scan_ts / 1000, tz=timezone.utc)
-        else:
-            # ISO-8601 string — handle with/without timezone
-            ts_str = str(scan_ts)
-            if ts_str.endswith('Z'):
-                ts_str = ts_str[:-1] + '+00:00'
-            scan_dt = datetime.fromisoformat(ts_str)
-            if scan_dt.tzinfo is None:
-                scan_dt = scan_dt.replace(tzinfo=timezone.utc)
+        raw_vulns = source.get('vulnerabilities', [])
+        filtered_vulns = filter_vulnerabilities(raw_vulns, severity=severity)
+        trimmed_vulns = [
+            {k: v for k, v in vuln.items() if k in _VULN_SUMMARY_FIELDS}
+            for vuln in filtered_vulns
+        ]
 
-        age = datetime.now(timezone.utc) - scan_dt
-        return age.days <= age_days
-    except (ValueError, TypeError, OSError) as e:
-        logger.warning(f"Could not parse scan timestamp '{scan_ts}': {e}")
-        return True  # Don't filter out on parse errors
+        results.append({
+            'project': project,
+            'timestamp': timestamp,
+            'total_count': source.get('count', {}),
+            'filtered_vulnerabilities': trimmed_vulns,
+            'filtered_count': len(trimmed_vulns),
+            'severity_summary': build_summary(filtered_vulns),
+        })
+    return results
 
 
 def handle_query_vulnerabilities(params: Dict[str, Any], request_id: str) -> Dict[str, Any]:
@@ -150,20 +148,25 @@ def handle_query_vulnerabilities(params: Dict[str, Any], request_id: str) -> Dic
     severity = _parse_severity(params.get('severity'))
     age_days = _parse_age_days(params.get('age_days'))
 
-    # Access-tier check — short-circuit before any data retrieval for limited users
-    access_tier = params.get('_access_tier', 'limited')
-    if access_tier != 'privileged':
-        logger.info(f"[{request_id}] Limited access — returning dashboard link only")
-        return _build_limited_response()
-
     logger.info(
         f"[{request_id}] QUERY_VULNERABILITIES: query='{query}', "
         f"version={version}, project_name={project_name}, "
         f"severity={severity}, age_days={age_days}",
     )
 
-    # Enhance the NL query with version/project context
-    enhanced_query = enhance_query(query, version=version, project_name=project_name)
+    # Resolve version to canonical project.tag format
+    resolved_tag = None
+    if version:
+        resolved_tag = resolve_version_tag(version)
+        if resolved_tag != version:
+            logger.info(
+                f"[{request_id}] TAG_RESOLVED: '{version}' -> '{resolved_tag}'"
+            )
+
+    # Enhance the NL query with resolved tag/project context
+    enhanced_query = enhance_query(
+        query, version=version, resolved_tag=resolved_tag, project_name=project_name,
+    )
     logger.info(f"[{request_id}] Enhanced query: '{enhanced_query}'")
 
     # Execute agentic search
@@ -194,48 +197,20 @@ def handle_query_vulnerabilities(params: Dict[str, Any], request_id: str) -> Dic
         }
 
     # Process each scan document hit
-    results = []
-    for hit in hits:
-        source = hit.get('_source', {})
-        project = source.get('project', {})
-        raw_vulns = source.get('vulnerabilities', [])
-        count = source.get('count', {})
-        timestamp = source.get('timestamp', {})
-
-        # Apply age threshold filter at the scan-document level
-        if age_days is not None and not _is_within_age(timestamp, age_days):
-            logger.info(
-                f"[{request_id}] Skipping scan for {project.get('name')} "
-                f"tag={project.get('tag')} — older than {age_days} days",
-            )
-            continue
-
-        # Apply post-query filters (severity, exclusion)
-        filtered_vulns = filter_vulnerabilities(raw_vulns, severity=severity)
-
-        results.append({
-            'project': project,
-            'timestamp': timestamp,
-            'total_count': count,
-            'filtered_vulnerabilities': filtered_vulns,
-            'filtered_count': len(filtered_vulns),
-            'severity_summary': build_summary(filtered_vulns),
-        })
+    results = _process_hits(hits, severity, request_id)
 
     logger.info(f"[{request_id}] Returning {len(results)} result entries")
 
-    # Build neglected page URL with the user's original query filters
+    # Build neglected page URL derived from available action-group parameters
     neglected_url = build_neglected_page_url(
-        age=params.get('age'),
-        severe=_parse_bool(params.get('severe')),
-        releases=_parse_bool(params.get('releases')),
-        critical=_parse_bool(params.get('critical')),
-        tag=params.get('tag'),
+        age=_map_age_days_to_age(age_days),
+        severe='HIGH' in severity if severity else None,
+        critical='CRITICAL' in severity if severity else None,
+        tag=resolved_tag or version,
     )
 
     return {
         'status': 'success',
-        'access_tier': 'privileged',
         'result_count': len(results),
         'results': results,
         'neglected_page_url': neglected_url,
