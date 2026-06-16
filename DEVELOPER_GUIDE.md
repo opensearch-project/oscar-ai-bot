@@ -21,7 +21,7 @@ The CDK deploys:
 | `OscarStorageStack` | Data persistence | DynamoDB table for session/context/deduplication with TTL and monitoring |
 | `OscarVpcStack` | Networking | VPC, security groups, VPC endpoints (S3, DynamoDB, Secrets Manager) |
 | `OscarKnowledgeBaseStack` | Bedrock Knowledge Base | S3 bucket, OpenSearch Serverless collection, document sync Lambda |
-| `OscarLambdaStack` | Compute functions | Supervisor agent, Jenkins agent, metrics agent (VPC-enabled) |
+| `OscarLambdaStack` | Compute functions | Supervisor agent, Jenkins agent, metrics agent (VPC-enabled), shared Lambda layer |
 | `OscarApiGatewayStack` | Slack integration | REST API (`POST /slack/events`) with Lambda proxy integration |
 | `OscarAgentsStack` | Bedrock Agents | Supervisor agents (privileged & limited), collaborator agents (Jenkins, Build, Test, Release) |
 
@@ -141,6 +141,7 @@ See `.env.example` for the full list of configurable values with defaults.
 | `stacks/` | CDK stack definitions                                       |
 | `agents/` | Agents per functionality (one per collaborator agent)       |
 | `lambda/` | Core Lambda source code (supervisor, communication handler) |
+| `lambda/shared-layer/` | Lambda layer with shared utilities (available to all Lambdas at runtime via `oscar_shared`) |
 
 ## 🧪 Testing
 

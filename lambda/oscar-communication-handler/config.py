@@ -45,6 +45,9 @@ class Config:
             raise ValueError("CONTEXT_TABLE_NAME is required")
         self.context_ttl = int(os.environ.get('CONTEXT_TTL', 604800))
 
+        # Feature flags
+        self.enable_2pr = os.environ.get('ENABLE_2PR', 'false').lower() == 'true'
+
         # Config (set by CDK)
         self.bedrock_message_version = os.environ.get('BEDROCK_RESPONSE_MESSAGE_VERSION', '1.0')
 

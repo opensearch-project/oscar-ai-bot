@@ -20,6 +20,7 @@ from typing import Any, Dict
 from config import config
 from jenkins_client import JenkinsClient
 from jenkinsfile_fetcher import get_job_registry
+from oscar_shared.approval_guard import validate_two_person_approval
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -185,6 +186,12 @@ def handle_trigger_job(jenkins_client: JenkinsClient, params: Dict[str, Any]) ->
             'confirmed': False
         }
 
+    # Two-person review (only when ENABLE_2PR is on)
+    approval_error = validate_two_person_approval(params, config.enable_2pr, f'job={job_name}')
+    if approval_error:
+        approval_error['job_name'] = job_name
+        return approval_error
+
     if not job_name:
         return {
             'status': 'error',
@@ -192,8 +199,11 @@ def handle_trigger_job(jenkins_client: JenkinsClient, params: Dict[str, Any]) ->
             'available_jobs': jenkins_client.job_registry.list_jobs()
         }
 
-    # Extract job parameters (all params except job_name and confirmed)
-    job_params = {k: v for k, v in params.items() if k not in ['job_name', 'confirmed']}
+    # Extract job parameters (all params except job_name, confirmed, and two-person review IDs)
+    job_params = {
+        k: v for k, v in params.items()
+        if k not in ['job_name', 'confirmed', 'requester_user_id', 'approver_user_id']
+    }
 
     # Handle legacy job_parameters JSON string if provided
     job_parameters_json = params.get('job_parameters')
