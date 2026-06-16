@@ -201,9 +201,6 @@ class TestParseAgeDays:
         assert mod._parse_age_days('365') == 365
 
 
-
-
-
 # ---------------------------------------------------------------------------
 # Severity filtering integration in handle_query_vulnerabilities
 # ---------------------------------------------------------------------------
