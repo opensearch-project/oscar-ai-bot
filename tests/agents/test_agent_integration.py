@@ -14,6 +14,7 @@ from aws_cdk.assertions import Match, Template
 from agents.base_agent import LambdaConfig, OscarAgent
 from agents.jenkins import JenkinsAgent
 from agents.metrics import MetricsAgent
+from agents.security_advisories import SecurityAdvisoriesAgent
 from stacks.bedrock_agents_stack import OscarAgentsStack
 from stacks.lambda_stack import OscarLambdaStack
 from stacks.permissions_stack import OscarPermissionsStack
@@ -21,7 +22,7 @@ from stacks.secrets_stack import OscarSecretsStack
 from stacks.storage_stack import OscarStorageStack
 from stacks.vpc_stack import OscarVpcStack
 
-ALL_AGENTS = [JenkinsAgent(), MetricsAgent()]
+ALL_AGENTS = [JenkinsAgent(), MetricsAgent(), SecurityAdvisoriesAgent()]
 AGENT_IDS = [a.name for a in ALL_AGENTS]
 ENV = Environment(account="123456789012", region="us-east-1")
 
@@ -93,7 +94,7 @@ class TestAgentRegistration:
     """Validate the specific agent set and their access levels."""
 
     def test_two_agents_registered(self):
-        assert len(ALL_AGENTS) == 2
+        assert len(ALL_AGENTS) == 3
 
     def test_agent_names_are_unique(self):
         names = [p.name for p in ALL_AGENTS]
@@ -104,6 +105,9 @@ class TestAgentRegistration:
 
     def test_metrics_access_level(self):
         assert MetricsAgent().get_access_level() == "both"
+
+    def test_security_advisories_access_level(self):
+        assert SecurityAdvisoriesAgent().get_access_level() == "privileged"
 
 
 # ---------------------------------------------------------------------------
@@ -156,15 +160,15 @@ class TestAgentStackWiring:
         assert jenkins_fn is not metrics_fn
 
     def test_lambda_function_count(self, stacks):
-        """Should be 2 agent entries + 2 core = 4 keys in lambda_functions dict."""
-        # 2 agents + supervisor-agent + communication-handler = 4 entries
-        assert len(stacks.lambda_functions) == 4
+        """Should be 3 agent entries + 2 core = 5 keys in lambda_functions dict."""
+        # 3 agents + supervisor-agent + communication-handler = 5 entries
+        assert len(stacks.lambda_functions) == 5
 
     def test_lambda_template_function_count(self, stacks):
-        """CloudFormation template should have 4 Lambda functions
-        (supervisor + communication + jenkins + unified metrics)."""
+        """CloudFormation template should have 5 Lambda functions
+        (supervisor + communication + jenkins + metrics + security-advisories)."""
         template = Template.from_stack(stacks)
-        template.resource_count_is("AWS::Lambda::Function", 4)
+        template.resource_count_is("AWS::Lambda::Function", 5)
 
 
 # ---------------------------------------------------------------------------

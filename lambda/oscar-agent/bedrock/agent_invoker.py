@@ -70,12 +70,20 @@ class BedrockAgentCore:
         if privilege:
             agent_id = self.privileged_agent_id
             alias_id = self.privileged_agent_alias_id
+
+        access_tier = "privileged" if privilege else "limited"
+
         request = {
             'agentId': agent_id,
             'agentAliasId': alias_id,
             'inputText': query,
             'sessionId': session_id or f"session-{int(time.time())}",
-            'enableTrace': True  # Enable trace to see raw model output
+            'enableTrace': True,  # Enable trace to see raw model output
+            'sessionState': {
+                'sessionAttributes': {
+                    'access_tier': access_tier,
+                }
+            }
         }
 
         return request

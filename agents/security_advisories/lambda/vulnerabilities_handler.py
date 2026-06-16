@@ -1,0 +1,217 @@
+#!/usr/bin/env python3
+# Copyright OpenSearch Contributors
+# SPDX-License-Identifier: Apache-2.0
+
+"""Vulnerabilities Handler for Security Advisories Lambda Functions.
+
+This module orchestrates the agentic search flow for vulnerability queries:
+enhance the NL query, execute agentic search, extract and filter results,
+and return structured data.
+
+Functions:
+    handle_query_vulnerabilities: Handle query_vulnerabilities requests
+"""
+
+import logging
+from typing import Any, Dict, Optional, Set
+
+from agentic_search import (AgenticSearchError, agentic_search, enhance_query,
+                            resolve_version_tag)
+from config import config
+from response_filter import (build_neglected_page_url, build_summary,
+                             filter_vulnerabilities)
+
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
+
+# Fields to retain when trimming vulnerability objects for the response.
+_VULN_SUMMARY_FIELDS = ('id', 'severity', 'advisory_url')
+
+
+def _parse_severity(raw: Optional[str]) -> Optional[Set[str]]:
+    """Parse a comma-separated severity string into a normalised set.
+
+    Args:
+        raw: Comma-separated severity levels (e.g. ``"CRITICAL,HIGH"``).
+
+    Returns:
+        Set of upper-cased severity strings, or ``None`` if *raw* is empty.
+    """
+    if not raw:
+        return None
+    return {s.strip().upper() for s in raw.split(',') if s.strip()}
+
+
+def _parse_age_days(raw: Optional[str]) -> Optional[int]:
+    """Parse an age-in-days value to an integer.
+
+    Args:
+        raw: String representation of the age threshold in days.
+
+    Returns:
+        Positive integer, or ``None`` if *raw* is empty or invalid.
+    """
+    if not raw:
+        return None
+    try:
+        value = int(raw)
+        return value if value > 0 else None
+    except (ValueError, TypeError):
+        return None
+
+
+def _map_age_days_to_age(age_days: Optional[int]) -> Optional[str]:
+    """Map an integer age-in-days value to the nearest valid neglected page bucket.
+
+    The neglected page only supports discrete values: 15d, 30d, 45d, 60d.
+    This maps the user's numeric threshold to the closest valid bucket.
+
+    Args:
+        age_days: Numeric age threshold from the action group parameter.
+
+    Returns:
+        A valid age bucket string (e.g. ``"30d"``), or ``None`` if not applicable.
+    """
+    if age_days is None:
+        return None
+
+    buckets = [15, 30, 45, 60]
+    for bucket in buckets:
+        if age_days <= bucket:
+            return f"{bucket}d"
+    return f"{buckets[-1]}d"
+
+
+def _process_hits(
+    hits: list, severity: Optional[Set[str]], request_id: str,
+) -> list:
+    """Process raw search hits into filtered, trimmed result entries.
+
+    Each hit represents a distinct project+tag from the latest scan index.
+    Filtering is applied at the vulnerability level (severity, exclusion status)
+    and results are trimmed to essential fields to reduce payload size.
+
+    Args:
+        hits: Raw hit list from the agentic search response.
+        severity: Set of severity levels to retain, or ``None`` for all.
+        request_id: Short request ID for log correlation.
+
+    Returns:
+        List of structured result dicts ready for the response payload.
+    """
+    results = []
+    for hit in hits:
+        source = hit.get('_source', {})
+        project = source.get('project', {})
+        timestamp = source.get('timestamp', {})
+
+        raw_vulns = source.get('vulnerabilities', [])
+        filtered_vulns = filter_vulnerabilities(raw_vulns, severity=severity)
+        trimmed_vulns = [
+            {k: v for k, v in vuln.items() if k in _VULN_SUMMARY_FIELDS}
+            for vuln in filtered_vulns
+        ]
+
+        results.append({
+            'project': project,
+            'timestamp': timestamp,
+            'total_count': source.get('count', {}),
+            'filtered_vulnerabilities': trimmed_vulns,
+            'filtered_count': len(trimmed_vulns),
+            'severity_summary': build_summary(filtered_vulns),
+        })
+    return results
+
+
+def handle_query_vulnerabilities(params: Dict[str, Any], request_id: str) -> Dict[str, Any]:
+    """Handle query_vulnerabilities requests via agentic search.
+
+    Extracts query parameters, enhances the NL query with version/project
+    context, executes agentic search through the configured pipeline, and
+    post-processes results with severity/exclusion/age filtering.
+
+    Args:
+        params: Parameters dict containing:
+            - query (str): Natural language query (required).
+            - version (str, optional): Version to scope the query.
+            - project_name (str, optional): Project name to scope the query.
+            - severity (str, optional): Comma-separated severity levels.
+            - age_days (str, optional): Max age in days for scan results.
+        request_id: Short request ID for log correlation.
+
+    Returns:
+        Structured result dict with status, results, and metadata.
+    """
+    query = params.get('query', '')
+    version = params.get('version')
+    project_name = params.get('project_name')
+    severity = _parse_severity(params.get('severity'))
+    age_days = _parse_age_days(params.get('age_days'))
+
+    logger.info(
+        f"[{request_id}] QUERY_VULNERABILITIES: query='{query}', "
+        f"version={version}, project_name={project_name}, "
+        f"severity={severity}, age_days={age_days}",
+    )
+
+    # Resolve version to canonical project.tag format
+    resolved_tag = None
+    if version:
+        resolved_tag = resolve_version_tag(version)
+        if resolved_tag != version:
+            logger.info(
+                f"[{request_id}] TAG_RESOLVED: '{version}' -> '{resolved_tag}'"
+            )
+
+    # Enhance the NL query with resolved tag/project context
+    enhanced_query = enhance_query(
+        query, version=version, resolved_tag=resolved_tag, project_name=project_name,
+    )
+    logger.info(f"[{request_id}] Enhanced query: '{enhanced_query}'")
+
+    # Execute agentic search
+    try:
+        response = agentic_search(config.agentic_pipeline, enhanced_query)
+    except AgenticSearchError as e:
+        logger.error(f"[{request_id}] SECURITY_ADVISORIES_AGENTIC_SEARCH_FAILED: {e}")
+        return {
+            'status': 'error',
+            'type': 'agentic_search_error',
+            'retryable': False,
+            'message': (
+                'The search agent could not process the query. '
+                'Try rephrasing the question.'
+            ),
+        }
+
+    # Extract hits
+    hits = response.get('hits', {}).get('hits', [])
+
+    if not hits:
+        logger.info(f"[{request_id}] No hits returned from agentic search")
+        return {
+            'status': 'success',
+            'message': 'No results found for the given query. Try broadening or rephrasing your search.',
+            'results': [],
+            'result_count': 0,
+        }
+
+    # Process each scan document hit
+    results = _process_hits(hits, severity, request_id)
+
+    logger.info(f"[{request_id}] Returning {len(results)} result entries")
+
+    # Build neglected page URL derived from available action-group parameters
+    neglected_url = build_neglected_page_url(
+        age=_map_age_days_to_age(age_days),
+        severe='HIGH' in severity if severity else None,
+        critical='CRITICAL' in severity if severity else None,
+        tag=resolved_tag or version,
+    )
+
+    return {
+        'status': 'success',
+        'result_count': len(results),
+        'results': results,
+        'neglected_page_url': neglected_url,
+    }

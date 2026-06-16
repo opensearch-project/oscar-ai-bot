@@ -66,6 +66,68 @@ class TestCreateAgentRequest:
         assert req['inputText'] == 'what is opensearch?'
 
 
+class TestSessionAttributeInjection:
+    """Validates Property 4: Session attribute injection correctness.
+
+    For any invocation of create_agent_request(query, privilege, session_id):
+    - If privilege is True, the request SHALL contain access_tier == "privileged"
+    - If privilege is False, the request SHALL contain access_tier == "limited"
+
+    _Requirements: 5.1, 5.2_
+    """
+
+    def test_privilege_true_sets_access_tier_privileged(self, agent_core):
+        """privilege=True produces access_tier: 'privileged' in sessionState."""
+        core, _ = agent_core
+        req = core.create_agent_request('show CVEs', privilege=True)
+        assert req['sessionState']['sessionAttributes']['access_tier'] == 'privileged'
+
+    def test_privilege_false_sets_access_tier_limited(self, agent_core):
+        """privilege=False produces access_tier: 'limited' in sessionState."""
+        core, _ = agent_core
+        req = core.create_agent_request('show CVEs', privilege=False)
+        assert req['sessionState']['sessionAttributes']['access_tier'] == 'limited'
+
+    def test_session_state_structure_present(self, agent_core):
+        """Request always contains sessionState.sessionAttributes dict."""
+        core, _ = agent_core
+        req = core.create_agent_request('hello', privilege=True)
+        assert 'sessionState' in req
+        assert 'sessionAttributes' in req['sessionState']
+        assert isinstance(req['sessionState']['sessionAttributes'], dict)
+
+    def test_privileged_preserves_other_request_fields(self, agent_core):
+        """Session attribute injection does not break other request fields."""
+        core, _ = agent_core
+        req = core.create_agent_request('test query', privilege=True, session_id='sess-123')
+        assert req['agentId'] == 'priv-agent'
+        assert req['agentAliasId'] == 'priv-alias'
+        assert req['inputText'] == 'test query'
+        assert req['sessionId'] == 'sess-123'
+        assert req['enableTrace'] is True
+        assert req['sessionState']['sessionAttributes']['access_tier'] == 'privileged'
+
+    def test_limited_preserves_other_request_fields(self, agent_core):
+        """Session attribute injection does not break other request fields."""
+        core, _ = agent_core
+        req = core.create_agent_request('test query', privilege=False, session_id='sess-456')
+        assert req['agentId'] == 'ltd-agent'
+        assert req['agentAliasId'] == 'ltd-alias'
+        assert req['inputText'] == 'test query'
+        assert req['sessionId'] == 'sess-456'
+        assert req['enableTrace'] is True
+        assert req['sessionState']['sessionAttributes']['access_tier'] == 'limited'
+
+    def test_access_tier_is_only_session_attribute(self, agent_core):
+        """Only access_tier is set in sessionAttributes (no extra keys)."""
+        core, _ = agent_core
+        req = core.create_agent_request('hello', privilege=True)
+        assert req['sessionState']['sessionAttributes'] == {'access_tier': 'privileged'}
+
+        req = core.create_agent_request('hello', privilege=False)
+        assert req['sessionState']['sessionAttributes'] == {'access_tier': 'limited'}
+
+
 class TestInvokeAgent:
 
     def test_returns_assembled_text(self, agent_core):

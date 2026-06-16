@@ -62,6 +62,7 @@ oscar-ai-bot/
 ├── lambda/                         # Lambda function source code
 │   ├── oscar-agent/                # Main Slack bot handler
 │   ├── oscar-communication-handler/ # Bedrock action group for messaging
+│   ├── shared-layer/               # Lambda layer with shared utilities (e.g. approval guard)
 │   └── knowledge-base/             # Upload and sync docs
 ├── agents/                         # Collaborator agent modules
 │   ├── base_agent.py               # Abstract agent interface

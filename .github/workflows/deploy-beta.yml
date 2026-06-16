@@ -14,10 +14,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
 
       - name: Set up Python ${{ env.PYTHON_VERSION }}
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6
         with:
           python-version: ${{ env.PYTHON_VERSION }}
 
@@ -30,7 +30,7 @@ jobs:
           pipenv install --deploy --dev
 
       - id: get_approvers
-        uses: actions/github-script@v7
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           result-encoding: json
@@ -48,7 +48,7 @@ jobs:
             return maintainers;
 
       - name: Configure beta deployment credentials
-        uses: aws-actions/configure-aws-credentials@v5
+        uses: aws-actions/configure-aws-credentials@61815dcd50bd041e203e49132bacad1fd04d2708 # v5
         with:
           role-to-assume: ${{ secrets.BETA_DEPLOYMENT_ROLE }}
           aws-region: 'us-east-1'
@@ -57,6 +57,7 @@ jobs:
         id: beta_stack_diff
         env:
           METRICS_CROSS_ACCOUNT_ROLE_ARN: ${{ secrets.METRICS_CROSS_ACCOUNT_ROLE }}
+          SECURITY_ADVISORIES_CROSS_ACCOUNT_ROLE_ARN: ${{ secrets.SECURITY_ADVISORIES_CROSS_ACCOUNT_ROLE }}
         run: |
           cp deployment/beta.env .env
           pipenv run cdk diff -c ENVIRONMENT=dev | sed -E 's/[0-9]{12}/[MASKED]/g' > beta_diff.txt
@@ -71,14 +72,14 @@ jobs:
           fi
 
       - name: Upload beta diff as artifact
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
           name: beta-stack-diff
           path: beta_diff.txt
           retention-days: 30
 
       - name: Approve or Deny beta change set
-        uses: trstringer/manual-approval@v1
+        uses: trstringer/manual-approval@74d99dff7380e3e4b122d4ededcbca2b6ce59367 # v1
         with:
           secret: ${{ secrets.GITHUB_TOKEN }}
           approvers: ${{ join(fromJSON(steps.get_approvers.outputs.result), ', ') }}
@@ -103,6 +104,7 @@ jobs:
       - name: Deploy beta stacks
         env:
           METRICS_CROSS_ACCOUNT_ROLE_ARN: ${{ secrets.METRICS_CROSS_ACCOUNT_ROLE }}
+          SECURITY_ADVISORIES_CROSS_ACCOUNT_ROLE_ARN: ${{ secrets.SECURITY_ADVISORIES_CROSS_ACCOUNT_ROLE }}
         run: |
           cp deployment/beta.env .env
           pipenv run cdk deploy "*" --require-approval=never -c ENVIRONMENT=dev

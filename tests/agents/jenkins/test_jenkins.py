@@ -6,10 +6,12 @@
 import os
 import sys
 import unittest
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 # Add jenkins directory to path for imports
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', '..', 'agents', 'jenkins', 'lambda'))
+# Add shared layer to path (simulates Lambda layer at runtime)
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', '..', 'lambda', 'shared-layer', 'python'))
 
 from jenkins_client import JenkinsClient, JenkinsCredentials  # noqa: E402
 from job_definitions import (JobDefinition, JobParameter,  # noqa: E402
@@ -313,6 +315,92 @@ class TestLambdaHandler(unittest.TestCase):
         self.assertEqual(result['messageVersion'], '1.0')
 
 
+@patch.dict(os.environ, _JENKINS_ENV)
+class TestTwoPersonApproval(unittest.TestCase):
+    """Test two-person approval enforcement in handle_trigger_job."""
+
+    def setUp(self):
+        _reset_config_cache()
+
+    def _trigger_event(self, **extra_params):
+        params = [
+            {'name': 'job_name', 'value': 'docker-scan'},
+            {'name': 'IMAGE_FULL_NAME', 'value': 'alpine:3.19'},
+            {'name': 'confirmed', 'value': 'true'},
+        ]
+        for name, value in extra_params.items():
+            params.append({'name': name, 'value': value})
+        return {'function': 'trigger_job', 'parameters': params}
+
+    @patch('lambda_function.JenkinsClient')
+    @patch('lambda_function.get_job_registry')
+    @patch('lambda_function.config')
+    def test_2pr_enabled_missing_user_ids_rejected(self, mock_config, mock_get_registry, mock_client_cls):
+        from lambda_function import lambda_handler
+        mock_config.enable_2pr = True
+        mock_get_registry.return_value = _build_test_registry()
+
+        result = lambda_handler(self._trigger_event(), None)
+        body = result['response']['functionResponse']['responseBody']['TEXT']['body']
+        self.assertIn('SECURITY ERROR', body)
+        self.assertIn('requester_user_id', body)
+        mock_client_cls.return_value.trigger_job.assert_not_called()
+
+    @patch('lambda_function.JenkinsClient')
+    @patch('lambda_function.get_job_registry')
+    @patch('lambda_function.config')
+    def test_2pr_enabled_self_approval_rejected(self, mock_config, mock_get_registry, mock_client_cls):
+        from lambda_function import lambda_handler
+        mock_config.enable_2pr = True
+        mock_get_registry.return_value = _build_test_registry()
+
+        event = self._trigger_event(requester_user_id='U_SAME', approver_user_id='U_SAME')
+        result = lambda_handler(event, None)
+        body = result['response']['functionResponse']['responseBody']['TEXT']['body']
+        self.assertIn('Self-approval is not permitted', body)
+        self.assertIn('U_SAME', body)
+        mock_client_cls.return_value.trigger_job.assert_not_called()
+
+    @patch('lambda_function.JenkinsClient')
+    @patch('lambda_function.get_job_registry')
+    @patch('lambda_function.config')
+    def test_2pr_enabled_distinct_users_proceeds(self, mock_config, mock_get_registry, mock_client_cls):
+        from lambda_function import lambda_handler
+        mock_config.enable_2pr = True
+        mock_get_registry.return_value = _build_test_registry()
+
+        mock_client = mock_client_cls.return_value
+        mock_client.trigger_job.return_value = {'status': 'success', 'workflow_url': 'https://j/job/docker-scan/1/'}
+
+        event = self._trigger_event(requester_user_id='U_REQ', approver_user_id='U_APP')
+        result = lambda_handler(event, None)
+        body = result['response']['functionResponse']['responseBody']['TEXT']['body']
+        self.assertIn('Success', body)
+        # Verify user-id keys were not forwarded as job parameters
+        forwarded_params = mock_client.trigger_job.call_args[0][1]
+        self.assertNotIn('requester_user_id', forwarded_params)
+        self.assertNotIn('approver_user_id', forwarded_params)
+        self.assertNotIn('confirmed', forwarded_params)
+
+    @patch('lambda_function.JenkinsClient')
+    @patch('lambda_function.get_job_registry')
+    @patch('lambda_function.config')
+    def test_2pr_disabled_skips_check(self, mock_config, mock_get_registry, mock_client_cls):
+        """When ENABLE_2PR is off, missing/equal user IDs should not block the job."""
+        from lambda_function import lambda_handler
+        mock_config.enable_2pr = False
+        mock_get_registry.return_value = _build_test_registry()
+
+        mock_client = mock_client_cls.return_value
+        mock_client.trigger_job.return_value = {'status': 'success', 'workflow_url': 'https://j/job/docker-scan/1/'}
+
+        # No requester/approver IDs at all
+        result = lambda_handler(self._trigger_event(), None)
+        body = result['response']['functionResponse']['responseBody']['TEXT']['body']
+        self.assertIn('Success', body)
+        mock_client.trigger_job.assert_called_once()
+
+
 class TestValidateBuildParams(unittest.TestCase):
     """Test _validate_build_params helper."""
 
@@ -405,6 +493,40 @@ class TestJobParameterFormatting(unittest.TestCase):
         """Test parameter formatting with no parameters."""
         result = format_parameters_as_bullets({})
         self.assertEqual(result, "• No parameters required")
+
+
+class TestJenkinsfileDiscovery(unittest.TestCase):
+    """Test Jenkinsfile discovery handles case-insensitive extensions."""
+
+    @patch('jenkinsfile_fetcher.requests.get')
+    @patch('jenkinsfile_fetcher.config')
+    def test_discovers_jenkinsfile_case_insensitive(self, mock_config, mock_get):
+        """Test that files with .jenkinsFile (capital F) are discovered."""
+        from jenkinsfile_fetcher import _discover_jenkinsfiles
+
+        mock_config.jenkins_dir = 'jenkins'
+        mock_config.github_repo = 'opensearch-project/opensearch-build'
+        mock_config.github_branch = 'main'
+        mock_config.github_token = None
+        mock_config.jenkinsfile_ignore_list = []
+
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = [
+            {'path': 'jenkins/check-for-build.jenkinsfile', 'type': 'file'},
+            {'path': 'jenkins/manifests-update.jenkinsFile', 'type': 'file'},
+            {'path': 'jenkins/some-job.JENKINSFILE', 'type': 'file'},
+            {'path': 'jenkins/not-a-jenkinsfile.groovy', 'type': 'file'},
+        ]
+        mock_get.return_value = mock_response
+
+        paths = _discover_jenkinsfiles()
+
+        self.assertIn('jenkins/check-for-build.jenkinsfile', paths)
+        self.assertIn('jenkins/manifests-update.jenkinsFile', paths)
+        self.assertIn('jenkins/some-job.JENKINSFILE', paths)
+        self.assertNotIn('jenkins/not-a-jenkinsfile.groovy', paths)
+        self.assertEqual(len(paths), 3)
 
 
 if __name__ == '__main__':

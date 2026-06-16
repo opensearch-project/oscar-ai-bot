@@ -31,6 +31,7 @@ class JenkinsAgent(OscarAgent):
                 "JENKINSFILE_GITHUB_REPO": os.environ.get("JENKINSFILE_GITHUB_REPO", "opensearch-project/opensearch-build"),
                 "JENKINSFILE_GITHUB_BRANCH": os.environ.get("JENKINSFILE_GITHUB_BRANCH", "main"),
                 "JENKINSFILE_IGNORE_LIST": os.environ.get("JENKINSFILE_IGNORE_LIST", ""),
+                "ENABLE_2PR": os.environ.get("ENABLE_2PR", "false"),
             },
         )
 

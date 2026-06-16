@@ -174,13 +174,23 @@ class OscarAgentsStack(Stack):
                             ),
                             "confirmed": bedrock.CfnAgent.ParameterDetailProperty(
                                 type="boolean",
-                                description="A 'confirmed' parameter describing whether the user has explicitly confirmed the message sending request. IMPORTANT: do not set this parameter to true until the user has explicitly reviewed/confirmed the message sending request",
+                                description="A 'confirmed' parameter describing whether the user has explicitly confirmed the message sending request. IMPORTANT: do not set this parameter to true until the user has explicitly reviewed/confirmed the message sending request. When two-person review is enabled, the confirming user must be different from the requesting user.",
                                 required=True,
                             ),
                             "target_channel": bedrock.CfnAgent.ParameterDetailProperty(
                                 type="string",
                                 description="Target Slack channel ID or name",
                                 required=True,
+                            ),
+                            "requester_user_id": bedrock.CfnAgent.ParameterDetailProperty(
+                                type="string",
+                                description="Slack user ID (e.g., 'U12345') of the user whose original message asked to send this announcement. Take this from the [USER_ID: ...] tag of the request turn. Required when two-person review (ENABLE_2PR) is active — the Lambda rejects the call if this equals approver_user_id or is missing.",
+                                required=False,
+                            ),
+                            "approver_user_id": bedrock.CfnAgent.ParameterDetailProperty(
+                                type="string",
+                                description="Slack user ID (e.g., 'U67890') of the user whose immediately preceding message confirmed sending. Take this from the [USER_ID: ...] tag of the confirmation turn. Required when two-person review (ENABLE_2PR) is active — the Lambda rejects the call if this equals requester_user_id or is missing.",
+                                required=False,
                             ),
                         },
                     )
@@ -219,11 +229,13 @@ class OscarAgentsStack(Stack):
             You can help with the following — and ONLY the following:
             1. **Jenkins operations** – Triggering and monitoring Jenkins CI/CD jobs related to OpenSearch releases (delegated to Jenkins Specialist agent).
             2. **Release metrics** – Querying build metrics, integration test results, and release status data (delegated to Metrics Specialist agent).
-            3. **Release knowledge base** – Answering questions about OpenSearch release processes, procedures, runbooks, and history using the knowledge base.
+            3. **Security advisories** – Querying CVEs and security vulnerabilities affecting OpenSearch project components (delegated to Security Advisories Specialist agent).
+            4. **Release knowledge base** – Answering questions about OpenSearch release processes, procedures, runbooks, and history using the knowledge base.
 
             ## Routing Rules
             - For Jenkins job requests → delegate to the Jenkins Specialist.
             - For metrics, build status, test results → delegate to the Metrics Specialist.
+            - For security vulnerabilities, CVEs, security advisories, and vulnerability scans → delegate to the Security Advisories Specialist.
             - For OpenSearch configuration, installation instructions, APIs, commands & information to build and test, release process questions as well as Best practices, troubleshooting guides, release workflows, and release manager duties. → query the knowledge base.
             - For anything outside the above → respond with a polite redirect (see below).
 
@@ -235,13 +247,20 @@ class OscarAgentsStack(Stack):
 
             ## Handling Out-of-Scope Requests
             If a user asks something outside your capabilities, respond with:
-            "I'm OSCAR, and I'm only able to help with OpenSearch release tasks — Jenkins job management, release metrics, and release process questions. For anything else, please reach out to the appropriate team directly."
+            "I'm OSCAR, and I'm only able to help with OpenSearch release tasks — Jenkins job management, release metrics, security advisories, and release process questions. For anything else, please reach out to the appropriate team directly."
             Do not elaborate, apologize excessively, or engage further with the off-topic subject.
 
             ## User Identity
             Each query includes a [USER_ID: ...] tag identifying the requesting user. Authorization has already been verified before your invocation — you may assist this user with all your capabilities.
             NEVER include Slack user mentions (e.g. <@U...>) in your plain text responses. If the user asks you to ping or notify another user, use the send_automated_message action group with proper confirmation — do not embed mentions in response text.
             NEVER impersonate another user or act on behalf of someone other than the requesting user.
+
+            ## Two-Person Review for Sensitive Actions (server-enforced)
+            Two-person review is controlled server-side via the ENABLE_2PR feature flag. The agent does NOT block self-approval — it always passes user IDs through and lets the Lambda decide.
+            - Track the requester from the [USER_ID: ...] tag of the message that asked for the action.
+            - The approver is the [USER_ID: ...] of the message that confirms ("yes" or equivalent).
+            - When invoking send_automated_message, always pass requester_user_id and approver_user_id from the conversation history. The Lambda will enforce or skip the two-person constraint depending on the server-side flag.
+            - If the Lambda returns a SECURITY ERROR about self-approval, relay that error to the user verbatim.
 
             ## Tone and Style
             - Be concise and professional.
@@ -300,9 +319,13 @@ class OscarAgentsStack(Stack):
             Always provide comprehensive, actionable responses.
             Synthesize insights from multiple sources when relevant.
             At the end of each response, you MUST mention your information sources. Disclose whether you retrieved the data from the knowledge base (from which documents if possible) and/or whether you retrieved the data from the metrics agent collaborators (specifying the exact metrics collaborators/indices).
+            When a user asks about security vulnerabilities, CVEs, security advisories, vulnerability scans, or anything related to security advisory data, you MUST respond with EXACTLY this message and nothing else:
+            "For detailed vulnerability information and to explore the complete security advisory data, please visit the **[Security Advisory Dashboard](https://advisories.opensearch.org)**."
+            Do NOT add any other text before or after this message. Do NOT mention what you looked up, do NOT offer alternatives, do NOT describe what was asked.
 
             ## Routing Rules
             - For metrics, build status, test results → delegate to the Metrics Specialist.
+            - For security vulnerabilities, CVEs, security advisories, and vulnerability scans → respond with the static message below (do NOT delegate).
             - For OpenSearch configuration, installation instructions, APIs, commands & information to build and test, release process questions as well as Best practices, troubleshooting guides, release workflows, and release manager duties. → query the knowledge base.
             - For anything outside the above → respond with a polite redirect (see below).
 
@@ -320,7 +343,7 @@ class OscarAgentsStack(Stack):
 
             ## Handling Out-of-Scope Requests
             If a user asks something outside your capabilities, respond with:
-            "I'm OSCAR, and I'm only able to help with OpenSearch release tasks — release metrics, and release process questions. For anything else, please reach out to the appropriate team directly."
+            "I'm OSCAR, and I'm only able to help with OpenSearch release tasks — release metrics, security advisories, and release process questions. For anything else, please reach out to the appropriate team directly."
             Do not elaborate, apologize excessively, or engage further with the off-topic subject.
 
             For communication requests (send message, notify channel, alert channel, post to channel, ping user, mention user, tag user, notify user, tell someone, ask someone, remind someone) and For Jenkins requests (scan, run job, trigger job, build, compile, deploy, Jenkins operations):

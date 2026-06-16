@@ -63,6 +63,14 @@ class OscarLambdaStack(Stack):
 
         self.lambda_functions: Dict[str, PythonFunction] = {}
 
+        # Shared layer for common utilities (e.g. two-person approval guard)
+        self.shared_layer = aws_lambda.LayerVersion(
+            self, "OscarSharedLayer",
+            code=aws_lambda.Code.from_asset("lambda/shared-layer"),
+            compatible_runtimes=[aws_lambda.Runtime.PYTHON_3_12],
+            description="Shared utilities for OSCAR Lambda functions",
+        )
+
         # Core lambdas
         self._create_supervisor_agent_lambda()
         self._create_communication_handler_lambda()
@@ -98,6 +106,7 @@ class OscarLambdaStack(Stack):
             role=execution_role,
             description="Main OSCAR agent with Slack event processing capabilities",
             reserved_concurrent_executions=10,
+            layers=[self.shared_layer],
         )
         function.add_permission(
             "AllowBedrockInvoke",
@@ -130,6 +139,7 @@ class OscarLambdaStack(Stack):
             role=execution_role,
             description="Communication handler for OSCAR Bedrock action groups",
             reserved_concurrent_executions=20,
+            layers=[self.shared_layer],
         )
         function.add_permission(
             "AllowBedrockInvoke",
@@ -217,6 +227,7 @@ class OscarLambdaStack(Stack):
                 role=role,
                 description=f"OSCAR {agent.name} agent lambda function",
                 reserved_concurrent_executions=config.reserved_concurrency,
+                layers=[self.shared_layer],
             )
 
             if config.needs_vpc and self.vpc_stack:
@@ -240,7 +251,7 @@ class OscarLambdaStack(Stack):
 
     # Keys to pass through from .env to Lambda (if set). Lambda config.py has its own defaults.
     _AGENT_ENV_KEYS = [
-        "ENABLE_DM", "CONTEXT_TTL", "AGENT_TIMEOUT", "AGENT_MAX_RETRIES",
+        "ENABLE_DM", "ENABLE_2PR", "CONTEXT_TTL", "AGENT_TIMEOUT", "AGENT_MAX_RETRIES",
         "HOURGLASS_THRESHOLD_SECONDS", "TIMEOUT_THRESHOLD_SECONDS",
         "MAX_WORKERS", "MAX_ACTIVE_QUERIES", "MONITOR_INTERVAL_SECONDS",
         "SLACK_HANDLER_THREAD_NAME_PREFIX",
@@ -254,7 +265,7 @@ class OscarLambdaStack(Stack):
     ]
 
     _COMM_HANDLER_ENV_KEYS = [
-        "CONTEXT_TTL", "BEDROCK_RESPONSE_MESSAGE_VERSION", "CHANNEL_MAPPINGS",
+        "ENABLE_2PR", "CONTEXT_TTL", "BEDROCK_RESPONSE_MESSAGE_VERSION", "CHANNEL_MAPPINGS",
         "CHANNEL_ID_PATTERN", "CHANNEL_REF_PATTERN", "MESSAGE_TIMEOUT", "LOG_LEVEL",
     ]
 

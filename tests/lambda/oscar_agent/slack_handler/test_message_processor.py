@@ -311,3 +311,16 @@ class TestProcessMessageIdentityGate:
         mp.process_message('C_ALLOWED', 'tts', 'U_ADMIN', '<@BOT> hello', say, message_ts='mts')
         mp._handle_link_github_via_dm.assert_not_called()
         mp.timeout_handler.query_agent_with_timeout.assert_called_once()
+        
+    def test_privileged_user_advisory_response_passed_through(self):
+        """Privileged user receives the full agent response with advisory content."""
+        mp, _, say = self._setup()
+        advisory_response = (
+            'Here is a detailed CVE breakdown from advisories.opensearch.org with specifics.'
+        )
+        mp.timeout_handler.query_agent_with_timeout.return_value = (advisory_response, 'sess2')
+
+        mp.process_message('C_ALLOWED', 'tts', 'U_ADMIN', '<@BOT> show vulns', say, message_ts='mts')
+
+        sent_text = say.call_args[1]['text']
+        assert 'detailed CVE breakdown' in sent_text

@@ -10,8 +10,10 @@ import logging
 from typing import Any, Dict
 
 from channel_utils import ChannelUtils
+from config import config
 from context_storage import get_storage
 from message_formatter import MessageFormatter
+from oscar_shared.approval_guard import validate_two_person_approval
 from response_builder import ResponseBuilder
 from slack_client import SlackClientManager
 
@@ -51,6 +53,13 @@ class MessageHandler:
 
             if confirmed is None or (isinstance(confirmed, str) and confirmed.lower().strip() == 'false') or (isinstance(confirmed, bool) and not confirmed):
                 return self.response_builder.create_error_response(action_group, function_name, 'Confirmed was not True')
+
+            # Two-person review (only when ENABLE_2PR is on)
+            approval_error = validate_two_person_approval(params, config.enable_2pr, f'channel={target_channel}')
+            if approval_error:
+                return self.response_builder.create_error_response(
+                    action_group, function_name, approval_error['message']
+                )
 
             logger.info(f"Processing message request: query='{query}', channel='{target_channel}'")
             logger.debug(f"Message content length: {len(message_content) if message_content else 0}")
