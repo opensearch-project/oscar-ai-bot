@@ -299,7 +299,7 @@ class TestParameterParsing:
 
         call_args = mock_vuln.handle_query_vulnerabilities.call_args
         params = call_args[0][0]
-        assert params == {'_access_tier': 'privileged'}
+        assert params == {}
 
 
 # ---------------------------------------------------------------------------

@@ -347,9 +347,9 @@ class TestOpensearchRequest:
 
 
 class TestGetLatestScansIndexHappyPath:
-    """Test get_latest_scans_index returns the index with the most recent scan."""
+    """Test get_latest_scans_index returns the most recently created index."""
 
-    def test_returns_index_from_most_recent_scan_document(self):
+    def test_returns_index_from_search_sorted_by_index_name(self):
         mod = _load_aws_utils()
         cfg = _make_config_mock(cross_account_role_arn='')
 
@@ -361,7 +361,7 @@ class TestGetLatestScansIndexHappyPath:
                         '_index': 'scans-000164',
                         '_id': 'abc123',
                         '_score': None,
-                        'sort': [1780337686739],
+                        'sort': ['scans-000164'],
                     },
                 ],
             },
@@ -388,7 +388,7 @@ class TestGetLatestScansIndexHappyPath:
 
 
 class TestGetLatestScansIndexEmptyResponse:
-    """Test get_latest_scans_index raises when no documents are found."""
+    """Test get_latest_scans_index raises when no scans indices are found."""
 
     def test_raises_runtime_error_on_empty_hits(self):
         mod = _load_aws_utils()
@@ -416,5 +416,5 @@ class TestGetLatestScansIndexEmptyResponse:
             mock_boto3.Session.return_value = mock_session
             mock_requests.request.return_value = mock_response
 
-            with pytest.raises(RuntimeError, match='No scan documents found'):
+            with pytest.raises(RuntimeError, match='No scans indices found'):
                 mod.get_latest_scans_index()

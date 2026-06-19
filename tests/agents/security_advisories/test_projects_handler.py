@@ -134,13 +134,15 @@ class TestProjectsSortedAlphabetically:
         assert result['project_count'] == 3
 
 
-class TestTagsSortedDescending:
-    """**Validates Property 7: List projects output ordering**
+class TestProjectTagsInOutput:
+    """**Validates Property 7: List projects output includes tags array**
 
-    Each project's tags SHALL be sorted in descending order.
+    Each project SHALL have a 'tags' array with all available tags sorted
+    in descending semver order (version tags first, then non-version tags).
     """
 
-    def test_tags_sorted_descending(self):
+    def test_tags_included_in_response(self):
+        """Response should include the full tags array for each project."""
         mock_aws = MagicMock()
         mock_aws.opensearch_request.return_value = SAMPLE_AGG_RESPONSE
         mod, _ = _load_projects_handler(mock_aws_utils=mock_aws)
@@ -148,23 +150,20 @@ class TestTagsSortedDescending:
         result = mod.handle_list_projects('test-010')
 
         for project in result['projects']:
-            tags = project['tags']
-            assert tags == sorted(tags, reverse=True), (
-                f"Tags for {project['name']} not sorted descending: {tags}"
-            )
+            assert 'tags' in project
 
-    def test_opensearch_tags_sorted_descending(self):
+    def test_tags_sorted_descending_semver(self):
         mock_aws = MagicMock()
         mock_aws.opensearch_request.return_value = SAMPLE_AGG_RESPONSE
         mod, _ = _load_projects_handler(mock_aws_utils=mock_aws)
 
         result = mod.handle_list_projects('test-011')
 
-        # Find the OpenSearch project
         os_project = next(p for p in result['projects'] if p['name'] == 'OpenSearch')
+        # Version tags sorted descending: 2.19.6, 2.19.5, 2.18.0
         assert os_project['tags'] == ['2.19.6', '2.19.5', '2.18.0']
 
-    def test_dashboards_tags_sorted_descending(self):
+    def test_non_version_tags_sorted_after_versions(self):
         mock_aws = MagicMock()
         mock_aws.opensearch_request.return_value = SAMPLE_AGG_RESPONSE
         mod, _ = _load_projects_handler(mock_aws_utils=mock_aws)
@@ -172,9 +171,45 @@ class TestTagsSortedDescending:
         result = mod.handle_list_projects('test-012')
 
         osd_project = next(
-            (p for p in result['projects'] if p['name'] == 'OpenSearch Dashboards'),
+            p for p in result['projects'] if p['name'] == 'OpenSearch Dashboards'
         )
-        assert osd_project['tags'] == ['origin/main', '2.19.6', '2.19.5']
+        # Version tags first (descending), then non-version tags
+        assert osd_project['tags'] == ['2.19.6', '2.19.5', 'origin/main']
+
+    def test_mixed_version_and_branch_tags(self):
+        mock_aws = MagicMock()
+        agg_with_branches = {
+            'aggregations': {
+                'projects': {
+                    'buckets': [
+                        {
+                            'key': 'OpenSearch',
+                            'doc_count': 15,
+                            'tags': {
+                                'buckets': [
+                                    {'key': '2.19.6', 'doc_count': 8},
+                                    {'key': 'origin/2.19', 'doc_count': 5},
+                                    {'key': 'origin/3.7', 'doc_count': 3},
+                                    {'key': 'origin/main', 'doc_count': 2},
+                                ],
+                            },
+                        },
+                    ],
+                },
+            },
+        }
+        mock_aws.opensearch_request.return_value = agg_with_branches
+        mod, _ = _load_projects_handler(mock_aws_utils=mock_aws)
+
+        result = mod.handle_list_projects('test-013')
+
+        os_project = result['projects'][0]
+        # 2.19.6 is a version (sorts first), then non-version tags
+        assert os_project['tags'][0] == '2.19.6'
+        # Non-version tags come after
+        assert 'origin/2.19' in os_project['tags']
+        assert 'origin/3.7' in os_project['tags']
+        assert 'origin/main' in os_project['tags']
 
 
 # ---------------------------------------------------------------------------

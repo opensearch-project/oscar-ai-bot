@@ -3,9 +3,12 @@
 
 """Tests for severity filtering and age threshold filtering in vulnerabilities_handler.
 
-These tests cover the new _parse_severity, _parse_age_days, and _is_within_age
-helper functions, as well as the end-to-end integration of severity and age_days
-parameters through handle_query_vulnerabilities.
+These tests cover _parse_severity, _parse_age_days helper functions, and the
+end-to-end integration of severity and age_days parameters through
+handle_query_vulnerabilities.
+
+Note: age_days no longer filters scan hits (since the agentic search targets
+a single latest-scan index). It is only used to build the neglected page URL.
 
 **Validates Acceptance Criteria 3: Query results are returned and processed
 accurately for a given release version, severity, repository and age threshold.**
@@ -14,8 +17,7 @@ accurately for a given release version, severity, repository and age threshold.*
 import importlib
 import os
 import sys
-import time
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -200,75 +202,6 @@ class TestParseAgeDays:
 
 
 # ---------------------------------------------------------------------------
-# _is_within_age tests
-# ---------------------------------------------------------------------------
-
-
-class TestIsWithinAge:
-    """Tests for _is_within_age helper function."""
-
-    def test_no_scan_timestamp_returns_true(self):
-        mod, _ = _load_vulnerabilities_handler()
-        assert mod._is_within_age({}, 30) is True
-
-    def test_scan_timestamp_none_returns_true(self):
-        mod, _ = _load_vulnerabilities_handler()
-        assert mod._is_within_age({'scan': None}, 30) is True
-
-    def test_recent_iso_timestamp_within_threshold(self):
-        mod, _ = _load_vulnerabilities_handler()
-        recent = datetime.now(timezone.utc).isoformat()
-        assert mod._is_within_age({'scan': recent}, 30) is True
-
-    def test_old_iso_timestamp_outside_threshold(self):
-        mod, _ = _load_vulnerabilities_handler()
-        old = '2020-01-01T00:00:00Z'
-        assert mod._is_within_age({'scan': old}, 30) is False
-
-    def test_recent_epoch_millis_within_threshold(self):
-        mod, _ = _load_vulnerabilities_handler()
-        recent_ms = int(time.time() * 1000)
-        assert mod._is_within_age({'scan': recent_ms}, 30) is True
-
-    def test_old_epoch_millis_outside_threshold(self):
-        mod, _ = _load_vulnerabilities_handler()
-        # 2020-01-01 in epoch millis
-        old_ms = 1577836800000
-        assert mod._is_within_age({'scan': old_ms}, 30) is False
-
-    def test_iso_timestamp_with_z_suffix(self):
-        mod, _ = _load_vulnerabilities_handler()
-        recent = datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
-        assert mod._is_within_age({'scan': recent}, 30) is True
-
-    def test_iso_timestamp_without_timezone(self):
-        mod, _ = _load_vulnerabilities_handler()
-        recent = datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%S')
-        assert mod._is_within_age({'scan': recent}, 30) is True
-
-    def test_boundary_exactly_at_threshold(self):
-        """A scan exactly age_days old should be included (days <= age_days)."""
-        mod, _ = _load_vulnerabilities_handler()
-        boundary = (datetime.now(timezone.utc) - timedelta(days=30)).isoformat()
-        assert mod._is_within_age({'scan': boundary}, 30) is True
-
-    def test_one_day_past_threshold(self):
-        mod, _ = _load_vulnerabilities_handler()
-        past = (datetime.now(timezone.utc) - timedelta(days=32)).isoformat()
-        assert mod._is_within_age({'scan': past}, 30) is False
-
-    def test_unparseable_timestamp_returns_true(self):
-        """Unparseable timestamps should not filter out results."""
-        mod, _ = _load_vulnerabilities_handler()
-        assert mod._is_within_age({'scan': 'not-a-date'}, 30) is True
-
-    def test_float_epoch_millis(self):
-        mod, _ = _load_vulnerabilities_handler()
-        recent_ms = time.time() * 1000
-        assert mod._is_within_age({'scan': recent_ms}, 30) is True
-
-
-# ---------------------------------------------------------------------------
 # Severity filtering integration in handle_query_vulnerabilities
 # ---------------------------------------------------------------------------
 
@@ -375,20 +308,20 @@ class TestSeverityFilteringIntegration:
 
 
 # ---------------------------------------------------------------------------
-# Age threshold filtering integration in handle_query_vulnerabilities
+# Age threshold — age_days is used only for neglected page URL, not filtering
 # ---------------------------------------------------------------------------
 
 
-class TestAgeThresholdFilteringIntegration:
-    """Verify age_days param filters out old scan documents."""
+class TestAgeThresholdIntegration:
+    """Verify age_days is parsed and passed to neglected URL but does not filter hits."""
 
-    def test_recent_scan_included(self):
-        """A scan from today should be included with age_days=30."""
+    def test_age_days_does_not_filter_old_scans(self):
+        """Old scans are NOT filtered out — age_days only affects neglected URL."""
         mock_agentic = _make_mock_agentic_search()
-        recent_ts = datetime.now(timezone.utc).isoformat()
+        old_ts = '2020-01-01T00:00:00Z'
         hit = _make_hit('OpenSearch', '2.19.6', [
             _make_vuln('CVE-001', 'HIGH'),
-        ], scan_timestamp=recent_ts)
+        ], scan_timestamp=old_ts)
         mock_agentic.agentic_search.return_value = {'hits': {'hits': [hit]}}
         mod, _ = _load_vulnerabilities_handler(mock_agentic=mock_agentic)
 
@@ -398,13 +331,12 @@ class TestAgeThresholdFilteringIntegration:
 
         assert result['result_count'] == 1
 
-    def test_old_scan_excluded(self):
-        """A scan from 2020 should be excluded with age_days=30."""
+    def test_age_days_reflected_in_neglected_url(self):
+        """age_days should map to the age param in the neglected URL."""
         mock_agentic = _make_mock_agentic_search()
-        old_ts = '2020-01-01T00:00:00Z'
         hit = _make_hit('OpenSearch', '2.19.6', [
             _make_vuln('CVE-001', 'HIGH'),
-        ], scan_timestamp=old_ts)
+        ])
         mock_agentic.agentic_search.return_value = {'hits': {'hits': [hit]}}
         mod, _ = _load_vulnerabilities_handler(mock_agentic=mock_agentic)
 
@@ -412,34 +344,10 @@ class TestAgeThresholdFilteringIntegration:
             {'query': 'Show CVEs', 'age_days': '30', '_access_tier': 'privileged'}, 'test-age-002',
         )
 
-        assert result['result_count'] == 0
-        assert result['results'] == []
+        assert 'age=30d' in result['neglected_page_url']
 
-    def test_mixed_ages_filters_correctly(self):
-        """Only recent scans should be included when age_days is set."""
-        mock_agentic = _make_mock_agentic_search()
-        recent_ts = datetime.now(timezone.utc).isoformat()
-        old_ts = '2020-06-15T12:00:00Z'
-        hit_recent = _make_hit('OpenSearch', '2.19.6', [
-            _make_vuln('CVE-001', 'HIGH'),
-        ], scan_timestamp=recent_ts)
-        hit_old = _make_hit('OpenSearch Dashboards', '2.19.6', [
-            _make_vuln('CVE-002', 'CRITICAL'),
-        ], scan_timestamp=old_ts)
-        mock_agentic.agentic_search.return_value = {
-            'hits': {'hits': [hit_recent, hit_old]},
-        }
-        mod, _ = _load_vulnerabilities_handler(mock_agentic=mock_agentic)
-
-        result = mod.handle_query_vulnerabilities(
-            {'query': 'Show CVEs', 'age_days': '30', '_access_tier': 'privileged'}, 'test-age-003',
-        )
-
-        assert result['result_count'] == 1
-        assert result['results'][0]['project']['name'] == 'OpenSearch'
-
-    def test_no_age_days_includes_all(self):
-        """Without age_days, all scans are included regardless of age."""
+    def test_invalid_age_days_still_returns_results(self):
+        """Invalid age_days should not affect results."""
         mock_agentic = _make_mock_agentic_search()
         old_ts = '2020-01-01T00:00:00Z'
         hit = _make_hit('OpenSearch', '2.19.6', [
@@ -449,78 +357,22 @@ class TestAgeThresholdFilteringIntegration:
         mod, _ = _load_vulnerabilities_handler(mock_agentic=mock_agentic)
 
         result = mod.handle_query_vulnerabilities(
-            {'query': 'Show CVEs', '_access_tier': 'privileged'}, 'test-age-004',
+            {'query': 'Show CVEs', 'age_days': 'abc', '_access_tier': 'privileged'}, 'test-age-003',
         )
 
         assert result['result_count'] == 1
-
-    def test_invalid_age_days_includes_all(self):
-        """Invalid age_days value should be treated as no filter."""
-        mock_agentic = _make_mock_agentic_search()
-        old_ts = '2020-01-01T00:00:00Z'
-        hit = _make_hit('OpenSearch', '2.19.6', [
-            _make_vuln('CVE-001', 'HIGH'),
-        ], scan_timestamp=old_ts)
-        mock_agentic.agentic_search.return_value = {'hits': {'hits': [hit]}}
-        mod, _ = _load_vulnerabilities_handler(mock_agentic=mock_agentic)
-
-        result = mod.handle_query_vulnerabilities(
-            {'query': 'Show CVEs', 'age_days': 'abc', '_access_tier': 'privileged'}, 'test-age-005',
-        )
-
-        assert result['result_count'] == 1
-
-    def test_age_days_with_epoch_millis_timestamp(self):
-        """age_days should work with epoch millisecond timestamps."""
-        mock_agentic = _make_mock_agentic_search()
-        recent_ms = int(time.time() * 1000)
-        hit = _make_hit('OpenSearch', '2.19.6', [
-            _make_vuln('CVE-001', 'HIGH'),
-        ], scan_timestamp=recent_ms)
-        mock_agentic.agentic_search.return_value = {'hits': {'hits': [hit]}}
-        mod, _ = _load_vulnerabilities_handler(mock_agentic=mock_agentic)
-
-        result = mod.handle_query_vulnerabilities(
-            {'query': 'Show CVEs', 'age_days': '7', '_access_tier': 'privileged'}, 'test-age-006',
-        )
-
-        assert result['result_count'] == 1
-
-    def test_all_scans_filtered_out_returns_empty(self):
-        """When all scans are older than age_days, result is empty."""
-        mock_agentic = _make_mock_agentic_search()
-        old_ts_1 = '2019-01-01T00:00:00Z'
-        old_ts_2 = '2019-06-01T00:00:00Z'
-        hit1 = _make_hit('OpenSearch', '2.19.6', [
-            _make_vuln('CVE-001', 'HIGH'),
-        ], scan_timestamp=old_ts_1)
-        hit2 = _make_hit('Dashboards', '2.19.6', [
-            _make_vuln('CVE-002', 'CRITICAL'),
-        ], scan_timestamp=old_ts_2)
-        mock_agentic.agentic_search.return_value = {
-            'hits': {'hits': [hit1, hit2]},
-        }
-        mod, _ = _load_vulnerabilities_handler(mock_agentic=mock_agentic)
-
-        result = mod.handle_query_vulnerabilities(
-            {'query': 'Show CVEs', 'age_days': '7', '_access_tier': 'privileged'}, 'test-age-007',
-        )
-
-        assert result['status'] == 'success'
-        assert result['result_count'] == 0
-        assert result['results'] == []
 
 
 # ---------------------------------------------------------------------------
-# Combined severity + age filtering
+# Combined severity + age — severity filters vulns, age only affects URL
 # ---------------------------------------------------------------------------
 
 
-class TestCombinedSeverityAndAgeFiltering:
-    """Verify severity and age_days work together correctly."""
+class TestCombinedSeverityAndAge:
+    """Verify severity filters vulns while age_days only affects neglected URL."""
 
-    def test_severity_and_age_both_applied(self):
-        """Both filters should be applied: age filters scans, severity filters vulns."""
+    def test_severity_filters_vulns_age_does_not_filter_hits(self):
+        """Severity filters CVEs within hits; age_days does not remove hits."""
         mock_agentic = _make_mock_agentic_search()
         recent_ts = datetime.now(timezone.utc).isoformat()
         old_ts = '2020-01-01T00:00:00Z'
@@ -544,32 +396,12 @@ class TestCombinedSeverityAndAgeFiltering:
             'test-combo-001',
         )
 
-        # Old hit filtered by age, recent hit filtered by severity
-        assert result['result_count'] == 1
-        entry = result['results'][0]
-        assert entry['project']['name'] == 'OpenSearch'
-        assert entry['filtered_count'] == 1
-        assert entry['filtered_vulnerabilities'][0]['id'] == 'CVE-001'
-
-    def test_age_filter_applied_before_severity(self):
-        """Old scans should be dropped entirely, not just have vulns filtered."""
-        mock_agentic = _make_mock_agentic_search()
-        old_ts = '2020-01-01T00:00:00Z'
-
-        hit = _make_hit('OpenSearch', '2.19.6', [
-            _make_vuln('CVE-001', 'CRITICAL'),
-        ], scan_timestamp=old_ts)
-
-        mock_agentic.agentic_search.return_value = {'hits': {'hits': [hit]}}
-        mod, _ = _load_vulnerabilities_handler(mock_agentic=mock_agentic)
-
-        result = mod.handle_query_vulnerabilities(
-            {'query': 'Show CVEs', 'severity': 'CRITICAL', 'age_days': '7', '_access_tier': 'privileged'},
-            'test-combo-002',
-        )
-
-        # Even though the vuln matches severity, the scan is too old
-        assert result['result_count'] == 0
+        # Both hits are returned (age doesn't filter), severity filters vulns
+        assert result['result_count'] == 2
+        assert result['results'][0]['filtered_count'] == 1
+        assert result['results'][0]['filtered_vulnerabilities'][0]['id'] == 'CVE-001'
+        assert result['results'][1]['filtered_count'] == 1
+        assert result['results'][1]['filtered_vulnerabilities'][0]['id'] == 'CVE-004'
 
 
 # ---------------------------------------------------------------------------

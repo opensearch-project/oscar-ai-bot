@@ -12,6 +12,10 @@ appropriate handler based on the function name in the event:
 
 All results are wrapped in the Bedrock response envelope via
 ``create_response()``.
+
+Note: Access tier separation is handled at the supervisor level. This Lambda
+is only invoked by the privileged supervisor agent, so all requests here are
+privileged.
 """
 
 import logging
@@ -20,7 +24,6 @@ import uuid
 from typing import Any, Dict, List
 
 from config import config
-from constants import DASHBOARD_URL, LIMITED_ACCESS_MESSAGE
 from projects_handler import handle_list_projects
 from response_builder import create_response
 from vulnerabilities_handler import handle_query_vulnerabilities
@@ -53,29 +56,11 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         function_name = event.get('function', '')
         parameters = event.get('parameters', [])
 
-        # Extract access_tier from session attributes (code-controlled, not LLM-set)
-        session_attributes = event.get('sessionAttributes', {})
-        access_tier = str(session_attributes.get('access_tier', 'limited')).lower().strip()
-
         params = _parse_parameters(parameters)
-        params['_access_tier'] = access_tier  # underscore prefix = internal, not from LLM
 
         logger.info(
-            f"[{request_id}] Function: {function_name}, Params: {params}, "
-            f"Access tier: {access_tier}",
+            f"[{request_id}] Function: {function_name}, Params: {params}",
         )
-
-        # Short-circuit ALL functions for limited-access requests at the router level
-        if access_tier != 'privileged':
-            logger.info(f"[{request_id}] Limited access — returning dashboard link only")
-            result = {
-                'status': 'success',
-                'access_tier': 'limited',
-                'message': LIMITED_ACCESS_MESSAGE,
-                'dashboard_url': DASHBOARD_URL,
-                'results': [],
-            }
-            return create_response(event, result)
 
         if function_name == 'query_vulnerabilities':
             result = handle_query_vulnerabilities(params, request_id)

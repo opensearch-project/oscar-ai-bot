@@ -15,6 +15,7 @@ PyJWT = {version = ">=2.8.0", extras = ["crypto"]}
 requests = ">=2.31.0"
 certifi = ">=2023.7.22"
 python-dotenv = ">=1.0.0"
+semver = "*"
 
 [dev-packages]
 isort = "~=5.13"

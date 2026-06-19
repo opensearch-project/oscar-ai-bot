@@ -66,28 +66,32 @@ def get_opensearch_session():
 
 
 def get_latest_scans_index() -> str:
-    """Get the concrete index containing the most recent scan document.
+    """Get the most recently created scans index.
 
-    Queries the ``scans`` alias with a descending sort on
-    ``timestamp.scan`` and ``size: 1`` to retrieve only the single most
-    recent document.  The ``_index`` field from the hit identifies the
-    concrete index name.
+    Uses the ``_search`` API across all indices with a filter on the
+    ``timestamp.scan`` field (which only exists in scan indices) and
+    sorts by ``_index`` descending.  Since scan indices follow the
+    naming pattern ``scans-NNNNNN``, lexicographic sort returns the
+    highest-numbered (most recent) index first.
 
     Returns:
         The concrete index name (e.g. ``scans-000164``).
 
     Raises:
-        RuntimeError: If no scan documents are found or the request fails.
+        RuntimeError: If no scans indices are found or the request fails.
     """
 
     body = json.dumps({
         'size': 1,
-        'sort': [{'timestamp.scan': {'order': 'desc'}}],
+        'query': {
+            'exists': {'field': 'timestamp.scan'},
+        },
+        'sort': [{'_index': {'order': 'desc'}}],
         '_source': False,
     })
 
     try:
-        path = '/scans/_search'
+        path = '/_search'
         response = opensearch_request('GET', path, body=body)
 
         hits = response.get('hits', {}).get('hits', [])
@@ -105,7 +109,7 @@ def get_latest_scans_index() -> str:
         ) from e
 
     raise RuntimeError(
-        'No scan documents found',
+        'No scans indices found',
     )
 
 
