@@ -114,11 +114,11 @@ class TestIndexResolutionError:
 # ---------------------------------------------------------------------------
 
 
-class TestMatchAllQuery:
-    """Test match_all query construction when no filters are provided."""
+class TestDefaultVersionBehavior:
+    """Test that missing/empty version defaults to origin/main filter."""
 
-    def test_both_params_none_produces_match_all(self):
-        """Validates: Requirement 1.4"""
+    def test_both_params_none_defaults_to_origin_main(self):
+        """Validates: Requirement 1.4 — no version defaults to origin/main."""
         mock_response = {'hits': {'hits': []}}
         mod, mock_aws = _load_dsl_query_builder(
             mock_opensearch_request=mock_response,
@@ -126,16 +126,16 @@ class TestMatchAllQuery:
 
         mod.query_vulnerabilities(version=None, project_name=None)
 
-        # Verify the query body sent to opensearch_request
         call_args = mock_aws.opensearch_request.call_args
         body_str = call_args[0][2] if len(call_args[0]) > 2 else call_args[1].get('body')
         body = json.loads(body_str)
 
-        assert 'match_all' in body['query']
-        assert 'bool' not in body['query']
+        assert 'bool' in body['query']
+        filters = body['query']['bool']['filter']
+        assert {'term': {'project.tag': 'origin/main'}} in filters
 
-    def test_both_params_empty_string_produces_match_all(self):
-        """Validates: Requirement 1.4"""
+    def test_both_params_empty_string_defaults_to_origin_main(self):
+        """Validates: Requirement 1.4 — empty version defaults to origin/main."""
         mock_response = {'hits': {'hits': []}}
         mod, mock_aws = _load_dsl_query_builder(
             mock_opensearch_request=mock_response,
@@ -147,11 +147,12 @@ class TestMatchAllQuery:
         body_str = call_args[0][2] if len(call_args[0]) > 2 else call_args[1].get('body')
         body = json.loads(body_str)
 
-        assert 'match_all' in body['query']
-        assert 'bool' not in body['query']
+        assert 'bool' in body['query']
+        filters = body['query']['bool']['filter']
+        assert {'term': {'project.tag': 'origin/main'}} in filters
 
-    def test_no_args_produces_match_all(self):
-        """Validates: Requirement 1.4"""
+    def test_no_args_defaults_to_origin_main(self):
+        """Validates: Requirement 1.4 — no args defaults to origin/main."""
         mock_response = {'hits': {'hits': []}}
         mod, mock_aws = _load_dsl_query_builder(
             mock_opensearch_request=mock_response,
@@ -163,7 +164,9 @@ class TestMatchAllQuery:
         body_str = call_args[0][2] if len(call_args[0]) > 2 else call_args[1].get('body')
         body = json.loads(body_str)
 
-        assert 'match_all' in body['query']
+        assert 'bool' in body['query']
+        filters = body['query']['bool']['filter']
+        assert {'term': {'project.tag': 'origin/main'}} in filters
 
 
 # ---------------------------------------------------------------------------
@@ -230,8 +233,8 @@ class TestDSLQueryStructure:
         assert len(filters) == 1
         assert filters[0] == {'term': {'project.tag': 'origin/3.7'}}
 
-    def test_project_name_only_produces_name_filter(self):
-        """Validates: Requirement 1.4"""
+    def test_project_name_only_produces_name_and_default_tag_filter(self):
+        """Validates: Requirement 1.4 — project_name alone still gets origin/main default."""
         mock_response = {'hits': {'hits': []}}
         mod, mock_aws = _load_dsl_query_builder(
             mock_opensearch_request=mock_response,
@@ -245,8 +248,9 @@ class TestDSLQueryStructure:
 
         assert 'bool' in body['query']
         filters = body['query']['bool']['filter']
-        assert len(filters) == 1
-        assert filters[0] == {'term': {'project.name': 'OpenSearch Dashboards'}}
+        assert len(filters) == 2
+        assert {'term': {'project.tag': 'origin/main'}} in filters
+        assert {'term': {'project.name': 'OpenSearch Dashboards'}} in filters
 
     def test_both_params_produce_combined_filter(self):
         """Validates: Requirement 1.4"""
@@ -410,57 +414,57 @@ class TestConnectionError:
 
 
 # ---------------------------------------------------------------------------
-# Test: Malformed response → response_parse_error
+# Test: Malformed response — caller handles gracefully via .get() defaults
 # ---------------------------------------------------------------------------
 
 
 class TestMalformedResponse:
-    """Test malformed OpenSearch responses produce response_parse_error."""
+    """Test that malformed OpenSearch responses are handled gracefully.
 
-    def test_missing_hits_key(self):
-        """Validates: Requirement 3.2"""
+    Since opensearch_request raises on non-2xx and the caller uses
+    .get() with defaults, these scenarios pass through without error.
+    The caller treats missing hits as empty results.
+    """
+
+    def test_missing_hits_key_passes_through(self):
+        """Response without 'hits' passes through; caller handles via .get() defaults."""
         mod, _ = _load_dsl_query_builder(
             mock_opensearch_request={'took': 5, 'timed_out': False},
         )
 
         result = mod.query_vulnerabilities(version='3.7')
 
-        assert result['status'] == 'error'
-        assert result['type'] == 'response_parse_error'
-        assert result['retryable'] is False
+        # No error — the response passes through as-is
+        assert 'status' not in result
+        assert result == {'took': 5, 'timed_out': False}
 
-    def test_hits_not_a_dict(self):
-        """Validates: Requirement 3.2"""
+    def test_hits_not_a_dict_passes_through(self):
+        """Response with non-dict 'hits' passes through."""
         mod, _ = _load_dsl_query_builder(
             mock_opensearch_request={'hits': 'not a dict'},
         )
 
         result = mod.query_vulnerabilities(version='3.7')
 
-        assert result['status'] == 'error'
-        assert result['type'] == 'response_parse_error'
-        assert result['retryable'] is False
+        assert 'status' not in result
 
-    def test_hits_hits_missing(self):
-        """Validates: Requirement 3.2"""
+    def test_hits_hits_missing_passes_through(self):
+        """Response with hits but no hits.hits passes through."""
         mod, _ = _load_dsl_query_builder(
             mock_opensearch_request={'hits': {'total': {'value': 0, 'relation': 'eq'}}},
         )
 
         result = mod.query_vulnerabilities(version='3.7')
 
-        assert result['status'] == 'error'
-        assert result['type'] == 'response_parse_error'
-        assert result['retryable'] is False
+        assert 'status' not in result
+        assert result['hits']['total']['value'] == 0
 
-    def test_hits_hits_not_a_list(self):
-        """Validates: Requirement 3.2"""
+    def test_hits_hits_not_a_list_passes_through(self):
+        """Response with non-list hits.hits passes through."""
         mod, _ = _load_dsl_query_builder(
             mock_opensearch_request={'hits': {'hits': {'unexpected': 'structure'}}},
         )
 
         result = mod.query_vulnerabilities(version='3.7')
 
-        assert result['status'] == 'error'
-        assert result['type'] == 'response_parse_error'
-        assert result['retryable'] is False
+        assert 'status' not in result

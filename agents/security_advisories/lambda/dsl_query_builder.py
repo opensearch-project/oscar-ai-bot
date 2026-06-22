@@ -135,17 +135,17 @@ def _build_dsl_query(
 
 
 def _execute_query(index: str, query_body: str) -> Dict[str, Any]:
-    """Execute the DSL query via opensearch_request and validate the response.
+    """Execute the DSL query via opensearch_request.
 
     Args:
         index: The OpenSearch index to query.
         query_body: JSON-encoded query body string.
 
     Returns:
-        The validated OpenSearch response dict.
+        The OpenSearch response dict.
 
     Raises:
-        Exception: If the request fails or response is malformed.
+        Exception: If the request fails (non-2xx, connection error, etc.).
     """
     path = f'/{index}/_search'
 
@@ -154,29 +154,10 @@ def _execute_query(index: str, query_body: str) -> Dict[str, Any]:
 
     result = opensearch_request('GET', path, body=query_body)
 
-    # Validate response structure
-    if not isinstance(result, dict):
-        return _error_response(
-            'response_parse_error',
-            'OpenSearch response is not a valid JSON object',
-        )
-
-    hits_outer = result.get('hits')
-    if not isinstance(hits_outer, dict):
-        return _error_response(
-            'response_parse_error',
-            'OpenSearch response missing "hits" object',
-        )
-
-    hits_inner = hits_outer.get('hits')
-    if not isinstance(hits_inner, list):
-        return _error_response(
-            'response_parse_error',
-            'OpenSearch response missing "hits.hits" array',
-        )
-
     # Log truncation warning when result count equals the configured size
-    if len(hits_inner) == _DEFAULT_QUERY_SIZE:
+    hits = result.get('hits') if isinstance(result, dict) else None
+    documents = hits.get('hits', []) if isinstance(hits, dict) else []
+    if len(documents) == _DEFAULT_QUERY_SIZE:
         logger.warning(
             f'DSL_QUERY: results may be truncated — '
             f'returned {_DEFAULT_QUERY_SIZE} documents (equals size limit of {_DEFAULT_QUERY_SIZE})',
