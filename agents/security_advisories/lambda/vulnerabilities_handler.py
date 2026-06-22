@@ -168,8 +168,11 @@ def handle_query_vulnerabilities(params: Dict[str, Any], request_id: str) -> Dic
         logger.error(f"[{request_id}] SECURITY_ADVISORIES_DSL_QUERY_FAILED: {response.get('message')}")
         return response
 
-    # Extract hits
-    hits = response.get('hits', {}).get('hits', [])
+    # Extract hits and total count
+    hits_envelope = response.get('hits', {})
+    hits = hits_envelope.get('hits', [])
+    total_value = hits_envelope.get('total', {}).get('value', len(hits))
+    results_truncated = len(hits) < total_value
 
     if not hits:
         logger.info(f"[{request_id}] No hits returned from DSL query")
@@ -185,6 +188,12 @@ def handle_query_vulnerabilities(params: Dict[str, Any], request_id: str) -> Dic
 
     logger.info(f"[{request_id}] Returning {len(results)} result entries")
 
+    if results_truncated:
+        logger.info(
+            f"[{request_id}] Results truncated: returned {len(hits)} "
+            f"of {total_value} total matching documents",
+        )
+
     # Build neglected page URL derived from available action-group parameters
     neglected_url = build_neglected_page_url(
         age=_map_age_days_to_age(age_days),
@@ -193,9 +202,20 @@ def handle_query_vulnerabilities(params: Dict[str, Any], request_id: str) -> Dic
         tag=resolved_tag or version,
     )
 
-    return {
+    result = {
         'status': 'success',
         'result_count': len(results),
+        'total_matching_documents': total_value,
+        'results_truncated': results_truncated,
         'results': results,
         'neglected_page_url': neglected_url,
     }
+
+    if results_truncated:
+        result['truncation_message'] = (
+            f"Showing {len(results)} of {total_value} total matching documents. "
+            "Results may be incomplete — consider narrowing your query with "
+            "additional filters (e.g. project_name, version, or severity)."
+        )
+
+    return result
