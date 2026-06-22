@@ -27,6 +27,27 @@ logger.setLevel(logging.INFO)
 _DEFAULT_QUERY_SIZE = 1000
 
 
+def _classify_version(version: str) -> str:
+    """Classify a version string into a known category for dispatch.
+
+    Returns one of: 'origin_prefixed', 'main_alias', 'three_part', 'two_part', 'unknown'.
+    """
+    if version.startswith('origin/'):
+        return 'origin_prefixed'
+    if version.lower() in ('main', 'latest'):
+        return 'main_alias'
+    try:
+        semver.Version.parse(version)
+        return 'three_part'
+    except ValueError:
+        pass
+    try:
+        semver.Version.parse(f'{version}.0')
+        return 'two_part'
+    except ValueError:
+        return 'unknown'
+
+
 def resolve_version_tag(version: str) -> str:
     """Map a user-provided version string to the canonical project.tag format.
 
@@ -49,38 +70,24 @@ def resolve_version_tag(version: str) -> str:
     if not version:
         return version
 
-    # Already in origin/ format — pass through
-    if version.startswith('origin/'):
-        logger.info(f"RESOLVE_TAG: '{version}' already has origin/ prefix, using as-is")
-        return version
-
-    # "main" or "latest" → origin/main
-    if version.lower() in ('main', 'latest'):
-        resolved = 'origin/main'
-        logger.info(f"RESOLVE_TAG: '{version}' -> '{resolved}'")
-        return resolved
-
-    # Try parsing as a full semver (three-part: "3.7.0", "2.19.6")
-    try:
-        semver.Version.parse(version)
-        logger.info(f"RESOLVE_TAG: '{version}' is a valid semver version, using as-is")
-        return version
-    except ValueError:
-        pass
-
-    # Validate that the input is a numeric two-part version (e.g., "3.7")
-    # by appending ".0" to form valid semver — rejects non-numeric strings
-    try:
-        semver.Version.parse(f'{version}.0')
-        resolved = f'origin/{version}'
-        logger.info(f"RESOLVE_TAG: '{version}' -> '{resolved}'")
-        return resolved
-    except ValueError:
-        pass
-
-    # Non-parseable — return as-is (exact tag lookup)
-    logger.info(f"RESOLVE_TAG: Cannot parse '{version}', using as-is")
-    return version
+    match _classify_version(version):
+        case 'origin_prefixed':
+            logger.info(f"RESOLVE_TAG: '{version}' already has origin/ prefix, using as-is")
+            return version
+        case 'main_alias':
+            resolved = 'origin/main'
+            logger.info(f"RESOLVE_TAG: '{version}' -> '{resolved}'")
+            return resolved
+        case 'three_part':
+            logger.info(f"RESOLVE_TAG: '{version}' is a valid semver version, using as-is")
+            return version
+        case 'two_part':
+            resolved = f'origin/{version}'
+            logger.info(f"RESOLVE_TAG: '{version}' -> '{resolved}'")
+            return resolved
+        case _:
+            logger.info(f"RESOLVE_TAG: Cannot parse '{version}', using as-is")
+            return version
 
 
 def _build_dsl_query(
@@ -254,8 +261,8 @@ def query_vulnerabilities(
         )
         return _error_response('index_resolution_error', str(e))
 
-    # Resolve version tag
-    resolved_tag = resolve_version_tag(version) if version else None
+    # Resolve version tag — default to origin/main per agent instructions
+    resolved_tag = resolve_version_tag(version) if version else 'origin/main'
 
     # Build the DSL query
     query_body_dict = _build_dsl_query(
