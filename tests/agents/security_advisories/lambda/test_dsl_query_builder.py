@@ -303,6 +303,36 @@ class TestDSLQueryStructure:
         assert isinstance(body['size'], int)
         assert body['size'] == 1000
 
+    def test_query_includes_sort_by_timestamp_desc(self):
+        """Validates: sort by timestamp.scan descending for deduplication."""
+        mock_response = {'hits': {'hits': []}}
+        mod, mock_aws = _load_dsl_query_builder(
+            mock_opensearch_request=mock_response,
+        )
+
+        mod.query_vulnerabilities(version='3.7')
+
+        call_args = mock_aws.opensearch_request.call_args
+        body_str = call_args[0][2] if len(call_args[0]) > 2 else call_args[1].get('body')
+        body = json.loads(body_str)
+
+        assert 'sort' in body
+        assert body['sort'] == [{'timestamp.scan': {'order': 'desc'}}]
+
+    def test_match_all_query_includes_sort(self):
+        """Validates: even match_all queries include sort for deduplication."""
+        mock_response = {'hits': {'hits': []}}
+        mod, mock_aws = _load_dsl_query_builder(
+            mock_opensearch_request=mock_response,
+        )
+
+        # Both params default to origin/main, resulting in bool/filter, but let's
+        # directly test the internal _build_dsl_query with no filters
+        body = mod._build_dsl_query(resolved_tag=None, project_name=None)
+
+        assert 'sort' in body
+        assert body['sort'] == [{'timestamp.scan': {'order': 'desc'}}]
+
 
 # ---------------------------------------------------------------------------
 # Test: OpenSearch non-2xx error → opensearch_error

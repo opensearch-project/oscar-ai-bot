@@ -264,6 +264,159 @@ class TestVulnerabilityExtractionCompleteness:
 
 
 # ---------------------------------------------------------------------------
+# Property 7: Deduplication by project.name + project.tag (keep newest)
+# ---------------------------------------------------------------------------
+
+
+class TestDeduplicationByProjectAndTag:
+    """**Validates: Deduplication by project.name + project.tag**
+
+    When multiple scan documents exist for the same project+tag combination
+    (different commit hashes), the handler SHALL keep only the newest entry
+    (first in timestamp-descending order) and discard duplicates.
+    """
+
+    def test_duplicate_project_tag_keeps_newest(self):
+        """Duplicate entries with same project.name+tag are deduplicated."""
+        older_hit = {
+            '_index': 'scans',
+            '_source': {
+                'project': {'name': 'OpenSearch', 'tag': '2.19.6'},
+                'vulnerabilities': [
+                    {'id': 'CVE-2024-OLD', 'severity': 'LOW'},
+                ],
+                'count': {'severe': 0, 'minor': 1},
+                'timestamp': {'scan': '2024-01-10T08:00:00Z'},
+            },
+        }
+        mock_dsl = _make_mock_dsl_query_builder()
+        # SAMPLE_HIT is newer (2024-01-15), older_hit is older (2024-01-10)
+        # Sorted desc by timestamp, SAMPLE_HIT comes first
+        mock_dsl.query_vulnerabilities.return_value = {
+            'hits': {'hits': [SAMPLE_HIT, older_hit]},
+        }
+        mod, _ = _load_vulnerabilities_handler(mock_dsl=mock_dsl)
+
+        result = mod.handle_query_vulnerabilities(
+            {'query': 'Show CVEs', 'version': '2.19', '_access_tier': 'privileged'}, 'test-dedup-01',
+        )
+
+        assert result['status'] == 'success'
+        assert result['result_count'] == 1
+        # The kept entry should be from the newer scan
+        entry = result['results'][0]
+        assert entry['timestamp'] == {'scan': '2024-01-15T10:30:00Z'}
+
+    def test_different_project_names_not_deduplicated(self):
+        """Entries with different project.name are NOT deduplicated."""
+        mock_dsl = _make_mock_dsl_query_builder()
+        mock_dsl.query_vulnerabilities.return_value = {
+            'hits': {'hits': [SAMPLE_HIT, SAMPLE_HIT_2]},
+        }
+        mod, _ = _load_vulnerabilities_handler(mock_dsl=mock_dsl)
+
+        result = mod.handle_query_vulnerabilities(
+            {'query': 'Show CVEs', 'version': '2.19', '_access_tier': 'privileged'}, 'test-dedup-02',
+        )
+
+        assert result['result_count'] == 2
+
+    def test_same_name_different_tags_not_deduplicated(self):
+        """Entries with same project.name but different tags are NOT deduplicated."""
+        hit_different_tag = {
+            '_index': 'scans',
+            '_source': {
+                'project': {'name': 'OpenSearch', 'tag': '3.0.0'},
+                'vulnerabilities': [],
+                'count': {'severe': 0, 'minor': 0},
+                'timestamp': {'scan': '2024-01-14T08:00:00Z'},
+            },
+        }
+        mock_dsl = _make_mock_dsl_query_builder()
+        mock_dsl.query_vulnerabilities.return_value = {
+            'hits': {'hits': [SAMPLE_HIT, hit_different_tag]},
+        }
+        mod, _ = _load_vulnerabilities_handler(mock_dsl=mock_dsl)
+
+        result = mod.handle_query_vulnerabilities(
+            {'query': 'Show CVEs', 'version': '2.19', '_access_tier': 'privileged'}, 'test-dedup-03',
+        )
+
+        assert result['result_count'] == 2
+
+    def test_three_duplicates_keeps_only_one(self):
+        """Three entries with same project+tag are collapsed to one."""
+        hit_dup1 = {
+            '_index': 'scans',
+            '_source': {
+                'project': {'name': 'OpenSearch', 'tag': '2.19.6'},
+                'vulnerabilities': [{'id': 'CVE-2024-DUP1', 'severity': 'HIGH'}],
+                'count': {'severe': 1, 'minor': 0},
+                'timestamp': {'scan': '2024-01-12T08:00:00Z'},
+            },
+        }
+        hit_dup2 = {
+            '_index': 'scans',
+            '_source': {
+                'project': {'name': 'OpenSearch', 'tag': '2.19.6'},
+                'vulnerabilities': [{'id': 'CVE-2024-DUP2', 'severity': 'MEDIUM'}],
+                'count': {'severe': 0, 'minor': 1},
+                'timestamp': {'scan': '2024-01-08T08:00:00Z'},
+            },
+        }
+        mock_dsl = _make_mock_dsl_query_builder()
+        # Sorted desc: SAMPLE_HIT (Jan 15) > hit_dup1 (Jan 12) > hit_dup2 (Jan 8)
+        mock_dsl.query_vulnerabilities.return_value = {
+            'hits': {'hits': [SAMPLE_HIT, hit_dup1, hit_dup2]},
+        }
+        mod, _ = _load_vulnerabilities_handler(mock_dsl=mock_dsl)
+
+        result = mod.handle_query_vulnerabilities(
+            {'query': 'Show CVEs', 'version': '2.19', '_access_tier': 'privileged'}, 'test-dedup-04',
+        )
+
+        assert result['result_count'] == 1
+        entry = result['results'][0]
+        assert entry['timestamp'] == {'scan': '2024-01-15T10:30:00Z'}
+
+    def test_dedup_preserves_non_duplicate_order(self):
+        """Deduplication preserves ordering of non-duplicate entries."""
+        hit_other = {
+            '_index': 'scans',
+            '_source': {
+                'project': {'name': 'Reporting', 'tag': '1.0.0'},
+                'vulnerabilities': [],
+                'count': {'severe': 0, 'minor': 0},
+                'timestamp': {'scan': '2024-01-13T08:00:00Z'},
+            },
+        }
+        hit_dup = {
+            '_index': 'scans',
+            '_source': {
+                'project': {'name': 'OpenSearch', 'tag': '2.19.6'},
+                'vulnerabilities': [],
+                'count': {'severe': 0, 'minor': 0},
+                'timestamp': {'scan': '2024-01-10T08:00:00Z'},
+            },
+        }
+        mock_dsl = _make_mock_dsl_query_builder()
+        # Order: SAMPLE_HIT (OpenSearch/2.19.6, Jan 15), hit_other (Reporting/1.0.0, Jan 13),
+        #        hit_dup (OpenSearch/2.19.6, Jan 10) — duplicate, dropped
+        mock_dsl.query_vulnerabilities.return_value = {
+            'hits': {'hits': [SAMPLE_HIT, hit_other, hit_dup]},
+        }
+        mod, _ = _load_vulnerabilities_handler(mock_dsl=mock_dsl)
+
+        result = mod.handle_query_vulnerabilities(
+            {'query': 'Show CVEs', 'version': '2.19', '_access_tier': 'privileged'}, 'test-dedup-05',
+        )
+
+        assert result['result_count'] == 2
+        assert result['results'][0]['project']['name'] == 'OpenSearch'
+        assert result['results'][1]['project']['name'] == 'Reporting'
+
+
+# ---------------------------------------------------------------------------
 # Missing parameter validation
 # ---------------------------------------------------------------------------
 

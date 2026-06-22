@@ -80,25 +80,65 @@ def _map_age_days_to_age(age_days: Optional[int]) -> Optional[str]:
     return f"{buckets[-1]}d"
 
 
+def _deduplicate_hits(hits: list, request_id: str) -> list:
+    """Deduplicate hits by project.name + project.tag, keeping the newest.
+
+    Multiple scan documents for the same project/tag combination can exist
+    in the index (different commit hashes). Since results are sorted by
+    timestamp.scan descending, the first occurrence of each key is the newest.
+
+    Args:
+        hits: Raw hit list sorted by timestamp.scan descending.
+        request_id: Short request ID for log correlation.
+
+    Returns:
+        Deduplicated list of hits (preserves original order, first wins).
+    """
+    seen: set = set()
+    unique_hits: list = []
+
+    for hit in hits:
+        source = hit.get('_source', {})
+        project = source.get('project', {})
+        key = (project.get('name', ''), project.get('tag', ''))
+
+        if key in seen:
+            continue
+        seen.add(key)
+        unique_hits.append(hit)
+
+    duplicates_removed = len(hits) - len(unique_hits)
+    logger.info(
+        f"[{request_id}] DEDUP: {len(hits)} hits -> {len(unique_hits)} unique "
+        f"(removed {duplicates_removed} duplicate scan document(s) by project+tag)",
+    )
+
+    return unique_hits
+
+
 def _process_hits(
     hits: list, severity: Optional[Set[str]], request_id: str,
 ) -> list:
     """Process raw search hits into filtered, trimmed result entries.
 
     Each hit represents a distinct project+tag from the latest scan index.
-    Filtering is applied at the vulnerability level (severity, exclusion status)
-    and results are trimmed to essential fields to reduce payload size.
+    Hits are first deduplicated by project.name + project.tag (keeping the
+    newest scan). Filtering is then applied at the vulnerability level
+    (severity, exclusion status) and results are trimmed to essential fields
+    to reduce payload size.
 
     Args:
-        hits: Raw hit list from the agentic search response.
+        hits: Raw hit list from the DSL query response (sorted by timestamp desc).
         severity: Set of severity levels to retain, or ``None`` for all.
         request_id: Short request ID for log correlation.
 
     Returns:
         List of structured result dicts ready for the response payload.
     """
+    unique_hits = _deduplicate_hits(hits, request_id)
+
     results = []
-    for hit in hits:
+    for hit in unique_hits:
         source = hit.get('_source', {})
         project = source.get('project', {})
         timestamp = source.get('timestamp', {})

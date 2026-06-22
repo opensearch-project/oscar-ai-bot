@@ -114,9 +114,14 @@ def _build_dsl_query(
     if project_name:
         filters.append({'term': {'project.name': project_name}})
 
+    # Sort by scan timestamp descending so the newest scan per project
+    # appears first — this enables deduplication in the handler layer.
+    sort = [{'timestamp.scan': {'order': 'desc'}}]
+
     if filters:
         query = {
             'size': _DEFAULT_QUERY_SIZE,
+            'sort': sort,
             'query': {
                 'bool': {
                     'filter': filters,
@@ -126,6 +131,7 @@ def _build_dsl_query(
     else:
         query = {
             'size': _DEFAULT_QUERY_SIZE,
+            'sort': sort,
             'query': {
                 'match_all': {},
             },
