@@ -145,6 +145,20 @@ def handle_query_vulnerabilities(params: Dict[str, Any], request_id: str) -> Dic
     severity = _parse_severity(params.get('severity'))
     age_days = _parse_age_days(params.get('age_days'))
 
+    # Require at least one of version or project_name to scope the query
+    if not version and not project_name:
+        logger.warning(f"[{request_id}] Missing required parameter: neither version nor project_name provided")
+        return {
+            'status': 'error',
+            'type': 'missing_parameter',
+            'retryable': False,
+            'message': (
+                'Please provide at least one of "version" or "project_name" '
+                'to scope the vulnerability query. '
+                'For example: version="2.19" or project_name="OpenSearch".'
+            ),
+        }
+
     logger.info(
         f"[{request_id}] QUERY_VULNERABILITIES: query='{query}', "
         f"version={version}, project_name={project_name}, "

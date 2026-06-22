@@ -119,7 +119,7 @@ class TestResultEntryStructuralCompleteness:
         mod, _ = _load_vulnerabilities_handler(mock_dsl=mock_dsl)
 
         result = mod.handle_query_vulnerabilities(
-            {'query': 'Show critical CVEs', '_access_tier': 'privileged'}, 'test-001',
+            {'query': 'Show critical CVEs', 'version': '2.19', '_access_tier': 'privileged'}, 'test-001',
         )
 
         assert result['status'] == 'success'
@@ -135,7 +135,7 @@ class TestResultEntryStructuralCompleteness:
         mod, _ = _load_vulnerabilities_handler(mock_dsl=mock_dsl)
 
         result = mod.handle_query_vulnerabilities(
-            {'query': 'Show CVEs', '_access_tier': 'privileged'}, 'test-002',
+            {'query': 'Show CVEs', 'version': '2.19', '_access_tier': 'privileged'}, 'test-002',
         )
 
         entry = result['results'][0]
@@ -149,7 +149,7 @@ class TestResultEntryStructuralCompleteness:
         mod, _ = _load_vulnerabilities_handler(mock_dsl=mock_dsl)
 
         result = mod.handle_query_vulnerabilities(
-            {'query': 'Show CVEs', '_access_tier': 'privileged'}, 'test-003',
+            {'query': 'Show CVEs', 'version': '2.19', '_access_tier': 'privileged'}, 'test-003',
         )
 
         entry = result['results'][0]
@@ -163,7 +163,7 @@ class TestResultEntryStructuralCompleteness:
         mod, _ = _load_vulnerabilities_handler(mock_dsl=mock_dsl)
 
         result = mod.handle_query_vulnerabilities(
-            {'query': 'Show CVEs', '_access_tier': 'privileged'}, 'test-004',
+            {'query': 'Show CVEs', 'version': '2.19', '_access_tier': 'privileged'}, 'test-004',
         )
 
         entry = result['results'][0]
@@ -177,7 +177,7 @@ class TestResultEntryStructuralCompleteness:
         mod, _ = _load_vulnerabilities_handler(mock_dsl=mock_dsl)
 
         result = mod.handle_query_vulnerabilities(
-            {'query': 'Show CVEs', '_access_tier': 'privileged'}, 'test-005',
+            {'query': 'Show CVEs', 'version': '2.19', '_access_tier': 'privileged'}, 'test-005',
         )
 
         entry = result['results'][0]
@@ -191,7 +191,7 @@ class TestResultEntryStructuralCompleteness:
         mod, _ = _load_vulnerabilities_handler(mock_dsl=mock_dsl)
 
         result = mod.handle_query_vulnerabilities(
-            {'query': 'Show CVEs', '_access_tier': 'privileged'}, 'test-006',
+            {'query': 'Show CVEs', 'version': '2.19', '_access_tier': 'privileged'}, 'test-006',
         )
 
         entry = result['results'][0]
@@ -218,7 +218,7 @@ class TestVulnerabilityExtractionCompleteness:
         mod, _ = _load_vulnerabilities_handler(mock_dsl=mock_dsl)
 
         result = mod.handle_query_vulnerabilities(
-            {'query': 'Show all CVEs', '_access_tier': 'privileged'}, 'test-010',
+            {'query': 'Show all CVEs', 'version': '2.19', '_access_tier': 'privileged'}, 'test-010',
         )
 
         assert result['status'] == 'success'
@@ -233,7 +233,7 @@ class TestVulnerabilityExtractionCompleteness:
         mod, _ = _load_vulnerabilities_handler(mock_dsl=mock_dsl)
 
         result = mod.handle_query_vulnerabilities(
-            {'query': 'Show CVEs', '_access_tier': 'privileged'}, 'test-011',
+            {'query': 'Show CVEs', 'version': '2.19', '_access_tier': 'privileged'}, 'test-011',
         )
 
         assert result['result_count'] == 1
@@ -256,11 +256,88 @@ class TestVulnerabilityExtractionCompleteness:
         mod, _ = _load_vulnerabilities_handler(mock_dsl=mock_dsl)
 
         result = mod.handle_query_vulnerabilities(
-            {'query': 'Show all CVEs', '_access_tier': 'privileged'}, 'test-012',
+            {'query': 'Show all CVEs', 'version': '2.19', '_access_tier': 'privileged'}, 'test-012',
         )
 
         assert result['result_count'] == 3
         assert len(result['results']) == 3
+
+
+# ---------------------------------------------------------------------------
+# Missing parameter validation
+# ---------------------------------------------------------------------------
+
+
+class TestMissingParameterValidation:
+    """Test that missing version and project_name returns an error."""
+
+    def test_neither_version_nor_project_name_returns_error(self):
+        """When both version and project_name are absent, return missing_parameter error."""
+        mod, mock_dsl = _load_vulnerabilities_handler()
+
+        result = mod.handle_query_vulnerabilities(
+            {'query': 'Show all CVEs', '_access_tier': 'privileged'}, 'test-050',
+        )
+
+        assert result['status'] == 'error'
+        assert result['type'] == 'missing_parameter'
+        assert result['retryable'] is False
+        assert 'version' in result['message']
+        assert 'project_name' in result['message']
+        # Should NOT have called the query builder
+        mock_dsl.query_vulnerabilities.assert_not_called()
+
+    def test_empty_string_version_and_project_name_returns_error(self):
+        """Empty strings for both version and project_name returns error."""
+        mod, mock_dsl = _load_vulnerabilities_handler()
+
+        result = mod.handle_query_vulnerabilities(
+            {'query': 'Show CVEs', 'version': '', 'project_name': '', '_access_tier': 'privileged'},
+            'test-051',
+        )
+
+        assert result['status'] == 'error'
+        assert result['type'] == 'missing_parameter'
+        mock_dsl.query_vulnerabilities.assert_not_called()
+
+    def test_none_version_and_project_name_returns_error(self):
+        """Explicit None for both version and project_name returns error."""
+        mod, mock_dsl = _load_vulnerabilities_handler()
+
+        result = mod.handle_query_vulnerabilities(
+            {'query': 'Show CVEs', 'version': None, 'project_name': None},
+            'test-052',
+        )
+
+        assert result['status'] == 'error'
+        assert result['type'] == 'missing_parameter'
+        mock_dsl.query_vulnerabilities.assert_not_called()
+
+    def test_version_provided_passes_validation(self):
+        """When version is provided, validation passes."""
+        mock_dsl = _make_mock_dsl_query_builder()
+        mock_dsl.query_vulnerabilities.return_value = {'hits': {'hits': []}}
+        mod, _ = _load_vulnerabilities_handler(mock_dsl=mock_dsl)
+
+        result = mod.handle_query_vulnerabilities(
+            {'query': 'Show CVEs', 'version': '2.19'}, 'test-053',
+        )
+
+        assert result['status'] == 'success'
+        mock_dsl.query_vulnerabilities.assert_called_once()
+
+    def test_project_name_provided_passes_validation(self):
+        """When project_name is provided, validation passes."""
+        mock_dsl = _make_mock_dsl_query_builder()
+        mock_dsl.query_vulnerabilities.return_value = {'hits': {'hits': []}}
+        mod, _ = _load_vulnerabilities_handler(mock_dsl=mock_dsl)
+
+        result = mod.handle_query_vulnerabilities(
+            {'query': 'Show CVEs', 'project_name': 'OpenSearch'}, 'test-054',
+        )
+
+        assert result['status'] == 'success'
+        mock_dsl.query_vulnerabilities.assert_called_once()
 
 
 # ---------------------------------------------------------------------------
@@ -279,7 +356,7 @@ class TestEmptyResults:
         mod, _ = _load_vulnerabilities_handler(mock_dsl=mock_dsl)
 
         result = mod.handle_query_vulnerabilities(
-            {'query': 'Show CVEs for nonexistent project', '_access_tier': 'privileged'}, 'test-020',
+            {'query': 'Show CVEs for nonexistent project', 'project_name': 'Nonexistent', '_access_tier': 'privileged'}, 'test-020',
         )
 
         assert result['status'] == 'success'
@@ -293,7 +370,7 @@ class TestEmptyResults:
         mod, _ = _load_vulnerabilities_handler(mock_dsl=mock_dsl)
 
         result = mod.handle_query_vulnerabilities(
-            {'query': 'Show CVEs', '_access_tier': 'privileged'}, 'test-021',
+            {'query': 'Show CVEs', 'version': '3.7', '_access_tier': 'privileged'}, 'test-021',
         )
 
         assert result['status'] == 'success'
@@ -320,7 +397,7 @@ class TestErrorResponseHandling:
         mod, _ = _load_vulnerabilities_handler(mock_dsl=mock_dsl)
 
         result = mod.handle_query_vulnerabilities(
-            {'query': 'Show CVEs', '_access_tier': 'privileged'}, 'test-030',
+            {'query': 'Show CVEs', 'version': '3.7', '_access_tier': 'privileged'}, 'test-030',
         )
 
         assert result['status'] == 'error'
@@ -339,7 +416,7 @@ class TestErrorResponseHandling:
         mod, _ = _load_vulnerabilities_handler(mock_dsl=mock_dsl)
 
         result = mod.handle_query_vulnerabilities(
-            {'query': 'Show CVEs', '_access_tier': 'privileged'}, 'test-031',
+            {'query': 'Show CVEs', 'version': '3.7', '_access_tier': 'privileged'}, 'test-031',
         )
 
         assert result['status'] == 'error'
@@ -356,7 +433,7 @@ class TestErrorResponseHandling:
         mod, _ = _load_vulnerabilities_handler(mock_dsl=mock_dsl)
 
         result = mod.handle_query_vulnerabilities(
-            {'query': 'Show CVEs', '_access_tier': 'privileged'}, 'test-032',
+            {'query': 'Show CVEs', 'version': '3.7', '_access_tier': 'privileged'}, 'test-032',
         )
 
         assert 'message' in result
@@ -383,7 +460,7 @@ class TestPrivilegedResponseEnrichment:
         mod, _ = _load_vulnerabilities_handler(mock_dsl=mock_dsl)
 
         result = mod.handle_query_vulnerabilities(
-            {'query': 'Show CVEs', '_access_tier': 'privileged'}, 'test-041',
+            {'query': 'Show CVEs', 'version': '2.19', '_access_tier': 'privileged'}, 'test-041',
         )
 
         assert 'neglected_page_url' in result
@@ -400,7 +477,7 @@ class TestPrivilegedResponseEnrichment:
         mod, _ = _load_vulnerabilities_handler(mock_dsl=mock_dsl)
 
         result = mod.handle_query_vulnerabilities(
-            {'query': 'Show CVEs', 'age_days': '30', '_access_tier': 'privileged'}, 'test-042',
+            {'query': 'Show CVEs', 'version': '2.19', 'age_days': '30', '_access_tier': 'privileged'}, 'test-042',
         )
 
         assert 'age=30d' in result['neglected_page_url']
@@ -414,7 +491,7 @@ class TestPrivilegedResponseEnrichment:
         mod, _ = _load_vulnerabilities_handler(mock_dsl=mock_dsl)
 
         result = mod.handle_query_vulnerabilities(
-            {'query': 'Show CVEs', 'severity': 'HIGH', '_access_tier': 'privileged'}, 'test-043',
+            {'query': 'Show CVEs', 'version': '2.19', 'severity': 'HIGH', '_access_tier': 'privileged'}, 'test-043',
         )
 
         assert 'severe=true' in result['neglected_page_url']
@@ -442,7 +519,7 @@ class TestPrivilegedResponseEnrichment:
         mod, _ = _load_vulnerabilities_handler(mock_dsl=mock_dsl)
 
         result = mod.handle_query_vulnerabilities(
-            {'query': 'Show CVEs', 'severity': 'CRITICAL,HIGH', '_access_tier': 'privileged'},
+            {'query': 'Show CVEs', 'version': '2.19', 'severity': 'CRITICAL,HIGH', '_access_tier': 'privileged'},
             'test-045',
         )
 
@@ -450,7 +527,7 @@ class TestPrivilegedResponseEnrichment:
         assert 'severe=true' in result['neglected_page_url']
 
     def test_neglected_url_defaults_when_no_filter_params(self):
-        """Neglected URL uses defaults when no filter params are provided."""
+        """Neglected URL uses defaults when no severity/age filter params are provided."""
         mock_dsl = _make_mock_dsl_query_builder()
         mock_dsl.query_vulnerabilities.return_value = {
             'hits': {'hits': [SAMPLE_HIT]},
@@ -458,7 +535,7 @@ class TestPrivilegedResponseEnrichment:
         mod, _ = _load_vulnerabilities_handler(mock_dsl=mock_dsl)
 
         result = mod.handle_query_vulnerabilities(
-            {'query': 'Show CVEs', '_access_tier': 'privileged'}, 'test-046',
+            {'query': 'Show CVEs', 'version': 'origin/main', '_access_tier': 'privileged'}, 'test-046',
         )
 
         url = result['neglected_page_url']
@@ -478,7 +555,7 @@ class TestPrivilegedResponseEnrichment:
         mod, _ = _load_vulnerabilities_handler(mock_dsl=mock_dsl)
 
         result = mod.handle_query_vulnerabilities(
-            {'query': 'Show CVEs for nonexistent', '_access_tier': 'privileged'}, 'test-047',
+            {'query': 'Show CVEs for nonexistent', 'version': '3.7', '_access_tier': 'privileged'}, 'test-047',
         )
 
         # Empty results return a message-style response
