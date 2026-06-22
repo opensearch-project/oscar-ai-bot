@@ -4,8 +4,8 @@
 
 """Vulnerabilities Handler for Security Advisories Lambda Functions.
 
-This module orchestrates the agentic search flow for vulnerability queries:
-enhance the NL query, execute agentic search, extract and filter results,
+This module orchestrates the direct DSL query flow for vulnerability queries:
+resolve parameters, execute a structured DSL query, extract and filter results,
 and return structured data.
 
 Functions:
@@ -15,9 +15,7 @@ Functions:
 import logging
 from typing import Any, Dict, Optional, Set
 
-from agentic_search import (AgenticSearchError, agentic_search, enhance_query,
-                            resolve_version_tag)
-from config import config
+from dsl_query_builder import query_vulnerabilities, resolve_version_tag
 from response_filter import (build_neglected_page_url, build_summary,
                              filter_vulnerabilities)
 
@@ -124,11 +122,10 @@ def _process_hits(
 
 
 def handle_query_vulnerabilities(params: Dict[str, Any], request_id: str) -> Dict[str, Any]:
-    """Handle query_vulnerabilities requests via agentic search.
+    """Handle query_vulnerabilities requests via direct DSL query.
 
-    Extracts query parameters, enhances the NL query with version/project
-    context, executes agentic search through the configured pipeline, and
-    post-processes results with severity/exclusion/age filtering.
+    Extracts query parameters, executes a structured DSL query against the
+    scans index, and post-processes results with severity/exclusion/age filtering.
 
     Args:
         params: Parameters dict containing:
@@ -163,32 +160,19 @@ def handle_query_vulnerabilities(params: Dict[str, Any], request_id: str) -> Dic
                 f"[{request_id}] TAG_RESOLVED: '{version}' -> '{resolved_tag}'"
             )
 
-    # Enhance the NL query with resolved tag/project context
-    enhanced_query = enhance_query(
-        query, version=version, resolved_tag=resolved_tag, project_name=project_name,
-    )
-    logger.info(f"[{request_id}] Enhanced query: '{enhanced_query}'")
+    # Execute DSL query
+    response = query_vulnerabilities(version=version, project_name=project_name)
 
-    # Execute agentic search
-    try:
-        response = agentic_search(config.agentic_pipeline, enhanced_query)
-    except AgenticSearchError as e:
-        logger.error(f"[{request_id}] SECURITY_ADVISORIES_AGENTIC_SEARCH_FAILED: {e}")
-        return {
-            'status': 'error',
-            'type': 'agentic_search_error',
-            'retryable': False,
-            'message': (
-                'The search agent could not process the query. '
-                'Try rephrasing the question.'
-            ),
-        }
+    # Check for error response
+    if response.get('status') == 'error':
+        logger.error(f"[{request_id}] SECURITY_ADVISORIES_DSL_QUERY_FAILED: {response.get('message')}")
+        return response
 
     # Extract hits
     hits = response.get('hits', {}).get('hits', [])
 
     if not hits:
-        logger.info(f"[{request_id}] No hits returned from agentic search")
+        logger.info(f"[{request_id}] No hits returned from DSL query")
         return {
             'status': 'success',
             'message': 'No results found for the given query. Try broadening or rephrasing your search.',

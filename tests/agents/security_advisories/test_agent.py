@@ -99,9 +99,9 @@ class TestActionGroups:
 class TestInstructions:
     """Agent and collaborator instructions contain required content."""
 
-    def test_agent_instruction_contains_agentic(self, agent):
+    def test_agent_instruction_contains_dsl_query(self, agent):
         instruction = agent.get_agent_instruction()
-        assert "agentic" in instruction.lower()
+        assert "dsl" in instruction.lower()
 
     def test_agent_instruction_contains_query_vulnerabilities(self, agent):
         instruction = agent.get_agent_instruction()

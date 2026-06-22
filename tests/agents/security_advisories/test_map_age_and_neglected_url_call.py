@@ -23,43 +23,24 @@ _LAMBDA_PATH = os.path.join(
 )
 
 
-def _make_mock_config():
-    """Create a mock config module with required attributes."""
-    mock_config = MagicMock()
-    mock_config.agentic_pipeline = 'oscar-agentic-pipeline'
-    mock_config_module = MagicMock()
-    mock_config_module.config = mock_config
-    return mock_config_module
-
-
-def _make_mock_agentic_search():
-    """Create a mock agentic_search module."""
+def _make_mock_dsl_query_builder():
+    """Create a mock dsl_query_builder module."""
     mock_mod = MagicMock()
-    mock_mod.enhance_query = MagicMock(side_effect=lambda q, **kw: q)
-    mock_mod.agentic_search = MagicMock(return_value={'hits': {'hits': []}})
+    mock_mod.query_vulnerabilities = MagicMock(return_value={'hits': {'hits': []}})
     mock_mod.resolve_version_tag = MagicMock(side_effect=lambda v: v)
-    mock_mod.AgenticSearchError = type('AgenticSearchError', (Exception,), {
-        '__init__': lambda self, msg, status_code=None: (
-            super(type(self), self).__init__(msg),
-            setattr(self, 'status_code', status_code),
-        )[-1],
-    })
     return mock_mod
 
 
-def _load_vulnerabilities_handler(mock_config=None, mock_agentic=None):
+def _load_vulnerabilities_handler(mock_dsl=None):
     """Import vulnerabilities_handler with mocked dependencies."""
-    if mock_config is None:
-        mock_config = _make_mock_config()
-    if mock_agentic is None:
-        mock_agentic = _make_mock_agentic_search()
+    if mock_dsl is None:
+        mock_dsl = _make_mock_dsl_query_builder()
 
     if _LAMBDA_PATH not in sys.path:
         sys.path.insert(0, _LAMBDA_PATH)
 
     with patch.dict('sys.modules', {
-        'config': mock_config,
-        'agentic_search': mock_agentic,
+        'dsl_query_builder': mock_dsl,
     }):
         spec = importlib.util.spec_from_file_location(
             'sa_vulnerabilities_handler',
@@ -67,7 +48,7 @@ def _load_vulnerabilities_handler(mock_config=None, mock_agentic=None):
         )
         mod = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(mod)
-        return mod, mock_agentic
+        return mod, mock_dsl
 
 
 SAMPLE_HIT = {
@@ -155,9 +136,9 @@ class TestNeglectedUrlFromHandlerParams:
 
     def _invoke_handler_with_hits(self, params):
         """Helper: invoke handler with a single hit and given params."""
-        mock_agentic = _make_mock_agentic_search()
-        mock_agentic.agentic_search.return_value = {'hits': {'hits': [SAMPLE_HIT]}}
-        mod, _ = _load_vulnerabilities_handler(mock_agentic=mock_agentic)
+        mock_dsl = _make_mock_dsl_query_builder()
+        mock_dsl.query_vulnerabilities.return_value = {'hits': {'hits': [SAMPLE_HIT]}}
+        mod, _ = _load_vulnerabilities_handler(mock_dsl=mock_dsl)
         return mod.handle_query_vulnerabilities(params, 'test-req')
 
     def test_default_url_when_no_filters(self):
