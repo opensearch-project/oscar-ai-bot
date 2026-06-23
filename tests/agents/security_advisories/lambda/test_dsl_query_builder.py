@@ -304,7 +304,7 @@ class TestDSLQueryStructure:
         assert body['size'] == 1000
 
     def test_query_includes_sort_by_timestamp_desc(self):
-        """Validates: sort by timestamp.scan descending for deduplication."""
+        """Validates: sort by timestamp.scan descending for collapse."""
         mock_response = {'hits': {'hits': []}}
         mod, mock_aws = _load_dsl_query_builder(
             mock_opensearch_request=mock_response,
@@ -319,8 +319,24 @@ class TestDSLQueryStructure:
         assert 'sort' in body
         assert body['sort'] == [{'timestamp.scan': {'order': 'desc'}}]
 
-    def test_match_all_query_includes_sort(self):
-        """Validates: even match_all queries include sort for deduplication."""
+    def test_query_includes_collapse_on_project_name(self):
+        """Validates: collapse on project.name for deduplication at query level."""
+        mock_response = {'hits': {'hits': []}}
+        mod, mock_aws = _load_dsl_query_builder(
+            mock_opensearch_request=mock_response,
+        )
+
+        mod.query_vulnerabilities(version='3.7')
+
+        call_args = mock_aws.opensearch_request.call_args
+        body_str = call_args[0][2] if len(call_args[0]) > 2 else call_args[1].get('body')
+        body = json.loads(body_str)
+
+        assert 'collapse' in body
+        assert body['collapse'] == {'field': 'project.name'}
+
+    def test_match_all_query_includes_sort_and_collapse(self):
+        """Validates: even match_all queries include sort and collapse."""
         mock_response = {'hits': {'hits': []}}
         mod, mock_aws = _load_dsl_query_builder(
             mock_opensearch_request=mock_response,
@@ -332,6 +348,8 @@ class TestDSLQueryStructure:
 
         assert 'sort' in body
         assert body['sort'] == [{'timestamp.scan': {'order': 'desc'}}]
+        assert 'collapse' in body
+        assert body['collapse'] == {'field': 'project.name'}
 
 
 # ---------------------------------------------------------------------------

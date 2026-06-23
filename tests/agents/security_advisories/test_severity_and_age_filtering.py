@@ -199,7 +199,7 @@ class TestSeverityFilteringIntegration:
             _make_vuln('CVE-002', 'HIGH'),
             _make_vuln('CVE-003', 'MEDIUM'),
         ])
-        mock_dsl.query_vulnerabilities.return_value = {'hits': {'hits': [hit]}}
+        mock_dsl.query_vulnerabilities.return_value = {'hits': {'total': {'value': 1}, 'hits': [hit]}}
         mod, _ = _load_vulnerabilities_handler(mock_dsl=mock_dsl)
 
         result = mod.handle_query_vulnerabilities(
@@ -220,7 +220,7 @@ class TestSeverityFilteringIntegration:
             _make_vuln('CVE-003', 'MEDIUM'),
             _make_vuln('CVE-004', 'LOW'),
         ])
-        mock_dsl.query_vulnerabilities.return_value = {'hits': {'hits': [hit]}}
+        mock_dsl.query_vulnerabilities.return_value = {'hits': {'total': {'value': 1}, 'hits': [hit]}}
         mod, _ = _load_vulnerabilities_handler(mock_dsl=mock_dsl)
 
         result = mod.handle_query_vulnerabilities(
@@ -241,7 +241,7 @@ class TestSeverityFilteringIntegration:
             _make_vuln('CVE-003', 'MEDIUM'),
             _make_vuln('CVE-004', 'LOW', excluded='AT_PROJECT'),
         ])
-        mock_dsl.query_vulnerabilities.return_value = {'hits': {'hits': [hit]}}
+        mock_dsl.query_vulnerabilities.return_value = {'hits': {'total': {'value': 1}, 'hits': [hit]}}
         mod, _ = _load_vulnerabilities_handler(mock_dsl=mock_dsl)
 
         result = mod.handle_query_vulnerabilities(
@@ -260,7 +260,7 @@ class TestSeverityFilteringIntegration:
             _make_vuln('CVE-003', 'HIGH'),
             _make_vuln('CVE-004', 'MEDIUM'),
         ])
-        mock_dsl.query_vulnerabilities.return_value = {'hits': {'hits': [hit]}}
+        mock_dsl.query_vulnerabilities.return_value = {'hits': {'total': {'value': 1}, 'hits': [hit]}}
         mod, _ = _load_vulnerabilities_handler(mock_dsl=mock_dsl)
 
         result = mod.handle_query_vulnerabilities(
@@ -277,7 +277,7 @@ class TestSeverityFilteringIntegration:
             _make_vuln('CVE-001', 'MEDIUM'),
             _make_vuln('CVE-002', 'LOW'),
         ])
-        mock_dsl.query_vulnerabilities.return_value = {'hits': {'hits': [hit]}}
+        mock_dsl.query_vulnerabilities.return_value = {'hits': {'total': {'value': 1}, 'hits': [hit]}}
         mod, _ = _load_vulnerabilities_handler(mock_dsl=mock_dsl)
 
         result = mod.handle_query_vulnerabilities(
@@ -304,7 +304,7 @@ class TestAgeThresholdIntegration:
         hit = _make_hit('OpenSearch', '2.19.6', [
             _make_vuln('CVE-001', 'HIGH'),
         ], scan_timestamp=old_ts)
-        mock_dsl.query_vulnerabilities.return_value = {'hits': {'hits': [hit]}}
+        mock_dsl.query_vulnerabilities.return_value = {'hits': {'total': {'value': 1}, 'hits': [hit]}}
         mod, _ = _load_vulnerabilities_handler(mock_dsl=mock_dsl)
 
         result = mod.handle_query_vulnerabilities(
@@ -319,7 +319,7 @@ class TestAgeThresholdIntegration:
         hit = _make_hit('OpenSearch', '2.19.6', [
             _make_vuln('CVE-001', 'HIGH'),
         ])
-        mock_dsl.query_vulnerabilities.return_value = {'hits': {'hits': [hit]}}
+        mock_dsl.query_vulnerabilities.return_value = {'hits': {'total': {'value': 1}, 'hits': [hit]}}
         mod, _ = _load_vulnerabilities_handler(mock_dsl=mock_dsl)
 
         result = mod.handle_query_vulnerabilities(
@@ -335,7 +335,7 @@ class TestAgeThresholdIntegration:
         hit = _make_hit('OpenSearch', '2.19.6', [
             _make_vuln('CVE-001', 'HIGH'),
         ], scan_timestamp=old_ts)
-        mock_dsl.query_vulnerabilities.return_value = {'hits': {'hits': [hit]}}
+        mock_dsl.query_vulnerabilities.return_value = {'hits': {'total': {'value': 1}, 'hits': [hit]}}
         mod, _ = _load_vulnerabilities_handler(mock_dsl=mock_dsl)
 
         result = mod.handle_query_vulnerabilities(
@@ -369,7 +369,7 @@ class TestCombinedSeverityAndAge:
         ], scan_timestamp=old_ts)
 
         mock_dsl.query_vulnerabilities.return_value = {
-            'hits': {'hits': [hit_recent, hit_old]},
+            'hits': {'total': {'value': 2}, 'hits': [hit_recent, hit_old]},
         }
         mod, _ = _load_vulnerabilities_handler(mock_dsl=mock_dsl)
 

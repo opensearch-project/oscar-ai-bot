@@ -137,7 +137,7 @@ class TestNeglectedUrlFromHandlerParams:
     def _invoke_handler_with_hits(self, params):
         """Helper: invoke handler with a single hit and given params."""
         mock_dsl = _make_mock_dsl_query_builder()
-        mock_dsl.query_vulnerabilities.return_value = {'hits': {'hits': [SAMPLE_HIT]}}
+        mock_dsl.query_vulnerabilities.return_value = {'hits': {'total': {'value': 1}, 'hits': [SAMPLE_HIT]}}
         mod, _ = _load_vulnerabilities_handler(mock_dsl=mock_dsl)
         return mod.handle_query_vulnerabilities(params, 'test-req')
 

@@ -115,13 +115,19 @@ def _build_dsl_query(
         filters.append({'term': {'project.name': project_name}})
 
     # Sort by scan timestamp descending so the newest scan per project
-    # appears first — this enables deduplication in the handler layer.
+    # appears first when combined with collapse.
     sort = [{'timestamp.scan': {'order': 'desc'}}]
+
+    # Collapse on project.name to return only the most recent scan
+    # document per project. Combined with the descending sort, this
+    # guarantees one result per project — the latest scan.
+    collapse = {'field': 'project.name'}
 
     if filters:
         query = {
             'size': _DEFAULT_QUERY_SIZE,
             'sort': sort,
+            'collapse': collapse,
             'query': {
                 'bool': {
                     'filter': filters,
@@ -132,6 +138,7 @@ def _build_dsl_query(
         query = {
             'size': _DEFAULT_QUERY_SIZE,
             'sort': sort,
+            'collapse': collapse,
             'query': {
                 'match_all': {},
             },

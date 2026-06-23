@@ -80,65 +80,28 @@ def _map_age_days_to_age(age_days: Optional[int]) -> Optional[str]:
     return f"{buckets[-1]}d"
 
 
-def _deduplicate_hits(hits: list, request_id: str) -> list:
-    """Deduplicate hits by project.name + project.tag, keeping the newest.
-
-    Multiple scan documents for the same project/tag combination can exist
-    in the index (different commit hashes). Since results are sorted by
-    timestamp.scan descending, the first occurrence of each key is the newest.
-
-    Args:
-        hits: Raw hit list sorted by timestamp.scan descending.
-        request_id: Short request ID for log correlation.
-
-    Returns:
-        Deduplicated list of hits (preserves original order, first wins).
-    """
-    seen: set = set()
-    unique_hits: list = []
-
-    for hit in hits:
-        source = hit.get('_source', {})
-        project = source.get('project', {})
-        key = (project.get('name', ''), project.get('tag', ''))
-
-        if key in seen:
-            continue
-        seen.add(key)
-        unique_hits.append(hit)
-
-    duplicates_removed = len(hits) - len(unique_hits)
-    logger.info(
-        f"[{request_id}] DEDUP: {len(hits)} hits -> {len(unique_hits)} unique "
-        f"(removed {duplicates_removed} duplicate scan document(s) by project+tag)",
-    )
-
-    return unique_hits
-
-
 def _process_hits(
     hits: list, severity: Optional[Set[str]], request_id: str,
 ) -> list:
     """Process raw search hits into filtered, trimmed result entries.
 
-    Each hit represents a distinct project+tag from the latest scan index.
-    Hits are first deduplicated by project.name + project.tag (keeping the
-    newest scan). Filtering is then applied at the vulnerability level
-    (severity, exclusion status) and results are trimmed to essential fields
-    to reduce payload size.
+    Each hit represents a distinct project from the latest scan index.
+    The DSL query uses ``collapse`` on ``project.name`` to return only
+    the most recent scan document per project, so no application-level
+    deduplication is needed. Filtering is applied at the vulnerability
+    level (severity, exclusion status) and results are trimmed to
+    essential fields to reduce payload size.
 
     Args:
-        hits: Raw hit list from the DSL query response (sorted by timestamp desc).
+        hits: Hit list from the DSL query response (already deduplicated via collapse).
         severity: Set of severity levels to retain, or ``None`` for all.
         request_id: Short request ID for log correlation.
 
     Returns:
         List of structured result dicts ready for the response payload.
     """
-    unique_hits = _deduplicate_hits(hits, request_id)
-
     results = []
-    for hit in unique_hits:
+    for hit in hits:
         source = hit.get('_source', {})
         project = source.get('project', {})
         timestamp = source.get('timestamp', {})
@@ -225,8 +188,6 @@ def handle_query_vulnerabilities(params: Dict[str, Any], request_id: str) -> Dic
     # Extract hits and total count
     hits_envelope = response.get('hits', {})
     hits = hits_envelope.get('hits', [])
-    total_value = hits_envelope.get('total', {}).get('value', len(hits))
-    results_truncated = len(hits) < total_value
 
     if not hits:
         logger.info(f"[{request_id}] No hits returned from DSL query")
@@ -237,6 +198,22 @@ def handle_query_vulnerabilities(params: Dict[str, Any], request_id: str) -> Dic
             'result_count': 0,
         }
 
+    total_value = hits_envelope['total']['value']
+
+    # Log collapse deduplication stats (total is pre-collapse, hits is post-collapse)
+    collapsed_count = total_value - len(hits)
+    if collapsed_count > 0:
+        logger.info(
+            f"[{request_id}] COLLAPSE: {total_value} total matches -> "
+            f"{len(hits)} after collapse (removed {collapsed_count} duplicate(s))",
+        )
+
+    # With collapse, total_value > len(hits) is normal (duplicates removed).
+    # True truncation only occurs when the collapsed result count hits the
+    # query size limit, meaning there may be more unique projects than returned.
+    from dsl_query_builder import _DEFAULT_QUERY_SIZE
+    results_truncated = len(hits) >= _DEFAULT_QUERY_SIZE
+
     # Process each scan document hit
     results = _process_hits(hits, severity, request_id)
 
@@ -245,7 +222,7 @@ def handle_query_vulnerabilities(params: Dict[str, Any], request_id: str) -> Dic
     if results_truncated:
         logger.info(
             f"[{request_id}] Results truncated: returned {len(hits)} "
-            f"of {total_value} total matching documents",
+            f"collapsed results (hit size limit of {_DEFAULT_QUERY_SIZE})",
         )
 
     # Build neglected page URL derived from available action-group parameters
@@ -267,7 +244,7 @@ def handle_query_vulnerabilities(params: Dict[str, Any], request_id: str) -> Dic
 
     if results_truncated:
         result['truncation_message'] = (
-            f"Showing {len(results)} of {total_value} total matching documents. "
+            f"Showing {len(results)} unique projects (query size limit reached). "
             "Results may be incomplete — consider narrowing your query with "
             "additional filters (e.g. project_name, version, or severity)."
         )

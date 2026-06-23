@@ -24,7 +24,7 @@ _LAMBDA_PATH = os.path.join(
 def _make_mock_dsl_query_builder():
     """Create a mock dsl_query_builder module."""
     mock_mod = MagicMock()
-    mock_mod.query_vulnerabilities = MagicMock(return_value={'hits': {'hits': []}})
+    mock_mod.query_vulnerabilities = MagicMock(return_value={'hits': {'total': {'value': 0}, 'hits': []}})
     mock_mod.resolve_version_tag = MagicMock(side_effect=lambda v: v)
     return mock_mod
 
@@ -114,7 +114,7 @@ class TestResultEntryStructuralCompleteness:
     def test_single_hit_contains_all_required_keys(self):
         mock_dsl = _make_mock_dsl_query_builder()
         mock_dsl.query_vulnerabilities.return_value = {
-            'hits': {'hits': [SAMPLE_HIT]},
+            'hits': {'total': {'value': 1}, 'hits': [SAMPLE_HIT]},
         }
         mod, _ = _load_vulnerabilities_handler(mock_dsl=mock_dsl)
 
@@ -130,7 +130,7 @@ class TestResultEntryStructuralCompleteness:
     def test_result_entry_project_matches_source(self):
         mock_dsl = _make_mock_dsl_query_builder()
         mock_dsl.query_vulnerabilities.return_value = {
-            'hits': {'hits': [SAMPLE_HIT]},
+            'hits': {'total': {'value': 1}, 'hits': [SAMPLE_HIT]},
         }
         mod, _ = _load_vulnerabilities_handler(mock_dsl=mock_dsl)
 
@@ -144,7 +144,7 @@ class TestResultEntryStructuralCompleteness:
     def test_result_entry_timestamp_matches_source(self):
         mock_dsl = _make_mock_dsl_query_builder()
         mock_dsl.query_vulnerabilities.return_value = {
-            'hits': {'hits': [SAMPLE_HIT]},
+            'hits': {'total': {'value': 1}, 'hits': [SAMPLE_HIT]},
         }
         mod, _ = _load_vulnerabilities_handler(mock_dsl=mock_dsl)
 
@@ -158,7 +158,7 @@ class TestResultEntryStructuralCompleteness:
     def test_result_entry_total_count_matches_source(self):
         mock_dsl = _make_mock_dsl_query_builder()
         mock_dsl.query_vulnerabilities.return_value = {
-            'hits': {'hits': [SAMPLE_HIT]},
+            'hits': {'total': {'value': 1}, 'hits': [SAMPLE_HIT]},
         }
         mod, _ = _load_vulnerabilities_handler(mock_dsl=mock_dsl)
 
@@ -172,7 +172,7 @@ class TestResultEntryStructuralCompleteness:
     def test_result_entry_severity_summary_is_dict(self):
         mock_dsl = _make_mock_dsl_query_builder()
         mock_dsl.query_vulnerabilities.return_value = {
-            'hits': {'hits': [SAMPLE_HIT]},
+            'hits': {'total': {'value': 1}, 'hits': [SAMPLE_HIT]},
         }
         mod, _ = _load_vulnerabilities_handler(mock_dsl=mock_dsl)
 
@@ -186,7 +186,7 @@ class TestResultEntryStructuralCompleteness:
     def test_result_entry_filtered_count_is_int(self):
         mock_dsl = _make_mock_dsl_query_builder()
         mock_dsl.query_vulnerabilities.return_value = {
-            'hits': {'hits': [SAMPLE_HIT]},
+            'hits': {'total': {'value': 1}, 'hits': [SAMPLE_HIT]},
         }
         mod, _ = _load_vulnerabilities_handler(mock_dsl=mock_dsl)
 
@@ -213,7 +213,7 @@ class TestVulnerabilityExtractionCompleteness:
     def test_multiple_hits_produce_correct_number_of_entries(self):
         mock_dsl = _make_mock_dsl_query_builder()
         mock_dsl.query_vulnerabilities.return_value = {
-            'hits': {'hits': [SAMPLE_HIT, SAMPLE_HIT_2]},
+            'hits': {'total': {'value': 2}, 'hits': [SAMPLE_HIT, SAMPLE_HIT_2]},
         }
         mod, _ = _load_vulnerabilities_handler(mock_dsl=mock_dsl)
 
@@ -228,7 +228,7 @@ class TestVulnerabilityExtractionCompleteness:
     def test_single_hit_produces_one_entry(self):
         mock_dsl = _make_mock_dsl_query_builder()
         mock_dsl.query_vulnerabilities.return_value = {
-            'hits': {'hits': [SAMPLE_HIT]},
+            'hits': {'total': {'value': 1}, 'hits': [SAMPLE_HIT]},
         }
         mod, _ = _load_vulnerabilities_handler(mock_dsl=mock_dsl)
 
@@ -251,7 +251,7 @@ class TestVulnerabilityExtractionCompleteness:
             },
         }
         mock_dsl.query_vulnerabilities.return_value = {
-            'hits': {'hits': [SAMPLE_HIT, SAMPLE_HIT_2, hit3]},
+            'hits': {'total': {'value': 3}, 'hits': [SAMPLE_HIT, SAMPLE_HIT_2, hit3]},
         }
         mod, _ = _load_vulnerabilities_handler(mock_dsl=mock_dsl)
 
@@ -268,152 +268,29 @@ class TestVulnerabilityExtractionCompleteness:
 # ---------------------------------------------------------------------------
 
 
-class TestDeduplicationByProjectAndTag:
-    """**Validates: Deduplication by project.name + project.tag**
+class TestCollapseDeduplication:
+    """**Validates: Deduplication via OpenSearch collapse**
 
-    When multiple scan documents exist for the same project+tag combination
-    (different commit hashes), the handler SHALL keep only the newest entry
-    (first in timestamp-descending order) and discard duplicates.
+    Deduplication is now handled at the query layer via the ``collapse``
+    clause on ``project.name``. The handler trusts that each hit in the
+    response is already unique per project. These tests verify that the
+    handler correctly processes pre-deduplicated results.
     """
 
-    def test_duplicate_project_tag_keeps_newest(self):
-        """Duplicate entries with same project.name+tag are deduplicated."""
-        older_hit = {
-            '_index': 'scans',
-            '_source': {
-                'project': {'name': 'OpenSearch', 'tag': '2.19.6'},
-                'vulnerabilities': [
-                    {'id': 'CVE-2024-OLD', 'severity': 'LOW'},
-                ],
-                'count': {'severe': 0, 'minor': 1},
-                'timestamp': {'scan': '2024-01-10T08:00:00Z'},
-            },
-        }
+    def test_single_hit_per_project_processed_correctly(self):
+        """Handler processes collapsed results (one per project) as-is."""
         mock_dsl = _make_mock_dsl_query_builder()
-        # SAMPLE_HIT is newer (2024-01-15), older_hit is older (2024-01-10)
-        # Sorted desc by timestamp, SAMPLE_HIT comes first
         mock_dsl.query_vulnerabilities.return_value = {
-            'hits': {'hits': [SAMPLE_HIT, older_hit]},
+            'hits': {'total': {'value': 2}, 'hits': [SAMPLE_HIT, SAMPLE_HIT_2]},
         }
         mod, _ = _load_vulnerabilities_handler(mock_dsl=mock_dsl)
 
         result = mod.handle_query_vulnerabilities(
-            {'query': 'Show CVEs', 'version': '2.19', '_access_tier': 'privileged'}, 'test-dedup-01',
+            {'query': 'Show CVEs', 'version': '2.19', '_access_tier': 'privileged'}, 'test-collapse-01',
         )
 
         assert result['status'] == 'success'
-        assert result['result_count'] == 1
-        # The kept entry should be from the newer scan
-        entry = result['results'][0]
-        assert entry['timestamp'] == {'scan': '2024-01-15T10:30:00Z'}
-
-    def test_different_project_names_not_deduplicated(self):
-        """Entries with different project.name are NOT deduplicated."""
-        mock_dsl = _make_mock_dsl_query_builder()
-        mock_dsl.query_vulnerabilities.return_value = {
-            'hits': {'hits': [SAMPLE_HIT, SAMPLE_HIT_2]},
-        }
-        mod, _ = _load_vulnerabilities_handler(mock_dsl=mock_dsl)
-
-        result = mod.handle_query_vulnerabilities(
-            {'query': 'Show CVEs', 'version': '2.19', '_access_tier': 'privileged'}, 'test-dedup-02',
-        )
-
         assert result['result_count'] == 2
-
-    def test_same_name_different_tags_not_deduplicated(self):
-        """Entries with same project.name but different tags are NOT deduplicated."""
-        hit_different_tag = {
-            '_index': 'scans',
-            '_source': {
-                'project': {'name': 'OpenSearch', 'tag': '3.0.0'},
-                'vulnerabilities': [],
-                'count': {'severe': 0, 'minor': 0},
-                'timestamp': {'scan': '2024-01-14T08:00:00Z'},
-            },
-        }
-        mock_dsl = _make_mock_dsl_query_builder()
-        mock_dsl.query_vulnerabilities.return_value = {
-            'hits': {'hits': [SAMPLE_HIT, hit_different_tag]},
-        }
-        mod, _ = _load_vulnerabilities_handler(mock_dsl=mock_dsl)
-
-        result = mod.handle_query_vulnerabilities(
-            {'query': 'Show CVEs', 'version': '2.19', '_access_tier': 'privileged'}, 'test-dedup-03',
-        )
-
-        assert result['result_count'] == 2
-
-    def test_three_duplicates_keeps_only_one(self):
-        """Three entries with same project+tag are collapsed to one."""
-        hit_dup1 = {
-            '_index': 'scans',
-            '_source': {
-                'project': {'name': 'OpenSearch', 'tag': '2.19.6'},
-                'vulnerabilities': [{'id': 'CVE-2024-DUP1', 'severity': 'HIGH'}],
-                'count': {'severe': 1, 'minor': 0},
-                'timestamp': {'scan': '2024-01-12T08:00:00Z'},
-            },
-        }
-        hit_dup2 = {
-            '_index': 'scans',
-            '_source': {
-                'project': {'name': 'OpenSearch', 'tag': '2.19.6'},
-                'vulnerabilities': [{'id': 'CVE-2024-DUP2', 'severity': 'MEDIUM'}],
-                'count': {'severe': 0, 'minor': 1},
-                'timestamp': {'scan': '2024-01-08T08:00:00Z'},
-            },
-        }
-        mock_dsl = _make_mock_dsl_query_builder()
-        # Sorted desc: SAMPLE_HIT (Jan 15) > hit_dup1 (Jan 12) > hit_dup2 (Jan 8)
-        mock_dsl.query_vulnerabilities.return_value = {
-            'hits': {'hits': [SAMPLE_HIT, hit_dup1, hit_dup2]},
-        }
-        mod, _ = _load_vulnerabilities_handler(mock_dsl=mock_dsl)
-
-        result = mod.handle_query_vulnerabilities(
-            {'query': 'Show CVEs', 'version': '2.19', '_access_tier': 'privileged'}, 'test-dedup-04',
-        )
-
-        assert result['result_count'] == 1
-        entry = result['results'][0]
-        assert entry['timestamp'] == {'scan': '2024-01-15T10:30:00Z'}
-
-    def test_dedup_preserves_non_duplicate_order(self):
-        """Deduplication preserves ordering of non-duplicate entries."""
-        hit_other = {
-            '_index': 'scans',
-            '_source': {
-                'project': {'name': 'Reporting', 'tag': '1.0.0'},
-                'vulnerabilities': [],
-                'count': {'severe': 0, 'minor': 0},
-                'timestamp': {'scan': '2024-01-13T08:00:00Z'},
-            },
-        }
-        hit_dup = {
-            '_index': 'scans',
-            '_source': {
-                'project': {'name': 'OpenSearch', 'tag': '2.19.6'},
-                'vulnerabilities': [],
-                'count': {'severe': 0, 'minor': 0},
-                'timestamp': {'scan': '2024-01-10T08:00:00Z'},
-            },
-        }
-        mock_dsl = _make_mock_dsl_query_builder()
-        # Order: SAMPLE_HIT (OpenSearch/2.19.6, Jan 15), hit_other (Reporting/1.0.0, Jan 13),
-        #        hit_dup (OpenSearch/2.19.6, Jan 10) — duplicate, dropped
-        mock_dsl.query_vulnerabilities.return_value = {
-            'hits': {'hits': [SAMPLE_HIT, hit_other, hit_dup]},
-        }
-        mod, _ = _load_vulnerabilities_handler(mock_dsl=mock_dsl)
-
-        result = mod.handle_query_vulnerabilities(
-            {'query': 'Show CVEs', 'version': '2.19', '_access_tier': 'privileged'}, 'test-dedup-05',
-        )
-
-        assert result['result_count'] == 2
-        assert result['results'][0]['project']['name'] == 'OpenSearch'
-        assert result['results'][1]['project']['name'] == 'Reporting'
 
 
 # ---------------------------------------------------------------------------
@@ -608,7 +485,7 @@ class TestPrivilegedResponseEnrichment:
         """Privileged response includes neglected_page_url field."""
         mock_dsl = _make_mock_dsl_query_builder()
         mock_dsl.query_vulnerabilities.return_value = {
-            'hits': {'hits': [SAMPLE_HIT]},
+            'hits': {'total': {'value': 1}, 'hits': [SAMPLE_HIT]},
         }
         mod, _ = _load_vulnerabilities_handler(mock_dsl=mock_dsl)
 
@@ -625,7 +502,7 @@ class TestPrivilegedResponseEnrichment:
         """Neglected URL includes age parameter derived from age_days."""
         mock_dsl = _make_mock_dsl_query_builder()
         mock_dsl.query_vulnerabilities.return_value = {
-            'hits': {'hits': [SAMPLE_HIT]},
+            'hits': {'total': {'value': 1}, 'hits': [SAMPLE_HIT]},
         }
         mod, _ = _load_vulnerabilities_handler(mock_dsl=mock_dsl)
 
@@ -639,7 +516,7 @@ class TestPrivilegedResponseEnrichment:
         """Neglected URL includes severe=true when severity contains HIGH."""
         mock_dsl = _make_mock_dsl_query_builder()
         mock_dsl.query_vulnerabilities.return_value = {
-            'hits': {'hits': [SAMPLE_HIT]},
+            'hits': {'total': {'value': 1}, 'hits': [SAMPLE_HIT]},
         }
         mod, _ = _load_vulnerabilities_handler(mock_dsl=mock_dsl)
 
@@ -653,7 +530,7 @@ class TestPrivilegedResponseEnrichment:
         """Neglected URL includes tag parameter derived from version."""
         mock_dsl = _make_mock_dsl_query_builder()
         mock_dsl.query_vulnerabilities.return_value = {
-            'hits': {'hits': [SAMPLE_HIT]},
+            'hits': {'total': {'value': 1}, 'hits': [SAMPLE_HIT]},
         }
         mod, _ = _load_vulnerabilities_handler(mock_dsl=mock_dsl)
 
@@ -667,7 +544,7 @@ class TestPrivilegedResponseEnrichment:
         """Neglected URL includes critical=true when severity contains CRITICAL."""
         mock_dsl = _make_mock_dsl_query_builder()
         mock_dsl.query_vulnerabilities.return_value = {
-            'hits': {'hits': [SAMPLE_HIT]},
+            'hits': {'total': {'value': 1}, 'hits': [SAMPLE_HIT]},
         }
         mod, _ = _load_vulnerabilities_handler(mock_dsl=mock_dsl)
 
@@ -683,7 +560,7 @@ class TestPrivilegedResponseEnrichment:
         """Neglected URL uses defaults when no severity/age filter params are provided."""
         mock_dsl = _make_mock_dsl_query_builder()
         mock_dsl.query_vulnerabilities.return_value = {
-            'hits': {'hits': [SAMPLE_HIT]},
+            'hits': {'total': {'value': 1}, 'hits': [SAMPLE_HIT]},
         }
         mod, _ = _load_vulnerabilities_handler(mock_dsl=mock_dsl)
 
