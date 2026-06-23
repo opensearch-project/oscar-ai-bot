@@ -203,7 +203,7 @@ class TestSeverityFilteringIntegration:
         mod, _ = _load_vulnerabilities_handler(mock_dsl=mock_dsl)
 
         result = mod.handle_query_vulnerabilities(
-            {'query': 'Show CVEs', 'severity': 'CRITICAL', '_access_tier': 'privileged'}, 'test-sev-001',
+            {'query': 'Show CVEs', 'version': '2.19', 'severity': 'CRITICAL', '_access_tier': 'privileged'}, 'test-sev-001',
         )
 
         assert result['status'] == 'success'
@@ -224,7 +224,7 @@ class TestSeverityFilteringIntegration:
         mod, _ = _load_vulnerabilities_handler(mock_dsl=mock_dsl)
 
         result = mod.handle_query_vulnerabilities(
-            {'query': 'Show CVEs', 'severity': 'CRITICAL,HIGH', '_access_tier': 'privileged'}, 'test-sev-002',
+            {'query': 'Show CVEs', 'version': '2.19', 'severity': 'CRITICAL,HIGH', '_access_tier': 'privileged'}, 'test-sev-002',
         )
 
         entry = result['results'][0]
@@ -245,7 +245,7 @@ class TestSeverityFilteringIntegration:
         mod, _ = _load_vulnerabilities_handler(mock_dsl=mock_dsl)
 
         result = mod.handle_query_vulnerabilities(
-            {'query': 'Show CVEs', '_access_tier': 'privileged'}, 'test-sev-003',
+            {'query': 'Show CVEs', 'version': '2.19', '_access_tier': 'privileged'}, 'test-sev-003',
         )
 
         entry = result['results'][0]
@@ -264,7 +264,7 @@ class TestSeverityFilteringIntegration:
         mod, _ = _load_vulnerabilities_handler(mock_dsl=mock_dsl)
 
         result = mod.handle_query_vulnerabilities(
-            {'query': 'Show CVEs', 'severity': 'CRITICAL', '_access_tier': 'privileged'}, 'test-sev-004',
+            {'query': 'Show CVEs', 'version': '2.19', 'severity': 'CRITICAL', '_access_tier': 'privileged'}, 'test-sev-004',
         )
 
         entry = result['results'][0]
@@ -281,7 +281,7 @@ class TestSeverityFilteringIntegration:
         mod, _ = _load_vulnerabilities_handler(mock_dsl=mock_dsl)
 
         result = mod.handle_query_vulnerabilities(
-            {'query': 'Show CVEs', 'severity': 'CRITICAL', '_access_tier': 'privileged'}, 'test-sev-005',
+            {'query': 'Show CVEs', 'version': '2.19', 'severity': 'CRITICAL', '_access_tier': 'privileged'}, 'test-sev-005',
         )
 
         entry = result['results'][0]
@@ -308,7 +308,7 @@ class TestAgeThresholdIntegration:
         mod, _ = _load_vulnerabilities_handler(mock_dsl=mock_dsl)
 
         result = mod.handle_query_vulnerabilities(
-            {'query': 'Show CVEs', 'age_days': '30', '_access_tier': 'privileged'}, 'test-age-001',
+            {'query': 'Show CVEs', 'version': '2.19', 'age_days': '30', '_access_tier': 'privileged'}, 'test-age-001',
         )
 
         assert result['result_count'] == 1
@@ -323,7 +323,7 @@ class TestAgeThresholdIntegration:
         mod, _ = _load_vulnerabilities_handler(mock_dsl=mock_dsl)
 
         result = mod.handle_query_vulnerabilities(
-            {'query': 'Show CVEs', 'age_days': '30', '_access_tier': 'privileged'}, 'test-age-002',
+            {'query': 'Show CVEs', 'version': '2.19', 'age_days': '30', '_access_tier': 'privileged'}, 'test-age-002',
         )
 
         assert 'age=30d' in result['neglected_page_url']
@@ -339,7 +339,7 @@ class TestAgeThresholdIntegration:
         mod, _ = _load_vulnerabilities_handler(mock_dsl=mock_dsl)
 
         result = mod.handle_query_vulnerabilities(
-            {'query': 'Show CVEs', 'age_days': 'abc', '_access_tier': 'privileged'}, 'test-age-003',
+            {'query': 'Show CVEs', 'version': '2.19', 'age_days': 'abc', '_access_tier': 'privileged'}, 'test-age-003',
         )
 
         assert result['result_count'] == 1
@@ -374,7 +374,7 @@ class TestCombinedSeverityAndAge:
         mod, _ = _load_vulnerabilities_handler(mock_dsl=mock_dsl)
 
         result = mod.handle_query_vulnerabilities(
-            {'query': 'Show CVEs', 'severity': 'CRITICAL', 'age_days': '30', '_access_tier': 'privileged'},
+            {'query': 'Show CVEs', 'version': '2.19', 'severity': 'CRITICAL', 'age_days': '30', '_access_tier': 'privileged'},
             'test-combo-001',
         )
 

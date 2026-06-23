@@ -145,6 +145,7 @@ class TestNeglectedUrlFromHandlerParams:
         """With no filter params, URL uses defaults: age=30d, severe=true, tag=origin/main."""
         result = self._invoke_handler_with_hits({
             'query': 'Show CVEs',
+            'version': 'origin/main',
             '_access_tier': 'privileged',
         })
         url = result['neglected_page_url']
@@ -157,6 +158,7 @@ class TestNeglectedUrlFromHandlerParams:
         """age_days parameter is mapped to the nearest bucket in the URL."""
         result = self._invoke_handler_with_hits({
             'query': 'Show CVEs',
+            'version': '2.19',
             'age_days': '20',
             '_access_tier': 'privileged',
         })
@@ -167,6 +169,7 @@ class TestNeglectedUrlFromHandlerParams:
         """age_days=15 maps to age=15d."""
         result = self._invoke_handler_with_hits({
             'query': 'Show CVEs',
+            'version': '2.19',
             'age_days': '15',
             '_access_tier': 'privileged',
         })
@@ -176,6 +179,7 @@ class TestNeglectedUrlFromHandlerParams:
         """severity=HIGH sets severe=true in the URL."""
         result = self._invoke_handler_with_hits({
             'query': 'Show CVEs',
+            'version': '2.19',
             'severity': 'HIGH',
             '_access_tier': 'privileged',
         })
@@ -185,6 +189,7 @@ class TestNeglectedUrlFromHandlerParams:
         """severity=CRITICAL sets critical=true in the URL."""
         result = self._invoke_handler_with_hits({
             'query': 'Show CVEs',
+            'version': '2.19',
             'severity': 'CRITICAL',
             '_access_tier': 'privileged',
         })
@@ -194,6 +199,7 @@ class TestNeglectedUrlFromHandlerParams:
         """severity=CRITICAL,HIGH sets both critical=true and severe=true."""
         result = self._invoke_handler_with_hits({
             'query': 'Show CVEs',
+            'version': '2.19',
             'severity': 'CRITICAL,HIGH',
             '_access_tier': 'privileged',
         })
@@ -205,6 +211,7 @@ class TestNeglectedUrlFromHandlerParams:
         """severity=MEDIUM explicitly passes severe=False and critical=False."""
         result = self._invoke_handler_with_hits({
             'query': 'Show CVEs',
+            'version': '2.19',
             'severity': 'MEDIUM',
             '_access_tier': 'privileged',
         })
@@ -244,6 +251,7 @@ class TestNeglectedUrlFromHandlerParams:
         """When severity is not provided, severe defaults to true."""
         result = self._invoke_handler_with_hits({
             'query': 'Show CVEs',
+            'version': 'origin/main',
             '_access_tier': 'privileged',
         })
         url = result['neglected_page_url']
@@ -255,6 +263,7 @@ class TestNeglectedUrlFromHandlerParams:
         """The neglected URL base has a trailing slash before the query string."""
         result = self._invoke_handler_with_hits({
             'query': 'Show CVEs',
+            'version': 'origin/main',
             '_access_tier': 'privileged',
         })
         url = result['neglected_page_url']
