@@ -15,7 +15,8 @@ Functions:
 import logging
 from typing import Any, Dict, Optional, Set
 
-from dsl_query_builder import query_vulnerabilities, resolve_version_tag
+from dsl_query_builder import (_DEFAULT_QUERY_SIZE, query_vulnerabilities,
+                               resolve_version_tag)
 from response_filter import (build_neglected_page_url, build_summary,
                              filter_vulnerabilities)
 
@@ -211,7 +212,6 @@ def handle_query_vulnerabilities(params: Dict[str, Any], request_id: str) -> Dic
     # With collapse, total_value > len(hits) is normal (duplicates removed).
     # True truncation only occurs when the collapsed result count hits the
     # query size limit, meaning there may be more unique projects than returned.
-    from dsl_query_builder import _DEFAULT_QUERY_SIZE
     results_truncated = len(hits) >= _DEFAULT_QUERY_SIZE
 
     # Process each scan document hit

@@ -33,6 +33,7 @@ def _make_mock_dsl_query_builder():
     mock_mod = MagicMock()
     mock_mod.query_vulnerabilities = MagicMock(return_value={'hits': {'hits': []}})
     mock_mod.resolve_version_tag = MagicMock(side_effect=lambda v: v)
+    mock_mod._DEFAULT_QUERY_SIZE = 1000
     return mock_mod
 
 
