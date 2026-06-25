@@ -233,8 +233,8 @@ class TestDSLQueryStructure:
         assert len(filters) == 1
         assert filters[0] == {'term': {'project.tag': 'origin/3.7'}}
 
-    def test_project_name_only_produces_name_and_default_tag_filter(self):
-        """Validates: Requirement 1.4 — project_name alone still gets origin/main default."""
+    def test_project_name_only_produces_name_filter_without_tag(self):
+        """Validates: Requirement 1.4 — project_name alone returns all versions."""
         mock_response = {'hits': {'hits': []}}
         mod, mock_aws = _load_dsl_query_builder(
             mock_opensearch_request=mock_response,
@@ -248,8 +248,7 @@ class TestDSLQueryStructure:
 
         assert 'bool' in body['query']
         filters = body['query']['bool']['filter']
-        assert len(filters) == 2
-        assert {'term': {'project.tag': 'origin/main'}} in filters
+        assert len(filters) == 1
         assert {'term': {'project.name': 'OpenSearch Dashboards'}} in filters
 
     def test_both_params_produce_combined_filter(self):
