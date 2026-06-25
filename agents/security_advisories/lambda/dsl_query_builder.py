@@ -15,6 +15,7 @@ Functions:
 
 import json
 import logging
+import re
 from typing import Any, Dict, Optional
 
 import semver
@@ -25,6 +26,10 @@ logger.setLevel(logging.INFO)
 
 # Default query size — matches the previous agentic search configuration
 _DEFAULT_QUERY_SIZE = 1000
+
+# Strict two-part numeric pattern (e.g., "3.7", "2.19") to avoid
+# misclassifying pre-release/build metadata strings like "3.7-rc".
+_TWO_PART_RE = re.compile(r'^\d+\.\d+$')
 
 
 def _classify_version(version: str) -> str:
@@ -39,13 +44,15 @@ def _classify_version(version: str) -> str:
     try:
         semver.Version.parse(version)
         return 'three_part'
-    except ValueError:
+    except (ValueError, TypeError):
         pass
-    try:
-        semver.Version.parse(f'{version}.0')
-        return 'two_part'
-    except ValueError:
-        return 'unknown'
+    if _TWO_PART_RE.match(version):
+        try:
+            semver.Version.parse(f'{version}.0')
+            return 'two_part'
+        except (ValueError, TypeError):
+            pass
+    return 'unknown'
 
 
 def resolve_version_tag(version: str) -> str:
@@ -210,22 +217,21 @@ def _error_response(
 def _connection_error(exception: Exception) -> Dict[str, Any]:
     """Return a connection error without leaking internal details.
 
-    Sanitizes the error message to exclude internal hostnames or credentials
-    that may appear in connection failure exceptions.
+    Logs the original exception internally for diagnostics, then returns
+    a sanitized error dict via _error_response for consistent structure.
 
     Args:
         exception: The caught exception from the connection failure.
 
     Returns:
-        Sanitized error dict.
+        Sanitized error dict with consistent structure.
     """
-    return {
-        'status': 'error',
-        'type': 'connection_error',
-        'retryable': False,
-        'message': 'Failed to connect to the OpenSearch cluster. '
-                   'The service may be temporarily unavailable.',
-    }
+    logger.error(f'CONNECTION_ERROR: {type(exception).__name__}: {exception}')
+    return _error_response(
+        'connection_error',
+        'Failed to connect to the OpenSearch cluster. '
+        'The service may be temporarily unavailable.',
+    )
 
 
 def query_vulnerabilities(
@@ -255,8 +261,16 @@ def query_vulnerabilities(
         )
         return _error_response('index_resolution_error', str(e))
 
-    # Resolve version tag — default to origin/main per agent instructions
-    resolved_tag = resolve_version_tag(version) if version else 'origin/main'
+    # Resolve version tag:
+    # - version provided → resolve to canonical tag format
+    # - only project_name provided → no tag filter (return all versions)
+    # - neither provided → default to origin/main
+    if version:
+        resolved_tag = resolve_version_tag(version)
+    elif project_name:
+        resolved_tag = None
+    else:
+        resolved_tag = 'origin/main'
 
     # Build the DSL query
     query_body_dict = _build_dsl_query(

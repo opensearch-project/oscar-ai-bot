@@ -295,54 +295,60 @@ class TestCollapseDeduplication:
 
 
 # ---------------------------------------------------------------------------
-# Missing parameter validation
+# Default version behavior
 # ---------------------------------------------------------------------------
 
 
-class TestMissingParameterValidation:
-    """Test that missing version and project_name returns an error."""
+class TestDefaultVersionBehavior:
+    """Test that missing version/project_name defaults to origin/main in the builder."""
 
-    def test_neither_version_nor_project_name_returns_error(self):
-        """When both version and project_name are absent, return missing_parameter error."""
-        mod, mock_dsl = _load_vulnerabilities_handler()
+    def test_neither_version_nor_project_name_defaults_to_origin_main(self):
+        """When both version and project_name are absent, builder defaults to origin/main."""
+        mock_dsl = _make_mock_dsl_query_builder()
+        mock_dsl.query_vulnerabilities.return_value = {'hits': {'hits': []}}
+        mod, _ = _load_vulnerabilities_handler(mock_dsl=mock_dsl)
 
         result = mod.handle_query_vulnerabilities(
             {'query': 'Show all CVEs', '_access_tier': 'privileged'}, 'test-050',
         )
 
-        assert result['status'] == 'error'
-        assert result['type'] == 'missing_parameter'
-        assert result['retryable'] is False
-        assert 'version' in result['message']
-        assert 'project_name' in result['message']
-        # Should NOT have called the query builder
-        mock_dsl.query_vulnerabilities.assert_not_called()
+        # Handler passes through to builder; builder applies origin/main default
+        mock_dsl.query_vulnerabilities.assert_called_once_with(
+            version=None, project_name=None,
+        )
+        assert result['status'] == 'success'
 
-    def test_empty_string_version_and_project_name_returns_error(self):
-        """Empty strings for both version and project_name returns error."""
-        mod, mock_dsl = _load_vulnerabilities_handler()
+    def test_empty_string_version_and_project_name_defaults_to_origin_main(self):
+        """Empty strings for both version and project_name are treated as absent."""
+        mock_dsl = _make_mock_dsl_query_builder()
+        mock_dsl.query_vulnerabilities.return_value = {'hits': {'hits': []}}
+        mod, _ = _load_vulnerabilities_handler(mock_dsl=mock_dsl)
 
         result = mod.handle_query_vulnerabilities(
             {'query': 'Show CVEs', 'version': '', 'project_name': '', '_access_tier': 'privileged'},
             'test-051',
         )
 
-        assert result['status'] == 'error'
-        assert result['type'] == 'missing_parameter'
-        mock_dsl.query_vulnerabilities.assert_not_called()
+        mock_dsl.query_vulnerabilities.assert_called_once_with(
+            version='', project_name='',
+        )
+        assert result['status'] == 'success'
 
-    def test_none_version_and_project_name_returns_error(self):
-        """Explicit None for both version and project_name returns error."""
-        mod, mock_dsl = _load_vulnerabilities_handler()
+    def test_none_version_and_project_name_defaults_to_origin_main(self):
+        """Explicit None for both version and project_name are treated as absent."""
+        mock_dsl = _make_mock_dsl_query_builder()
+        mock_dsl.query_vulnerabilities.return_value = {'hits': {'hits': []}}
+        mod, _ = _load_vulnerabilities_handler(mock_dsl=mock_dsl)
 
         result = mod.handle_query_vulnerabilities(
             {'query': 'Show CVEs', 'version': None, 'project_name': None},
             'test-052',
         )
 
-        assert result['status'] == 'error'
-        assert result['type'] == 'missing_parameter'
-        mock_dsl.query_vulnerabilities.assert_not_called()
+        mock_dsl.query_vulnerabilities.assert_called_once_with(
+            version=None, project_name=None,
+        )
+        assert result['status'] == 'success'
 
     def test_version_provided_passes_validation(self):
         """When version is provided, validation passes."""
