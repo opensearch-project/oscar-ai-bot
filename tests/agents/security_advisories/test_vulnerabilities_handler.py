@@ -3,7 +3,7 @@
 
 """Tests for security advisories vulnerabilities_handler.py.
 
-These tests verify the agentic search flow for vulnerability queries:
+These tests verify the DSL query flow for vulnerability queries:
 result entry structure, multiple hits, empty results, and error handling.
 
 **Validates Property 5: Result entry structural completeness**
@@ -21,44 +21,26 @@ _LAMBDA_PATH = os.path.join(
 )
 
 
-def _make_mock_config():
-    """Create a mock config module with required attributes."""
-    mock_config = MagicMock()
-    mock_config.agentic_pipeline = 'oscar-agentic-pipeline'
-    mock_config_module = MagicMock()
-    mock_config_module.config = mock_config
-    return mock_config_module
-
-
-def _make_mock_agentic_search():
-    """Create a mock agentic_search module."""
+def _make_mock_dsl_query_builder():
+    """Create a mock dsl_query_builder module."""
     mock_mod = MagicMock()
-    mock_mod.enhance_query = MagicMock(side_effect=lambda q, **kw: q)
-    mock_mod.agentic_search = MagicMock(return_value={'hits': {'hits': []}})
+    mock_mod.query_vulnerabilities = MagicMock(return_value={'hits': {'total': {'value': 0}, 'hits': []}})
     mock_mod.resolve_version_tag = MagicMock(side_effect=lambda v: v)
-    mock_mod.AgenticSearchError = type('AgenticSearchError', (Exception,), {
-        '__init__': lambda self, msg, status_code=None: (
-            super(type(self), self).__init__(msg),
-            setattr(self, 'status_code', status_code),
-        )[-1],
-    })
+    mock_mod._DEFAULT_QUERY_SIZE = 1000
     return mock_mod
 
 
-def _load_vulnerabilities_handler(mock_config=None, mock_agentic=None):
+def _load_vulnerabilities_handler(mock_dsl=None):
     """Import vulnerabilities_handler with mocked dependencies."""
-    if mock_config is None:
-        mock_config = _make_mock_config()
-    if mock_agentic is None:
-        mock_agentic = _make_mock_agentic_search()
+    if mock_dsl is None:
+        mock_dsl = _make_mock_dsl_query_builder()
 
     # Also need response_filter — load the real one
     if _LAMBDA_PATH not in sys.path:
         sys.path.insert(0, _LAMBDA_PATH)
 
     with patch.dict('sys.modules', {
-        'config': mock_config,
-        'agentic_search': mock_agentic,
+        'dsl_query_builder': mock_dsl,
     }):
         spec = importlib.util.spec_from_file_location(
             'sa_vulnerabilities_handler',
@@ -66,7 +48,7 @@ def _load_vulnerabilities_handler(mock_config=None, mock_agentic=None):
         )
         mod = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(mod)
-        return mod, mock_agentic
+        return mod, mock_dsl
 
 
 # ---------------------------------------------------------------------------
@@ -131,14 +113,14 @@ class TestResultEntryStructuralCompleteness:
     }
 
     def test_single_hit_contains_all_required_keys(self):
-        mock_agentic = _make_mock_agentic_search()
-        mock_agentic.agentic_search.return_value = {
-            'hits': {'hits': [SAMPLE_HIT]},
+        mock_dsl = _make_mock_dsl_query_builder()
+        mock_dsl.query_vulnerabilities.return_value = {
+            'hits': {'total': {'value': 1}, 'hits': [SAMPLE_HIT]},
         }
-        mod, _ = _load_vulnerabilities_handler(mock_agentic=mock_agentic)
+        mod, _ = _load_vulnerabilities_handler(mock_dsl=mock_dsl)
 
         result = mod.handle_query_vulnerabilities(
-            {'query': 'Show critical CVEs', '_access_tier': 'privileged'}, 'test-001',
+            {'query': 'Show critical CVEs', 'version': '2.19', '_access_tier': 'privileged'}, 'test-001',
         )
 
         assert result['status'] == 'success'
@@ -147,70 +129,70 @@ class TestResultEntryStructuralCompleteness:
         assert self.REQUIRED_KEYS.issubset(set(entry.keys()))
 
     def test_result_entry_project_matches_source(self):
-        mock_agentic = _make_mock_agentic_search()
-        mock_agentic.agentic_search.return_value = {
-            'hits': {'hits': [SAMPLE_HIT]},
+        mock_dsl = _make_mock_dsl_query_builder()
+        mock_dsl.query_vulnerabilities.return_value = {
+            'hits': {'total': {'value': 1}, 'hits': [SAMPLE_HIT]},
         }
-        mod, _ = _load_vulnerabilities_handler(mock_agentic=mock_agentic)
+        mod, _ = _load_vulnerabilities_handler(mock_dsl=mock_dsl)
 
         result = mod.handle_query_vulnerabilities(
-            {'query': 'Show CVEs', '_access_tier': 'privileged'}, 'test-002',
+            {'query': 'Show CVEs', 'version': '2.19', '_access_tier': 'privileged'}, 'test-002',
         )
 
         entry = result['results'][0]
         assert entry['project'] == {'name': 'OpenSearch', 'tag': '2.19.6'}
 
     def test_result_entry_timestamp_matches_source(self):
-        mock_agentic = _make_mock_agentic_search()
-        mock_agentic.agentic_search.return_value = {
-            'hits': {'hits': [SAMPLE_HIT]},
+        mock_dsl = _make_mock_dsl_query_builder()
+        mock_dsl.query_vulnerabilities.return_value = {
+            'hits': {'total': {'value': 1}, 'hits': [SAMPLE_HIT]},
         }
-        mod, _ = _load_vulnerabilities_handler(mock_agentic=mock_agentic)
+        mod, _ = _load_vulnerabilities_handler(mock_dsl=mock_dsl)
 
         result = mod.handle_query_vulnerabilities(
-            {'query': 'Show CVEs', '_access_tier': 'privileged'}, 'test-003',
+            {'query': 'Show CVEs', 'version': '2.19', '_access_tier': 'privileged'}, 'test-003',
         )
 
         entry = result['results'][0]
         assert entry['timestamp'] == {'scan': '2024-01-15T10:30:00Z'}
 
     def test_result_entry_total_count_matches_source(self):
-        mock_agentic = _make_mock_agentic_search()
-        mock_agentic.agentic_search.return_value = {
-            'hits': {'hits': [SAMPLE_HIT]},
+        mock_dsl = _make_mock_dsl_query_builder()
+        mock_dsl.query_vulnerabilities.return_value = {
+            'hits': {'total': {'value': 1}, 'hits': [SAMPLE_HIT]},
         }
-        mod, _ = _load_vulnerabilities_handler(mock_agentic=mock_agentic)
+        mod, _ = _load_vulnerabilities_handler(mock_dsl=mock_dsl)
 
         result = mod.handle_query_vulnerabilities(
-            {'query': 'Show CVEs', '_access_tier': 'privileged'}, 'test-004',
+            {'query': 'Show CVEs', 'version': '2.19', '_access_tier': 'privileged'}, 'test-004',
         )
 
         entry = result['results'][0]
         assert entry['total_count'] == {'severe': 1, 'minor': 1}
 
     def test_result_entry_severity_summary_is_dict(self):
-        mock_agentic = _make_mock_agentic_search()
-        mock_agentic.agentic_search.return_value = {
-            'hits': {'hits': [SAMPLE_HIT]},
+        mock_dsl = _make_mock_dsl_query_builder()
+        mock_dsl.query_vulnerabilities.return_value = {
+            'hits': {'total': {'value': 1}, 'hits': [SAMPLE_HIT]},
         }
-        mod, _ = _load_vulnerabilities_handler(mock_agentic=mock_agentic)
+        mod, _ = _load_vulnerabilities_handler(mock_dsl=mock_dsl)
 
         result = mod.handle_query_vulnerabilities(
-            {'query': 'Show CVEs', '_access_tier': 'privileged'}, 'test-005',
+            {'query': 'Show CVEs', 'version': '2.19', '_access_tier': 'privileged'}, 'test-005',
         )
 
         entry = result['results'][0]
         assert isinstance(entry['severity_summary'], dict)
 
     def test_result_entry_filtered_count_is_int(self):
-        mock_agentic = _make_mock_agentic_search()
-        mock_agentic.agentic_search.return_value = {
-            'hits': {'hits': [SAMPLE_HIT]},
+        mock_dsl = _make_mock_dsl_query_builder()
+        mock_dsl.query_vulnerabilities.return_value = {
+            'hits': {'total': {'value': 1}, 'hits': [SAMPLE_HIT]},
         }
-        mod, _ = _load_vulnerabilities_handler(mock_agentic=mock_agentic)
+        mod, _ = _load_vulnerabilities_handler(mock_dsl=mock_dsl)
 
         result = mod.handle_query_vulnerabilities(
-            {'query': 'Show CVEs', '_access_tier': 'privileged'}, 'test-006',
+            {'query': 'Show CVEs', 'version': '2.19', '_access_tier': 'privileged'}, 'test-006',
         )
 
         entry = result['results'][0]
@@ -225,19 +207,19 @@ class TestResultEntryStructuralCompleteness:
 class TestVulnerabilityExtractionCompleteness:
     """**Validates Property 6: Vulnerability extraction completeness**
 
-    For any agentic search response containing N hits, the handler SHALL
+    For any DSL query response containing N hits, the handler SHALL
     produce exactly N result entries.
     """
 
     def test_multiple_hits_produce_correct_number_of_entries(self):
-        mock_agentic = _make_mock_agentic_search()
-        mock_agentic.agentic_search.return_value = {
-            'hits': {'hits': [SAMPLE_HIT, SAMPLE_HIT_2]},
+        mock_dsl = _make_mock_dsl_query_builder()
+        mock_dsl.query_vulnerabilities.return_value = {
+            'hits': {'total': {'value': 2}, 'hits': [SAMPLE_HIT, SAMPLE_HIT_2]},
         }
-        mod, _ = _load_vulnerabilities_handler(mock_agentic=mock_agentic)
+        mod, _ = _load_vulnerabilities_handler(mock_dsl=mock_dsl)
 
         result = mod.handle_query_vulnerabilities(
-            {'query': 'Show all CVEs', '_access_tier': 'privileged'}, 'test-010',
+            {'query': 'Show all CVEs', 'version': '2.19', '_access_tier': 'privileged'}, 'test-010',
         )
 
         assert result['status'] == 'success'
@@ -245,21 +227,21 @@ class TestVulnerabilityExtractionCompleteness:
         assert len(result['results']) == 2
 
     def test_single_hit_produces_one_entry(self):
-        mock_agentic = _make_mock_agentic_search()
-        mock_agentic.agentic_search.return_value = {
-            'hits': {'hits': [SAMPLE_HIT]},
+        mock_dsl = _make_mock_dsl_query_builder()
+        mock_dsl.query_vulnerabilities.return_value = {
+            'hits': {'total': {'value': 1}, 'hits': [SAMPLE_HIT]},
         }
-        mod, _ = _load_vulnerabilities_handler(mock_agentic=mock_agentic)
+        mod, _ = _load_vulnerabilities_handler(mock_dsl=mock_dsl)
 
         result = mod.handle_query_vulnerabilities(
-            {'query': 'Show CVEs', '_access_tier': 'privileged'}, 'test-011',
+            {'query': 'Show CVEs', 'version': '2.19', '_access_tier': 'privileged'}, 'test-011',
         )
 
         assert result['result_count'] == 1
         assert len(result['results']) == 1
 
     def test_three_hits_produce_three_entries(self):
-        mock_agentic = _make_mock_agentic_search()
+        mock_dsl = _make_mock_dsl_query_builder()
         hit3 = {
             '_index': 'scans',
             '_source': {
@@ -269,17 +251,124 @@ class TestVulnerabilityExtractionCompleteness:
                 'timestamp': {'scan': '2024-01-17T12:00:00Z'},
             },
         }
-        mock_agentic.agentic_search.return_value = {
-            'hits': {'hits': [SAMPLE_HIT, SAMPLE_HIT_2, hit3]},
+        mock_dsl.query_vulnerabilities.return_value = {
+            'hits': {'total': {'value': 3}, 'hits': [SAMPLE_HIT, SAMPLE_HIT_2, hit3]},
         }
-        mod, _ = _load_vulnerabilities_handler(mock_agentic=mock_agentic)
+        mod, _ = _load_vulnerabilities_handler(mock_dsl=mock_dsl)
 
         result = mod.handle_query_vulnerabilities(
-            {'query': 'Show all CVEs', '_access_tier': 'privileged'}, 'test-012',
+            {'query': 'Show all CVEs', 'version': '2.19', '_access_tier': 'privileged'}, 'test-012',
         )
 
         assert result['result_count'] == 3
         assert len(result['results']) == 3
+
+
+# ---------------------------------------------------------------------------
+# Property 7: Deduplication by project.name + project.tag (keep newest)
+# ---------------------------------------------------------------------------
+
+
+class TestCollapseDeduplication:
+    """**Validates: Deduplication via OpenSearch collapse**
+
+    Deduplication is now handled at the query layer via the ``collapse``
+    clause on ``project.name``. The handler trusts that each hit in the
+    response is already unique per project. These tests verify that the
+    handler correctly processes pre-deduplicated results.
+    """
+
+    def test_single_hit_per_project_processed_correctly(self):
+        """Handler processes collapsed results (one per project) as-is."""
+        mock_dsl = _make_mock_dsl_query_builder()
+        mock_dsl.query_vulnerabilities.return_value = {
+            'hits': {'total': {'value': 2}, 'hits': [SAMPLE_HIT, SAMPLE_HIT_2]},
+        }
+        mod, _ = _load_vulnerabilities_handler(mock_dsl=mock_dsl)
+
+        result = mod.handle_query_vulnerabilities(
+            {'query': 'Show CVEs', 'version': '2.19', '_access_tier': 'privileged'}, 'test-collapse-01',
+        )
+
+        assert result['status'] == 'success'
+        assert result['result_count'] == 2
+
+
+# ---------------------------------------------------------------------------
+# Missing parameter validation
+# ---------------------------------------------------------------------------
+
+
+class TestMissingParameterValidation:
+    """Test that missing version and project_name returns an error."""
+
+    def test_neither_version_nor_project_name_returns_error(self):
+        """When both version and project_name are absent, return missing_parameter error."""
+        mod, mock_dsl = _load_vulnerabilities_handler()
+
+        result = mod.handle_query_vulnerabilities(
+            {'query': 'Show all CVEs', '_access_tier': 'privileged'}, 'test-050',
+        )
+
+        assert result['status'] == 'error'
+        assert result['type'] == 'missing_parameter'
+        assert result['retryable'] is False
+        assert 'version' in result['message']
+        assert 'project_name' in result['message']
+        # Should NOT have called the query builder
+        mock_dsl.query_vulnerabilities.assert_not_called()
+
+    def test_empty_string_version_and_project_name_returns_error(self):
+        """Empty strings for both version and project_name returns error."""
+        mod, mock_dsl = _load_vulnerabilities_handler()
+
+        result = mod.handle_query_vulnerabilities(
+            {'query': 'Show CVEs', 'version': '', 'project_name': '', '_access_tier': 'privileged'},
+            'test-051',
+        )
+
+        assert result['status'] == 'error'
+        assert result['type'] == 'missing_parameter'
+        mock_dsl.query_vulnerabilities.assert_not_called()
+
+    def test_none_version_and_project_name_returns_error(self):
+        """Explicit None for both version and project_name returns error."""
+        mod, mock_dsl = _load_vulnerabilities_handler()
+
+        result = mod.handle_query_vulnerabilities(
+            {'query': 'Show CVEs', 'version': None, 'project_name': None},
+            'test-052',
+        )
+
+        assert result['status'] == 'error'
+        assert result['type'] == 'missing_parameter'
+        mock_dsl.query_vulnerabilities.assert_not_called()
+
+    def test_version_provided_passes_validation(self):
+        """When version is provided, validation passes."""
+        mock_dsl = _make_mock_dsl_query_builder()
+        mock_dsl.query_vulnerabilities.return_value = {'hits': {'hits': []}}
+        mod, _ = _load_vulnerabilities_handler(mock_dsl=mock_dsl)
+
+        result = mod.handle_query_vulnerabilities(
+            {'query': 'Show CVEs', 'version': '2.19'}, 'test-053',
+        )
+
+        assert result['status'] == 'success'
+        mock_dsl.query_vulnerabilities.assert_called_once()
+
+    def test_project_name_provided_passes_validation(self):
+        """When project_name is provided, validation passes."""
+        mock_dsl = _make_mock_dsl_query_builder()
+        mock_dsl.query_vulnerabilities.return_value = {'hits': {'hits': []}}
+        mod, _ = _load_vulnerabilities_handler(mock_dsl=mock_dsl)
+
+        result = mod.handle_query_vulnerabilities(
+            {'query': 'Show CVEs', 'project_name': 'OpenSearch'}, 'test-054',
+        )
+
+        assert result['status'] == 'success'
+        mock_dsl.query_vulnerabilities.assert_called_once()
 
 
 # ---------------------------------------------------------------------------
@@ -291,14 +380,14 @@ class TestEmptyResults:
     """Test empty results return success with descriptive message."""
 
     def test_no_hits_returns_success_with_message(self):
-        mock_agentic = _make_mock_agentic_search()
-        mock_agentic.agentic_search.return_value = {
+        mock_dsl = _make_mock_dsl_query_builder()
+        mock_dsl.query_vulnerabilities.return_value = {
             'hits': {'hits': []},
         }
-        mod, _ = _load_vulnerabilities_handler(mock_agentic=mock_agentic)
+        mod, _ = _load_vulnerabilities_handler(mock_dsl=mock_dsl)
 
         result = mod.handle_query_vulnerabilities(
-            {'query': 'Show CVEs for nonexistent project', '_access_tier': 'privileged'}, 'test-020',
+            {'query': 'Show CVEs for nonexistent project', 'project_name': 'Nonexistent', '_access_tier': 'privileged'}, 'test-020',
         )
 
         assert result['status'] == 'success'
@@ -307,12 +396,12 @@ class TestEmptyResults:
         assert result['result_count'] == 0
 
     def test_missing_hits_key_returns_success_with_empty(self):
-        mock_agentic = _make_mock_agentic_search()
-        mock_agentic.agentic_search.return_value = {}
-        mod, _ = _load_vulnerabilities_handler(mock_agentic=mock_agentic)
+        mock_dsl = _make_mock_dsl_query_builder()
+        mock_dsl.query_vulnerabilities.return_value = {}
+        mod, _ = _load_vulnerabilities_handler(mock_dsl=mock_dsl)
 
         result = mod.handle_query_vulnerabilities(
-            {'query': 'Show CVEs', '_access_tier': 'privileged'}, 'test-021',
+            {'query': 'Show CVEs', 'version': '3.7', '_access_tier': 'privileged'}, 'test-021',
         )
 
         assert result['status'] == 'success'
@@ -320,78 +409,89 @@ class TestEmptyResults:
 
 
 # ---------------------------------------------------------------------------
-# AgenticSearchError handling
+# Error response handling (error dict from dsl_query_builder)
 # ---------------------------------------------------------------------------
 
 
-class TestAgenticSearchErrorHandling:
-    """Test AgenticSearchError returns non-retryable error response."""
+class TestErrorResponseHandling:
+    """Test error dict response propagation from dsl_query_builder."""
 
-    def test_agentic_search_error_returns_non_retryable(self):
-        mock_agentic = _make_mock_agentic_search()
-        mock_agentic.agentic_search.side_effect = mock_agentic.AgenticSearchError(
-            'Search failed', status_code=500,
-        )
-        mod, _ = _load_vulnerabilities_handler(mock_agentic=mock_agentic)
+    def test_error_response_is_propagated(self):
+        mock_dsl = _make_mock_dsl_query_builder()
+        mock_dsl.query_vulnerabilities.return_value = {
+            'status': 'error',
+            'type': 'opensearch_error',
+            'retryable': False,
+            'message': 'OpenSearch query failed: 500 - Internal Server Error',
+            'status_code': 500,
+        }
+        mod, _ = _load_vulnerabilities_handler(mock_dsl=mock_dsl)
 
         result = mod.handle_query_vulnerabilities(
-            {'query': 'Show CVEs', '_access_tier': 'privileged'}, 'test-030',
+            {'query': 'Show CVEs', 'version': '3.7', '_access_tier': 'privileged'}, 'test-030',
         )
 
         assert result['status'] == 'error'
-        assert result['type'] == 'agentic_search_error'
         assert result['retryable'] is False
-        assert 'rephras' in result['message'].lower()
+        assert 'message' in result
 
-    def test_agentic_search_error_without_status_code(self):
-        mock_agentic = _make_mock_agentic_search()
-        mock_agentic.agentic_search.side_effect = mock_agentic.AgenticSearchError(
-            'Connection refused',
-        )
-        mod, _ = _load_vulnerabilities_handler(mock_agentic=mock_agentic)
+    def test_connection_error_response_is_propagated(self):
+        mock_dsl = _make_mock_dsl_query_builder()
+        mock_dsl.query_vulnerabilities.return_value = {
+            'status': 'error',
+            'type': 'connection_error',
+            'retryable': False,
+            'message': 'Failed to connect to the OpenSearch cluster. '
+                       'The service may be temporarily unavailable.',
+        }
+        mod, _ = _load_vulnerabilities_handler(mock_dsl=mock_dsl)
 
         result = mod.handle_query_vulnerabilities(
-            {'query': 'Show CVEs', '_access_tier': 'privileged'}, 'test-031',
+            {'query': 'Show CVEs', 'version': '3.7', '_access_tier': 'privileged'}, 'test-031',
         )
 
         assert result['status'] == 'error'
         assert result['retryable'] is False
 
     def test_error_response_has_message_key(self):
-        mock_agentic = _make_mock_agentic_search()
-        mock_agentic.agentic_search.side_effect = mock_agentic.AgenticSearchError(
-            'Bad request', status_code=400,
-        )
-        mod, _ = _load_vulnerabilities_handler(mock_agentic=mock_agentic)
+        mock_dsl = _make_mock_dsl_query_builder()
+        mock_dsl.query_vulnerabilities.return_value = {
+            'status': 'error',
+            'type': 'index_resolution_error',
+            'retryable': False,
+            'message': 'Could not resolve scans index',
+        }
+        mod, _ = _load_vulnerabilities_handler(mock_dsl=mock_dsl)
 
         result = mod.handle_query_vulnerabilities(
-            {'query': 'Show CVEs', '_access_tier': 'privileged'}, 'test-032',
+            {'query': 'Show CVEs', 'version': '3.7', '_access_tier': 'privileged'}, 'test-032',
         )
 
         assert 'message' in result
         assert len(result['message']) > 0
 
+
 # ---------------------------------------------------------------------------
-# Privileged response enrichment (access_tier and neglected_page_url)
+# Privileged response enrichment (neglected_page_url)
 # ---------------------------------------------------------------------------
 
 
 class TestPrivilegedResponseEnrichment:
-    """Test that privileged responses include access_tier and neglected_page_url.
+    """Test that privileged responses include neglected_page_url.
 
     _Validates: Requirements 2.1, 3.1, 5.2_
     """
 
     def test_privileged_response_has_neglected_page_url(self):
         """Privileged response includes neglected_page_url field."""
-        mock_agentic = _make_mock_agentic_search()
-        mock_agentic.agentic_search.return_value = {
-            'hits': {'hits': [SAMPLE_HIT]},
+        mock_dsl = _make_mock_dsl_query_builder()
+        mock_dsl.query_vulnerabilities.return_value = {
+            'hits': {'total': {'value': 1}, 'hits': [SAMPLE_HIT]},
         }
-        mod, _ = _load_vulnerabilities_handler(mock_agentic=mock_agentic)
+        mod, _ = _load_vulnerabilities_handler(mock_dsl=mock_dsl)
 
         result = mod.handle_query_vulnerabilities(
-            {'query': 'Show CVEs', '_access_tier': 'privileged'}, 'test-041',
+            {'query': 'Show CVEs', 'version': '2.19', '_access_tier': 'privileged'}, 'test-041',
         )
 
         assert 'neglected_page_url' in result
@@ -401,39 +501,39 @@ class TestPrivilegedResponseEnrichment:
 
     def test_neglected_url_includes_age_param_from_age_days(self):
         """Neglected URL includes age parameter derived from age_days."""
-        mock_agentic = _make_mock_agentic_search()
-        mock_agentic.agentic_search.return_value = {
-            'hits': {'hits': [SAMPLE_HIT]},
+        mock_dsl = _make_mock_dsl_query_builder()
+        mock_dsl.query_vulnerabilities.return_value = {
+            'hits': {'total': {'value': 1}, 'hits': [SAMPLE_HIT]},
         }
-        mod, _ = _load_vulnerabilities_handler(mock_agentic=mock_agentic)
+        mod, _ = _load_vulnerabilities_handler(mock_dsl=mock_dsl)
 
         result = mod.handle_query_vulnerabilities(
-            {'query': 'Show CVEs', 'age_days': '30', '_access_tier': 'privileged'}, 'test-042',
+            {'query': 'Show CVEs', 'version': '2.19', 'age_days': '30', '_access_tier': 'privileged'}, 'test-042',
         )
 
         assert 'age=30d' in result['neglected_page_url']
 
     def test_neglected_url_includes_severe_when_high_severity(self):
         """Neglected URL includes severe=true when severity contains HIGH."""
-        mock_agentic = _make_mock_agentic_search()
-        mock_agentic.agentic_search.return_value = {
-            'hits': {'hits': [SAMPLE_HIT]},
+        mock_dsl = _make_mock_dsl_query_builder()
+        mock_dsl.query_vulnerabilities.return_value = {
+            'hits': {'total': {'value': 1}, 'hits': [SAMPLE_HIT]},
         }
-        mod, _ = _load_vulnerabilities_handler(mock_agentic=mock_agentic)
+        mod, _ = _load_vulnerabilities_handler(mock_dsl=mock_dsl)
 
         result = mod.handle_query_vulnerabilities(
-            {'query': 'Show CVEs', 'severity': 'HIGH', '_access_tier': 'privileged'}, 'test-043',
+            {'query': 'Show CVEs', 'version': '2.19', 'severity': 'HIGH', '_access_tier': 'privileged'}, 'test-043',
         )
 
         assert 'severe=true' in result['neglected_page_url']
 
     def test_neglected_url_includes_tag_from_version(self):
         """Neglected URL includes tag parameter derived from version."""
-        mock_agentic = _make_mock_agentic_search()
-        mock_agentic.agentic_search.return_value = {
-            'hits': {'hits': [SAMPLE_HIT]},
+        mock_dsl = _make_mock_dsl_query_builder()
+        mock_dsl.query_vulnerabilities.return_value = {
+            'hits': {'total': {'value': 1}, 'hits': [SAMPLE_HIT]},
         }
-        mod, _ = _load_vulnerabilities_handler(mock_agentic=mock_agentic)
+        mod, _ = _load_vulnerabilities_handler(mock_dsl=mock_dsl)
 
         result = mod.handle_query_vulnerabilities(
             {'query': 'Show CVEs', 'version': '2.19.6', '_access_tier': 'privileged'}, 'test-044',
@@ -443,14 +543,14 @@ class TestPrivilegedResponseEnrichment:
 
     def test_neglected_url_includes_critical_when_critical_severity(self):
         """Neglected URL includes critical=true when severity contains CRITICAL."""
-        mock_agentic = _make_mock_agentic_search()
-        mock_agentic.agentic_search.return_value = {
-            'hits': {'hits': [SAMPLE_HIT]},
+        mock_dsl = _make_mock_dsl_query_builder()
+        mock_dsl.query_vulnerabilities.return_value = {
+            'hits': {'total': {'value': 1}, 'hits': [SAMPLE_HIT]},
         }
-        mod, _ = _load_vulnerabilities_handler(mock_agentic=mock_agentic)
+        mod, _ = _load_vulnerabilities_handler(mock_dsl=mock_dsl)
 
         result = mod.handle_query_vulnerabilities(
-            {'query': 'Show CVEs', 'severity': 'CRITICAL,HIGH', '_access_tier': 'privileged'},
+            {'query': 'Show CVEs', 'version': '2.19', 'severity': 'CRITICAL,HIGH', '_access_tier': 'privileged'},
             'test-045',
         )
 
@@ -458,15 +558,15 @@ class TestPrivilegedResponseEnrichment:
         assert 'severe=true' in result['neglected_page_url']
 
     def test_neglected_url_defaults_when_no_filter_params(self):
-        """Neglected URL uses defaults when no filter params are provided."""
-        mock_agentic = _make_mock_agentic_search()
-        mock_agentic.agentic_search.return_value = {
-            'hits': {'hits': [SAMPLE_HIT]},
+        """Neglected URL uses defaults when no severity/age filter params are provided."""
+        mock_dsl = _make_mock_dsl_query_builder()
+        mock_dsl.query_vulnerabilities.return_value = {
+            'hits': {'total': {'value': 1}, 'hits': [SAMPLE_HIT]},
         }
-        mod, _ = _load_vulnerabilities_handler(mock_agentic=mock_agentic)
+        mod, _ = _load_vulnerabilities_handler(mock_dsl=mock_dsl)
 
         result = mod.handle_query_vulnerabilities(
-            {'query': 'Show CVEs', '_access_tier': 'privileged'}, 'test-046',
+            {'query': 'Show CVEs', 'version': 'origin/main', '_access_tier': 'privileged'}, 'test-046',
         )
 
         url = result['neglected_page_url']
@@ -477,18 +577,17 @@ class TestPrivilegedResponseEnrichment:
         assert 'critical=false' in url
         assert 'tag=origin' in url
 
-    def test_empty_results_still_has_neglected_url(self):
-        """Even with no hits, privileged response includes neglected_page_url."""
-        mock_agentic = _make_mock_agentic_search()
-        mock_agentic.agentic_search.return_value = {
+    def test_empty_results_still_has_success_status(self):
+        """Even with no hits, response returns success status."""
+        mock_dsl = _make_mock_dsl_query_builder()
+        mock_dsl.query_vulnerabilities.return_value = {
             'hits': {'hits': []},
         }
-        mod, _ = _load_vulnerabilities_handler(mock_agentic=mock_agentic)
+        mod, _ = _load_vulnerabilities_handler(mock_dsl=mock_dsl)
 
         result = mod.handle_query_vulnerabilities(
-            {'query': 'Show CVEs for nonexistent', '_access_tier': 'privileged'}, 'test-047',
+            {'query': 'Show CVEs for nonexistent', 'version': '3.7', '_access_tier': 'privileged'}, 'test-047',
         )
 
-        # Empty results return a message-style response, which may or may not have neglected_url
-        # The key point is it doesn't crash and returns success
+        # Empty results return a message-style response
         assert result['status'] == 'success'

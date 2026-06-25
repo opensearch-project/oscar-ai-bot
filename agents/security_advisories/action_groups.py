@@ -28,10 +28,10 @@ def _privileged_action_group(
                 bedrock.CfnAgent.FunctionProperty(
                     name="query_vulnerabilities",
                     description=(
-                        "Query CVEs and vulnerabilities using natural language. "
-                        "The query is routed through an agentic flow pipeline that "
-                        "automatically translates it into OpenSearch DSL. Optionally "
-                        "scope by version or project name."
+                        "Query CVEs and vulnerabilities for OpenSearch project "
+                        "components. Scope by version or project name. Call "
+                        "list_projects() first to resolve the exact canonical "
+                        "project name."
                     ),
                     parameters={
                         "query": bedrock.CfnAgent.ParameterDetailProperty(
@@ -46,9 +46,11 @@ def _privileged_action_group(
                         "version": bedrock.CfnAgent.ParameterDetailProperty(
                             type="string",
                             description=(
-                                "OpenSearch version or branch to scope the query "
-                                "(e.g., '2.19.6', '3.0.0', 'origin/2.19'). "
-                                "Defaults to 'origin/main' if the user does not specify a version."
+                                "OpenSearch version or branch to scope the query. "
+                                "Valid values: a three-part version (e.g., '2.19.6', '3.0.0'), "
+                                "a two-part branch version (e.g., '3.7', '2.19'), "
+                                "'main', "
+                                "or an origin-prefixed tag (e.g., 'origin/2.19'). "
                             ),
                             required=False,
                         ),

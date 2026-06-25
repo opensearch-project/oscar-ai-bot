@@ -4,8 +4,8 @@
 
 """Vulnerabilities Handler for Security Advisories Lambda Functions.
 
-This module orchestrates the agentic search flow for vulnerability queries:
-enhance the NL query, execute agentic search, extract and filter results,
+This module orchestrates the direct DSL query flow for vulnerability queries:
+resolve parameters, execute a structured DSL query, extract and filter results,
 and return structured data.
 
 Functions:
@@ -15,9 +15,8 @@ Functions:
 import logging
 from typing import Any, Dict, Optional, Set
 
-from agentic_search import (AgenticSearchError, agentic_search, enhance_query,
-                            resolve_version_tag)
-from config import config
+from dsl_query_builder import (_DEFAULT_QUERY_SIZE, query_vulnerabilities,
+                               resolve_version_tag)
 from response_filter import (build_neglected_page_url, build_summary,
                              filter_vulnerabilities)
 
@@ -87,12 +86,15 @@ def _process_hits(
 ) -> list:
     """Process raw search hits into filtered, trimmed result entries.
 
-    Each hit represents a distinct project+tag from the latest scan index.
-    Filtering is applied at the vulnerability level (severity, exclusion status)
-    and results are trimmed to essential fields to reduce payload size.
+    Each hit represents a distinct project from the latest scan index.
+    The DSL query uses ``collapse`` on ``project.name`` to return only
+    the most recent scan document per project, so no application-level
+    deduplication is needed. Filtering is applied at the vulnerability
+    level (severity, exclusion status) and results are trimmed to
+    essential fields to reduce payload size.
 
     Args:
-        hits: Raw hit list from the agentic search response.
+        hits: Hit list from the DSL query response (already deduplicated via collapse).
         severity: Set of severity levels to retain, or ``None`` for all.
         request_id: Short request ID for log correlation.
 
@@ -124,11 +126,10 @@ def _process_hits(
 
 
 def handle_query_vulnerabilities(params: Dict[str, Any], request_id: str) -> Dict[str, Any]:
-    """Handle query_vulnerabilities requests via agentic search.
+    """Handle query_vulnerabilities requests via direct DSL query.
 
-    Extracts query parameters, enhances the NL query with version/project
-    context, executes agentic search through the configured pipeline, and
-    post-processes results with severity/exclusion/age filtering.
+    Extracts query parameters, executes a structured DSL query against the
+    scans index, and post-processes results with severity/exclusion/age filtering.
 
     Args:
         params: Parameters dict containing:
@@ -148,6 +149,20 @@ def handle_query_vulnerabilities(params: Dict[str, Any], request_id: str) -> Dic
     severity = _parse_severity(params.get('severity'))
     age_days = _parse_age_days(params.get('age_days'))
 
+    # Require at least one of version or project_name to scope the query
+    if not version and not project_name:
+        logger.warning(f"[{request_id}] Missing required parameter: neither version nor project_name provided")
+        return {
+            'status': 'error',
+            'type': 'missing_parameter',
+            'retryable': False,
+            'message': (
+                'Please provide at least one of "version" or "project_name" '
+                'to scope the vulnerability query. '
+                'For example: version="2.19" or project_name="OpenSearch".'
+            ),
+        }
+
     logger.info(
         f"[{request_id}] QUERY_VULNERABILITIES: query='{query}', "
         f"version={version}, project_name={project_name}, "
@@ -163,32 +178,20 @@ def handle_query_vulnerabilities(params: Dict[str, Any], request_id: str) -> Dic
                 f"[{request_id}] TAG_RESOLVED: '{version}' -> '{resolved_tag}'"
             )
 
-    # Enhance the NL query with resolved tag/project context
-    enhanced_query = enhance_query(
-        query, version=version, resolved_tag=resolved_tag, project_name=project_name,
-    )
-    logger.info(f"[{request_id}] Enhanced query: '{enhanced_query}'")
+    # Execute DSL query
+    response = query_vulnerabilities(version=version, project_name=project_name)
 
-    # Execute agentic search
-    try:
-        response = agentic_search(config.agentic_pipeline, enhanced_query)
-    except AgenticSearchError as e:
-        logger.error(f"[{request_id}] SECURITY_ADVISORIES_AGENTIC_SEARCH_FAILED: {e}")
-        return {
-            'status': 'error',
-            'type': 'agentic_search_error',
-            'retryable': False,
-            'message': (
-                'The search agent could not process the query. '
-                'Try rephrasing the question.'
-            ),
-        }
+    # Check for error response
+    if response.get('status') == 'error':
+        logger.error(f"[{request_id}] SECURITY_ADVISORIES_DSL_QUERY_FAILED: {response.get('message')}")
+        return response
 
-    # Extract hits
-    hits = response.get('hits', {}).get('hits', [])
+    # Extract hits and total count
+    hits_envelope = response.get('hits', {})
+    hits = hits_envelope.get('hits', [])
 
     if not hits:
-        logger.info(f"[{request_id}] No hits returned from agentic search")
+        logger.info(f"[{request_id}] No hits returned from DSL query")
         return {
             'status': 'success',
             'message': 'No results found for the given query. Try broadening or rephrasing your search.',
@@ -196,10 +199,31 @@ def handle_query_vulnerabilities(params: Dict[str, Any], request_id: str) -> Dic
             'result_count': 0,
         }
 
+    total_value = hits_envelope['total']['value']
+
+    # Log collapse deduplication stats (total is pre-collapse, hits is post-collapse)
+    collapsed_count = total_value - len(hits)
+    if collapsed_count > 0:
+        logger.info(
+            f"[{request_id}] COLLAPSE: {total_value} total matches -> "
+            f"{len(hits)} after collapse (removed {collapsed_count} duplicate(s))",
+        )
+
+    # With collapse, total_value > len(hits) is normal (duplicates removed).
+    # True truncation only occurs when the collapsed result count hits the
+    # query size limit, meaning there may be more unique projects than returned.
+    results_truncated = len(hits) >= _DEFAULT_QUERY_SIZE
+
     # Process each scan document hit
     results = _process_hits(hits, severity, request_id)
 
     logger.info(f"[{request_id}] Returning {len(results)} result entries")
+
+    if results_truncated:
+        logger.info(
+            f"[{request_id}] Results truncated: returned {len(hits)} "
+            f"collapsed results (hit size limit of {_DEFAULT_QUERY_SIZE})",
+        )
 
     # Build neglected page URL derived from available action-group parameters
     neglected_url = build_neglected_page_url(
@@ -209,9 +233,20 @@ def handle_query_vulnerabilities(params: Dict[str, Any], request_id: str) -> Dic
         tag=resolved_tag or version,
     )
 
-    return {
+    result = {
         'status': 'success',
         'result_count': len(results),
+        'total_matching_documents': total_value,
+        'results_truncated': results_truncated,
         'results': results,
         'neglected_page_url': neglected_url,
     }
+
+    if results_truncated:
+        result['truncation_message'] = (
+            f"Showing {len(results)} unique projects (query size limit reached). "
+            "Results may be incomplete — consider narrowing your query with "
+            "additional filters (e.g. project_name, version, or severity)."
+        )
+
+    return result

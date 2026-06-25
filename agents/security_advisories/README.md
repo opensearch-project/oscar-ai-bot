@@ -1,6 +1,6 @@
 # Security Advisories Agent
 
-The Security Advisories agent gives OSCAR the ability to query CVEs and security vulnerabilities affecting OpenSearch project components through Slack. It connects to a cross-account OpenSearch cluster via STS AssumeRole and AWS SigV4 authentication, using OpenSearch Agentic Search to translate natural language queries into DSL.
+The Security Advisories agent gives OSCAR the ability to query CVEs and security vulnerabilities affecting OpenSearch project components through Slack. It connects to a cross-account OpenSearch cluster via STS AssumeRole and AWS SigV4 authentication, using direct DSL query construction to retrieve vulnerability scan data.
 
 ## Architecture
 
@@ -16,13 +16,11 @@ Security Advisories Agent
     ▼
 Security Advisories Lambda
     ├─ Projects Handler (aggregation-based project/tag discovery)
-    ├─ Query Enhancer (appends version + project context to NL query)
-    ├─ Agentic Search Client (GET /_search?search_pipeline=...)
+    ├─ DSL Query Builder (constructs bool/filter queries from structured parameters)
     │       │
     │       ▼
     │   OpenSearch Cluster
-    │       ├─ Flow Agent (translates NL → DSL via QueryPlanningTool)
-    │       └─ Returns hits + generated DSL
+    │       └─ Returns hits from scans index
     │       │
     ├─ Response Filter (severity, exclusion, age filtering)
     └─ Summary Builder (severity count aggregation)
@@ -31,17 +29,17 @@ Security Advisories Lambda
 ## How It Works
 
 1. **Cross-Account Access** — The Lambda assumes a role in the OpenSearch account using STS, then signs requests with SigV4.
-2. **Query Enhancement** — The version and project name (if provided) are appended to the natural language query for context.
-3. **Agentic Search** — The enhanced query is sent to OpenSearch with a search pipeline parameter. The flow agent on the cluster translates the natural language to DSL and executes the query.
+2. **DSL Query Construction** — The version and project name parameters (if provided) are used to construct a bool/filter query directly. Version strings are resolved to canonical tag format via `resolve_version_tag()`, and the query targets the latest scans index.
+3. **Query Execution** — The DSL query is sent to the scans index via `opensearch_request()` with SigV4 authentication.
 4. **Post-Query Filtering** — Results are filtered by severity level, exclusion status, and scan age at the application layer (these array-level filters can't be efficiently done in OpenSearch DSL).
 
-**Project Discovery** — The `list_projects` function uses terms aggregations to enumerate available projects and their tags without agentic search. This is especially useful when queries reference relative terms like "latest release" or "most recent version" — the agent calls `list_projects` first to resolve the concrete version before querying vulnerabilities.
+**Project Discovery** — The `list_projects` function uses terms aggregations to enumerate available projects and their tags without querying scan documents. This is especially useful when queries reference relative terms like "latest release" or "most recent version" — the agent calls `list_projects` first to resolve the concrete version before querying vulnerabilities.
 
 ## Bedrock Functions
 
 | Function | Description |
 |----------|-------------|
-| `query_vulnerabilities` | Query CVEs using natural language via the agentic pipeline |
+| `query_vulnerabilities` | Query CVEs using direct DSL construction scoped by version and/or project name |
 | `list_projects` | List available components and their tags/versions |
 
 ### query_vulnerabilities
@@ -79,70 +77,6 @@ Scan results are stored per project/tag/hash combination. Each scan document con
 | `timestamp.scan` | When the scan ran (epoch milliseconds) |
 | `timestamp.commit` | Commit timestamp (epoch milliseconds) |
 
-## Agentic Pipeline Prerequisites
-
-Before the Security Advisories agent can use agentic search, the OpenSearch cluster must have the following configured:
-
-### 1. ML Model Registration
-
-Register an LLM model in the OpenSearch ML framework that the flow agent will use for query translation:
-
-```bash
-POST /_plugins/_ml/models/_register
-{
-  "name": "query-planning-model",
-  "function_name": "remote",
-  "connector_id": "<your-connector-id>"
-}
-```
-
-### 2. Flow Agent Creation
-
-Create a flow agent with QueryPlanningTool configured for the scans index:
-
-```bash
-POST /_plugins/_ml/agents/_register
-{
-  "name": "oscar-agent",
-  "type": "flow",
-  "tools": [
-    {
-      "type": "QueryPlanningTool",
-      "parameters": {
-        "model_id": "<registered-model-id>"
-      }
-    }
-  ]
-}
-```
-
-### 3. Agentic Search Pipeline Creation
-
-Create a search pipeline with `agentic_query_translator` request processor and `agentic_context` response processor:
-
-```bash
-PUT /_search/pipeline/oscar-agentic-pipeline
-{
-  "request_processors": [
-    {
-      "agentic_query_translator": {
-        "agent_id": "<oscar-agent-id>"
-      }
-    }
-  ],
-  "response_processors": [
-    {
-      "agentic_context": {
-        "agent_steps_summary": true,
-        "dsl_query": true
-      }
-    }
-  ]
-}
-```
-
-This pipeline is used for the scans index.
-
 ## IAM Permissions
 
 The Lambda needs to assume a role in the OpenSearch account. That role must:
@@ -171,23 +105,57 @@ The cross-account role needs the following permissions on the OpenSearch domain:
 ```
 
 Required permissions:
-- `es:ESHttpGet` — For `/_search` requests with `search_pipeline` parameter
+- `es:ESHttpGet` — For `/_search` requests
 - `es:ESHttpPost` — For aggregation queries (project discovery)
 
 The Lambda's execution role also needs STS AssumeRole permission to assume the cross-account role. Store the role ARN in the `SECURITY_ADVISORIES_CROSS_ACCOUNT_ROLE_ARN` environment variable (set via `.env` / CDK).
 
-## Example Agentic Search Requests/Responses
+## Example DSL Query Requests/Responses
 
-### Query Vulnerabilities
+### Query Vulnerabilities (with version and project name)
 
 Request:
 ```
-GET /scans/_search?search_pipeline=oscar-agentic-pipeline
+GET /scans-000164/_search
 {
+  "size": 100,
   "query": {
-    "agentic": {
-      "query_text": "Show me critical CVEs for Dashboards version 2.2.0"
+    "bool": {
+      "filter": [
+        {"term": {"project.tag": "2.2.0"}},
+        {"term": {"project.name": "OpenSearch Dashboards"}}
+      ]
     }
+  }
+}
+```
+
+### Query Vulnerabilities (version only)
+
+Request:
+```
+GET /scans-000164/_search
+{
+  "size": 100,
+  "query": {
+    "bool": {
+      "filter": [
+        {"term": {"project.tag": "origin/3.7"}}
+      ]
+    }
+  }
+}
+```
+
+### Query Vulnerabilities (no filters — match all)
+
+Request:
+```
+GET /scans-000164/_search
+{
+  "size": 100,
+  "query": {
+    "match_all": {}
   }
 }
 ```
@@ -212,11 +180,11 @@ POST /scans/_search
 }
 ```
 
-### Response Format (Agentic Search)
+### Response Format (DSL Query)
 
 ```json
 {
-  "took": 1419,
+  "took": 42,
   "timed_out": false,
   "_shards": {"total": 5, "successful": 5, "skipped": 0, "failed": 0},
   "hits": {
@@ -224,54 +192,38 @@ POST /scans/_search
     "max_score": 0,
     "hits": [
       {
-        "_index": "scans",
+        "_index": "scans-000164",
         "_id": "<document-id>",
         "_score": 0,
         "_source": {
           "project": {
             "repo": "<repo-url>",
-            "name": "<project-name>",
-            "tag": "<release-version>",
+            "name": "OpenSearch Dashboards",
+            "tag": "2.2.0",
             "hash": "<commit-hash>"
           },
           "vulnerabilities": [
             {
-              "id": "<cve-id>",
-              "aliases": ["<cve-id>", "<ghsa-id>"],
-              "title": ["<advisory description>"],
+              "id": "CVE-2020-36604",
+              "aliases": ["CVE-2020-36604", "GHSA-2r2c-g63r-vccr"],
+              "title": ["hoek Prototype Pollution vulnerability"],
               "severity": "CRITICAL",
               "package": {
-                "name": "<package-name>",
-                "version": "<package-version>",
-                "purl": "pkg:npm/<package-name>@<package-version>",
+                "name": "hoek",
+                "version": "4.2.1",
+                "purl": "pkg:npm/hoek@4.2.1",
                 "ecosystem": "npm"
               }
             }
           ],
           "count": {"severe": 11, "minor": 16},
-          "timestamp": {"scan": "<epoch-ms>", "commit": "<epoch-ms>"}
+          "timestamp": {"scan": "1719273600000", "commit": "1719187200000"}
         }
       }
     ]
-  },
-  "ext": {
-    "dsl_query": {
-      "size": 10,
-      "query": {
-        "bool": {
-          "filter": [
-            {"term": {"project.name": "<project-name>"}},
-            {"term": {"project.tag": "<release-version"}},
-            {"nested": {"path": "vulnerabilities", "query": {"match_all": {}}}}
-          ]
-        }
-      }
-    }
   }
 }
 ```
-
-The `ext.dsl_query` field contains the DSL query generated by the flow agent, useful for debugging query translation issues.
 
 ## Environment Variables
 
@@ -304,7 +256,6 @@ These are passed through from `.env` to the Lambda as environment variables. All
 | `OPENSEARCH_REGION` | AWS region of the OpenSearch cluster | `us-east-1` |
 | `OPENSEARCH_SERVICE` | AWS service name for SigV4 signing | `es` |
 | `OPENSEARCH_REQUEST_TIMEOUT` | Request timeout in seconds | `60` |
-| `AGENTIC_PIPELINE` | Agentic search pipeline name | `oscar-agentic-pipeline` |
 | `SECURITY_ADVISORIES_CROSS_ACCOUNT_ROLE_ARN` | IAM role ARN for cross-account OpenSearch access | _(none)_ |
 
 ## Monitoring
@@ -313,11 +264,6 @@ The agent configures CloudWatch alarms for the following log patterns:
 
 | Pattern | Threshold | Description |
 |---------|-----------|-------------|
-| `SECURITY_ADVISORIES_AGENTIC_SEARCH_FAILED` | 5 occurrences | OpenSearch agentic query failures |
+| `SECURITY_ADVISORIES_DSL_QUERY_FAILED` | 5 occurrences | OpenSearch DSL query failures |
 | `SECURITY_ADVISORIES_OPENSEARCH_CONNECTION_FAILED` | 2 occurrences | OpenSearch connectivity issues |
 | `SECURITY_ADVISORIES_CROSS_ACCOUNT_ROLE_FAILED` | 1 occurrence | Cross-account role assumption failure |
-
-## Notes
-
-- If the agentic pipeline fails, the Lambda returns an error to the Bedrock agent rather than falling back to a raw DSL query.
-- The flow agent is stateless (single-pass) — conversational continuity is handled by the Bedrock session, not OpenSearch.
