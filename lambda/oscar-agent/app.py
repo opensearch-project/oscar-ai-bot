@@ -104,14 +104,21 @@ def lambda_handler(event: Dict[str, Any], context: Optional[object]) -> Dict[str
         logger.info("Processing async Slack event with OSCAR agent")
         return process_slack_event(event['detail'], context)
 
+    # Identity slash commands are lightweight (DynamoDB only) and must be handled
+    # synchronously so ack() and respond() work within Slack's 3-second deadline.
+    raw_body = event.get('body', '') or ''
+    _SYNC_COMMANDS = ('oscar-link-github', 'oscar-unlink-github', 'oscar-identity-status')
+    if any(cmd in raw_body for cmd in _SYNC_COMMANDS):
+        logger.info("Routing identity slash command synchronously")
+        return process_slack_event(event, context)
+
     # Extract event body for processing
     body = None
-    if event.get('body') and event['body'].strip():  # Check if body exists and is not empty/whitespace
+    if raw_body.strip():
         try:
-            body = json.loads(event['body']) if isinstance(event['body'], str) else event['body']
+            body = json.loads(raw_body) if isinstance(raw_body, str) else raw_body
         except (json.JSONDecodeError, TypeError) as e:
-            logger.warning(f"Failed to parse event body as JSON: {e}. Body: {event.get('body')[:100]}...")
-            # For slash commands and other non-JSON payloads, continue without body parsing
+            logger.warning(f"Failed to parse event body as JSON: {e}. Body: {raw_body[:100]}...")
             body = None
 
     # Handle Slack URL verification challenge immediately

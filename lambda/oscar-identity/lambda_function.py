@@ -241,7 +241,7 @@ def _handle_validation():
                         ExpressionAttributeValues={
                             ":status": "expired",
                             ":ts": now,
-                            ":reason": "not_in_monitored_channel",
+                            ":reason": "member_is_not_in_the_channel",
                             ":active": "active",
                         },
                     )

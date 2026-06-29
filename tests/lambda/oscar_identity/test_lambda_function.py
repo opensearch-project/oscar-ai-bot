@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """Tests for the identity OAuth callback Lambda."""
 
+import importlib
 import json
 import os
 import sys
@@ -9,8 +10,9 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-# Add Lambda source path
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', '..', 'lambda', 'oscar-identity'))
+# Add Lambda source path so oauth_state can be found
+_IDENTITY_LAMBDA_DIR = os.path.join(os.path.dirname(__file__), '..', '..', '..', 'lambda', 'oscar-identity')
+sys.path.insert(0, _IDENTITY_LAMBDA_DIR)
 
 # Set required env vars before import
 os.environ.setdefault("IDENTITY_TABLE_PREFIX", "oscar-identity")
@@ -46,10 +48,28 @@ def setup_env(monkeypatch):
 @pytest.fixture(autouse=True)
 def clear_module_cache():
     """Ensure lambda_function is reimported fresh each test."""
+    for mod in list(sys.modules.keys()):
+        if "lambda_function" in mod or "oauth_state" in mod:
+            del sys.modules[mod]
     yield
+    for mod in list(sys.modules.keys()):
+        if "lambda_function" in mod or "oauth_state" in mod:
+            del sys.modules[mod]
+
+
+def _load_identity_lambda():
+    """Load the oscar-identity lambda_function module by file path."""
     for mod in list(sys.modules.keys()):
         if "lambda_function" in mod:
             del sys.modules[mod]
+    spec = importlib.util.spec_from_file_location(
+        "lambda_function",
+        os.path.join(_IDENTITY_LAMBDA_DIR, "lambda_function.py"),
+    )
+    mod = importlib.util.module_from_spec(spec)
+    sys.modules["lambda_function"] = mod
+    spec.loader.exec_module(mod)
+    return mod
 
 
 def _invoke(event):
@@ -66,7 +86,7 @@ def _invoke(event):
         }
         mock_client.return_value = mock_secrets
 
-        import lambda_function
+        lambda_function = _load_identity_lambda()
         lambda_function._oauth_creds = None
 
         return lambda_function.lambda_handler(event, None), mock_table, lambda_function
@@ -131,7 +151,7 @@ class TestOAuthFlow:
             }
             mock_client.return_value = mock_secrets
 
-            import lambda_function
+            lambda_function = _load_identity_lambda()
             lambda_function._oauth_creds = None
             result = lambda_function.lambda_handler(
                 {"queryStringParameters": {"code": "valid", "state": state}}, None
@@ -170,7 +190,7 @@ class TestOAuthFlow:
             }
             mock_client.return_value = mock_secrets
 
-            import lambda_function
+            lambda_function = _load_identity_lambda()
             lambda_function._oauth_creds = None
             result = lambda_function.lambda_handler(
                 {"queryStringParameters": {"code": "valid", "state": state}}, None
@@ -198,7 +218,7 @@ class TestOAuthFlow:
             }
             mock_client.return_value = mock_secrets
 
-            import lambda_function
+            lambda_function = _load_identity_lambda()
             lambda_function._oauth_creds = None
             result = lambda_function.lambda_handler(
                 {"queryStringParameters": {"code": "expired", "state": state}}, None
@@ -237,7 +257,7 @@ class TestWeeklyValidation:
             }
             mock_client.return_value = mock_secrets
 
-            import lambda_function
+            lambda_function = _load_identity_lambda()
             lambda_function._oauth_creds = None
             result = lambda_function.lambda_handler(
                 {"source": "aws.events"}, None
@@ -272,7 +292,7 @@ class TestWeeklyValidation:
             }
             mock_client.return_value = mock_secrets
 
-            import lambda_function
+            lambda_function = _load_identity_lambda()
             lambda_function._oauth_creds = None
             result = lambda_function.lambda_handler(
                 {"source": "aws.events"}, None
@@ -294,7 +314,7 @@ class TestWeeklyValidation:
             }
             mock_client.return_value = mock_secrets
 
-            import lambda_function
+            lambda_function = _load_identity_lambda()
             lambda_function._oauth_creds = None
             result = lambda_function.lambda_handler(
                 {"source": "aws.events"}, None
