@@ -47,7 +47,8 @@ def _privileged_action_group(
                             type="string",
                             description=(
                                 "OpenSearch version or branch to scope the query. "
-                                "Valid values: a three-part version (e.g., '2.19.6', '3.0.0'), "
+                                "Valid values: a three-part version (e.g., '2.19.6', '3.0.0') "
+                                "which resolves to its branch (origin/major.minor), "
                                 "a two-part branch version (e.g., '3.7', '2.19'), "
                                 "'main', "
                                 "or an origin-prefixed tag (e.g., 'origin/2.19'). "

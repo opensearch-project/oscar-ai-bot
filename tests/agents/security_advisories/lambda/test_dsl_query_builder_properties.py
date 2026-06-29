@@ -119,20 +119,21 @@ class TestVersionTagResolutionCorrectness:
 
     @given(version=three_part_versions)
     @settings(max_examples=100)
-    def test_three_part_semver_passes_through_unchanged(self, version):
-        """Three-part valid semver versions pass through unchanged.
+    def test_three_part_semver_maps_to_origin_major_minor(self, version):
+        """Three-part valid semver versions map to origin/{major}.{minor}.
 
         **Validates: Requirements 5.3**
         """
         # Only test versions that are actually valid semver
         try:
-            semver.Version.parse(version)
+            parsed = semver.Version.parse(version)
         except ValueError:
             return
 
         result = resolve_version_tag(version)
-        assert result == version, (
-            f'Three-part semver "{version}" should pass through unchanged, got "{result}"'
+        expected = f'origin/{parsed.major}.{parsed.minor}'
+        assert result == expected, (
+            f'Three-part semver "{version}" should map to "{expected}", got "{result}"'
         )
 
     @given(version=main_latest_variants)

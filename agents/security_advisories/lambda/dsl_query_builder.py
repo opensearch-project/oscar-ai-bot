@@ -65,7 +65,7 @@ def resolve_version_tag(version: str) -> str:
       - Already prefixed with ``"origin/"`` → returned as-is
       - ``"main"`` or ``"latest"`` → ``"origin/main"``
       - Two-part version (e.g., ``"3.7"``) → ``"origin/3.7"`` (branch tag)
-      - Three-part version (e.g., ``"3.7.0"``, ``"2.19.6"``) → returned as-is (release tag)
+      - Three-part version (e.g., ``"3.7.0"``, ``"2.19.6"``) → ``"origin/3.7"``, ``"origin/2.19"`` (branch tag)
       - Non-parseable input → returned as-is (for exact tag lookups)
 
     Args:
@@ -86,8 +86,10 @@ def resolve_version_tag(version: str) -> str:
             logger.info(f"RESOLVE_TAG: '{version}' -> '{resolved}'")
             return resolved
         case 'three_part':
-            logger.info(f"RESOLVE_TAG: '{version}' is a valid semver version, using as-is")
-            return version
+            parsed = semver.Version.parse(version)
+            resolved = f'origin/{parsed.major}.{parsed.minor}'
+            logger.info(f"RESOLVE_TAG: '{version}' -> '{resolved}' (extracted major.minor)")
+            return resolved
         case 'two_part':
             resolved = f'origin/{version}'
             logger.info(f"RESOLVE_TAG: '{version}' -> '{resolved}'")
