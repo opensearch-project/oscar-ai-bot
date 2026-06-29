@@ -267,8 +267,8 @@ class TestDSLQueryStructure:
         assert 'bool' in body['query']
         filters = body['query']['bool']['filter']
         assert len(filters) == 2
-        # Three-part semver passes through unchanged
-        assert {'term': {'project.tag': '2.19.6'}} in filters
+        # Three-part semver resolves to origin/major.minor
+        assert {'term': {'project.tag': 'origin/2.19'}} in filters
         assert {'term': {'project.name': 'OpenSearch'}} in filters
 
     def test_query_targets_correct_index(self):

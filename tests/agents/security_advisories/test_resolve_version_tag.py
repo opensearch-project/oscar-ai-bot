@@ -48,15 +48,15 @@ def _load_dsl_query_builder():
 
 
 class TestResolveVersionTagSemver:
-    """Numeric versions are returned as-is for exact release tag lookups."""
+    """Numeric versions resolve to origin/major.minor branch tags."""
 
     def test_three_part_version(self):
         mod = _load_dsl_query_builder()
-        assert mod.resolve_version_tag('3.7.0') == '3.7.0'
+        assert mod.resolve_version_tag('3.7.0') == 'origin/3.7'
 
     def test_three_part_version_with_patch(self):
         mod = _load_dsl_query_builder()
-        assert mod.resolve_version_tag('2.19.6') == '2.19.6'
+        assert mod.resolve_version_tag('2.19.6') == 'origin/2.19'
 
     def test_four_part_version(self):
         """Four-part versions are not a valid user input — treated as non-parseable."""
@@ -70,7 +70,7 @@ class TestResolveVersionTagSemver:
 
     def test_major_zero(self):
         mod = _load_dsl_query_builder()
-        assert mod.resolve_version_tag('0.9.0') == '0.9.0'
+        assert mod.resolve_version_tag('0.9.0') == 'origin/0.9'
 
 
 # ---------------------------------------------------------------------------
