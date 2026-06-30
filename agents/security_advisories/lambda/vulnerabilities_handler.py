@@ -15,8 +15,8 @@ Functions:
 import logging
 from typing import Any, Dict, Optional, Set
 
-from dsl_query_builder import (_DEFAULT_QUERY_SIZE, query_vulnerabilities,
-                               resolve_version_tag)
+from dsl_query_builder import (_DEFAULT_QUERY_SIZE, query_advisories,
+                               query_vulnerabilities, resolve_version_tag)
 from response_filter import (build_neglected_page_url, build_summary,
                              filter_vulnerabilities)
 
@@ -82,21 +82,29 @@ def _map_age_days_to_age(age_days: Optional[int]) -> Optional[str]:
 
 
 def _process_hits(
-    hits: list, severity: Optional[Set[str]], request_id: str,
+    hits: list,
+    request_id: str,
+    allowed_cve_ids: Optional[Set[str]] = None,
 ) -> list:
     """Process raw search hits into filtered, trimmed result entries.
 
     Each hit represents a distinct project from the latest scan index.
     The DSL query uses ``collapse`` on ``project.name`` to return only
     the most recent scan document per project, so no application-level
-    deduplication is needed. Filtering is applied at the vulnerability
-    level (severity, exclusion status) and results are trimmed to
-    essential fields to reduce payload size.
+    deduplication is needed.
+
+    When ``allowed_cve_ids`` is provided (from the advisories index query),
+    only vulnerabilities whose ID is in that set are retained. This handles
+    both severity and age filtering via a single allowlist.
+
+    When ``allowed_cve_ids`` is None (no severity or age filter), only
+    exclusion filtering is applied (removing excluded CVEs).
 
     Args:
         hits: Hit list from the DSL query response (already deduplicated via collapse).
-        severity: Set of severity levels to retain, or ``None`` for all.
         request_id: Short request ID for log correlation.
+        allowed_cve_ids: If provided, only retain vulnerabilities whose ID is in
+            this set. Used when severity and/or age filtering is active.
 
     Returns:
         List of structured result dicts ready for the response payload.
@@ -108,20 +116,44 @@ def _process_hits(
         timestamp = source.get('timestamp', {})
 
         raw_vulns = source.get('vulnerabilities', [])
-        filtered_vulns = filter_vulnerabilities(raw_vulns, severity=severity)
+
+        if allowed_cve_ids is not None:
+            # Advisories-based filtering: keep only non-excluded CVEs in the allowlist
+            filtered_vulns = filter_vulnerabilities(raw_vulns, severity=None)
+            pre_allowlist_count = len(filtered_vulns)
+            filtered_vulns = [
+                v for v in filtered_vulns if v.get('id') in allowed_cve_ids
+            ]
+            if pre_allowlist_count > 0 or len(filtered_vulns) > 0:
+                logger.info(
+                    f"[{request_id}] PROCESS_HITS: project={project.get('name')}, "
+                    f"raw={len(raw_vulns)}, after_exclusion_filter={pre_allowlist_count}, "
+                    f"after_advisories_filter={len(filtered_vulns)}",
+                )
+        else:
+            # No severity/age filter — just remove excluded CVEs
+            filtered_vulns = filter_vulnerabilities(raw_vulns, severity=None)
+
         trimmed_vulns = [
             {k: v for k, v in vuln.items() if k in _VULN_SUMMARY_FIELDS}
             for vuln in filtered_vulns
         ]
 
-        results.append({
+        entry = {
             'project': project,
             'timestamp': timestamp,
-            'total_count': source.get('count', {}),
             'filtered_vulnerabilities': trimmed_vulns,
             'filtered_count': len(trimmed_vulns),
             'severity_summary': build_summary(filtered_vulns),
-        })
+        }
+
+        # Only include total_count when advisories filtering is NOT active.
+        # When filtering is active the total scan counts are misleading
+        # because they reflect the full scan, not the filtered subset.
+        if allowed_cve_ids is None:
+            entry['total_count'] = source.get('count', {})
+
+        results.append(entry)
     return results
 
 
@@ -131,13 +163,18 @@ def handle_query_vulnerabilities(params: Dict[str, Any], request_id: str) -> Dic
     Extracts query parameters, executes a structured DSL query against the
     scans index, and post-processes results with severity/exclusion/age filtering.
 
+    When ``age_days`` is provided, performs a secondary query against the
+    advisories index to identify CVEs whose ``timestamp.publish`` is older
+    than the specified threshold. Only those CVEs are retained in the results.
+
     Args:
         params: Parameters dict containing:
             - query (str): Natural language query (required).
             - version (str, optional): Version to scope the query.
             - project_name (str, optional): Project name to scope the query.
             - severity (str, optional): Comma-separated severity levels.
-            - age_days (str, optional): Max age in days for scan results.
+            - age_days (str, optional): Minimum age in days — only return CVEs
+              published at least this many days ago.
         request_id: Short request ID for log correlation.
 
     Returns:
@@ -200,8 +237,30 @@ def handle_query_vulnerabilities(params: Dict[str, Any], request_id: str) -> Dic
     # query size limit, meaning there may be more unique projects than returned.
     results_truncated = len(hits) >= _DEFAULT_QUERY_SIZE
 
+    # Advisories filtering: when severity or age_days is specified, query the
+    # advisories index to get the authoritative set of CVE IDs matching those
+    # criteria. This single allowlist replaces separate application-side filters.
+    allowed_cve_ids = None
+    if severity or age_days:
+        # Collect all CVE IDs across all scan hits
+        all_cve_ids = []
+        for hit in hits:
+            vulns = hit.get('_source', {}).get('vulnerabilities', [])
+            for vuln in vulns:
+                vuln_id = vuln.get('id')
+                if vuln_id:
+                    all_cve_ids.append(vuln_id)
+
+        if all_cve_ids:
+            allowed_cve_ids = query_advisories(all_cve_ids, age_days=age_days, severity=severity)
+            logger.info(
+                f"[{request_id}] ADVISORIES_FILTER: {len(allowed_cve_ids)} of "
+                f"{len(set(all_cve_ids))} unique CVE(s) match criteria "
+                f"(severity={severity}, age_days={age_days})",
+            )
+
     # Process each scan document hit
-    results = _process_hits(hits, severity, request_id)
+    results = _process_hits(hits, request_id, allowed_cve_ids=allowed_cve_ids)
 
     logger.info(f"[{request_id}] Returning {len(results)} result entries")
 
