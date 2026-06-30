@@ -75,9 +75,10 @@ def _privileged_action_group(
                         "age_days": bedrock.CfnAgent.ParameterDetailProperty(
                             type="integer",
                             description=(
-                                "Maximum age in days for scan results. Only return "
-                                "vulnerabilities from scans within this many days "
-                                "(e.g., 30 for the past month, 7 for the past week)"
+                                "Minimum age in days of CVE advisories to include. "
+                                "Only return CVEs published at least this many days ago "
+                                "(e.g., 60 for advisories older than 60 days, 14 for 2 weeks). "
+                                "Default to 60 for release preparation queries."
                             ),
                             required=False,
                         ),
