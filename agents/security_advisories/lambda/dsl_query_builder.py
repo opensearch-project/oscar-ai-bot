@@ -168,6 +168,9 @@ def _execute_query(index: str, query_body: str) -> Dict[str, Any]:
     """
     path = f'/{index}/_search'
 
+    logger.info(f'DSL_QUERY: GET {path}')
+    logger.info(f'DSL_QUERY: body={query_body}')
+
     result = opensearch_request('GET', path, body=query_body)
 
     # Log truncation warning when result count equals the configured size
