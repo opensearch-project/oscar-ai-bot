@@ -333,7 +333,10 @@ def query_advisories(
     """Query the advisories index to filter CVEs by age and/or severity.
 
     Constructs a bool/filter query that:
-      1. Matches advisory documents whose ``id`` is in the provided CVE ID list.
+      1. Matches advisory documents whose ``aliases`` field contains any of
+         the provided CVE IDs. This is more resilient than matching on ``id``
+         because advisory re-keying can change the ``id`` while ``aliases``
+         retains all known identifiers.
       2. Optionally filters to those with ``timestamp.publish`` older than the
          cutoff date (when ``age_days`` is provided).
       3. Optionally filters by severity level(s) (when ``severity`` is provided).
@@ -369,9 +372,10 @@ def query_advisories(
     # Batch the terms query to avoid hitting OpenSearch limits
     for i in range(0, len(unique_ids), _ADVISORIES_BATCH_SIZE):
         batch = unique_ids[i:i + _ADVISORIES_BATCH_SIZE]
+        batch_set = set(batch)
 
         filter_clauses: List[Dict[str, Any]] = [
-            {'terms': {'id': batch}},
+            {'terms': {'aliases': batch}},
         ]
 
         if cutoff_iso:
@@ -382,7 +386,7 @@ def query_advisories(
 
         query_body = json.dumps({
             'size': len(batch),
-            '_source': ['id'],
+            '_source': ['aliases'],
             'query': {
                 'bool': {
                     'filter': filter_clauses,
@@ -403,9 +407,10 @@ def query_advisories(
         hits = result.get('hits', {}).get('hits', [])
 
         for hit in hits:
-            advisory_id = hit.get('_source', {}).get('id')
-            if advisory_id:
-                matched_cve_ids.add(advisory_id)
+            aliases = hit.get('_source', {}).get('aliases', [])
+            for alias in aliases:
+                if alias in batch_set:
+                    matched_cve_ids.add(alias)
 
     logger.info(
         f'ADVISORIES_QUERY: Found {len(matched_cve_ids)} matching CVE(s)',
