@@ -117,22 +117,15 @@ def _process_hits(
 
         raw_vulns = source.get('vulnerabilities', [])
 
-        if allowed_cve_ids is not None:
-            # Advisories-based filtering: keep only non-excluded CVEs in the allowlist
-            filtered_vulns = filter_vulnerabilities(raw_vulns, severity=None)
-            pre_allowlist_count = len(filtered_vulns)
-            filtered_vulns = [
-                v for v in filtered_vulns if v.get('id') in allowed_cve_ids
-            ]
-            if pre_allowlist_count > 0 or len(filtered_vulns) > 0:
-                logger.info(
-                    f"[{request_id}] PROCESS_HITS: project={project.get('name')}, "
-                    f"raw={len(raw_vulns)}, after_exclusion_filter={pre_allowlist_count}, "
-                    f"after_advisories_filter={len(filtered_vulns)}",
-                )
-        else:
-            # No severity/age filter — just remove excluded CVEs
-            filtered_vulns = filter_vulnerabilities(raw_vulns, severity=None)
+        filtered_vulns = filter_vulnerabilities(
+            raw_vulns, allowed_cve_ids=allowed_cve_ids,
+        )
+
+        if allowed_cve_ids is not None and (len(raw_vulns) > 0 or len(filtered_vulns) > 0):
+            logger.info(
+                f"[{request_id}] PROCESS_HITS: project={project.get('name')}, "
+                f"raw={len(raw_vulns)}, after_filter={len(filtered_vulns)}",
+            )
 
         trimmed_vulns = [
             {k: v for k, v in vuln.items() if k in _VULN_SUMMARY_FIELDS}
