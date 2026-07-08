@@ -34,7 +34,7 @@ def _make_mock_dsl_query_builder():
     mock_mod = MagicMock()
     mock_mod.query_vulnerabilities = MagicMock(return_value={'hits': {'hits': []}})
     mock_mod.resolve_version_tag = MagicMock(side_effect=lambda v: v)
-    mock_mod.query_advisories = MagicMock(return_value=set())
+    mock_mod.query_advisories = MagicMock(return_value=(set(), False))
     mock_mod._DEFAULT_QUERY_SIZE = 1000
     return mock_mod
 
@@ -203,7 +203,7 @@ class TestSeverityFilteringIntegration:
             _make_vuln('CVE-003', 'MEDIUM'),
         ])
         mock_dsl.query_vulnerabilities.return_value = {'hits': {'total': {'value': 1}, 'hits': [hit]}}
-        mock_dsl.query_advisories.return_value = {'CVE-001'}
+        mock_dsl.query_advisories.return_value = ({'CVE-001'}, False)
         mod, _ = _load_vulnerabilities_handler(mock_dsl=mock_dsl)
 
         result = mod.handle_query_vulnerabilities(
@@ -225,7 +225,7 @@ class TestSeverityFilteringIntegration:
             _make_vuln('CVE-004', 'LOW'),
         ])
         mock_dsl.query_vulnerabilities.return_value = {'hits': {'total': {'value': 1}, 'hits': [hit]}}
-        mock_dsl.query_advisories.return_value = {'CVE-001', 'CVE-002'}
+        mock_dsl.query_advisories.return_value = ({'CVE-001', 'CVE-002'}, False)
         mod, _ = _load_vulnerabilities_handler(mock_dsl=mock_dsl)
 
         result = mod.handle_query_vulnerabilities(
@@ -266,7 +266,7 @@ class TestSeverityFilteringIntegration:
             _make_vuln('CVE-004', 'MEDIUM'),
         ])
         mock_dsl.query_vulnerabilities.return_value = {'hits': {'total': {'value': 1}, 'hits': [hit]}}
-        mock_dsl.query_advisories.return_value = {'CVE-001', 'CVE-002'}
+        mock_dsl.query_advisories.return_value = ({'CVE-001', 'CVE-002'}, False)
         mod, _ = _load_vulnerabilities_handler(mock_dsl=mock_dsl)
 
         result = mod.handle_query_vulnerabilities(
@@ -313,7 +313,7 @@ class TestAgeThresholdIntegration:
         ], scan_timestamp=old_ts)
         mock_dsl.query_vulnerabilities.return_value = {'hits': {'total': {'value': 1}, 'hits': [hit]}}
         # Only CVE-001 is old enough
-        mock_dsl.query_advisories.return_value = {'CVE-001'}
+        mock_dsl.query_advisories.return_value = ({'CVE-001'}, False)
         mod, _ = _load_vulnerabilities_handler(mock_dsl=mock_dsl)
 
         result = mod.handle_query_vulnerabilities(
@@ -331,7 +331,7 @@ class TestAgeThresholdIntegration:
             _make_vuln('CVE-001', 'HIGH'),
         ])
         mock_dsl.query_vulnerabilities.return_value = {'hits': {'total': {'value': 1}, 'hits': [hit]}}
-        mock_dsl.query_advisories.return_value = set()
+        mock_dsl.query_advisories.return_value = (set(), False)
         mod, _ = _load_vulnerabilities_handler(mock_dsl=mock_dsl)
 
         result = mod.handle_query_vulnerabilities(
@@ -348,7 +348,7 @@ class TestAgeThresholdIntegration:
             _make_vuln('CVE-001', 'HIGH'),
         ])
         mock_dsl.query_vulnerabilities.return_value = {'hits': {'total': {'value': 1}, 'hits': [hit]}}
-        mock_dsl.query_advisories.return_value = {'CVE-001'}
+        mock_dsl.query_advisories.return_value = ({'CVE-001'}, False)
         mod, _ = _load_vulnerabilities_handler(mock_dsl=mock_dsl)
 
         result = mod.handle_query_vulnerabilities(
@@ -403,7 +403,7 @@ class TestCombinedSeverityAndAge:
             'hits': {'total': {'value': 2}, 'hits': [hit_recent, hit_old]},
         }
         # Both CRITICAL CVEs are old enough
-        mock_dsl.query_advisories.return_value = {'CVE-001', 'CVE-004'}
+        mock_dsl.query_advisories.return_value = ({'CVE-001', 'CVE-004'}, False)
         mod, _ = _load_vulnerabilities_handler(mock_dsl=mock_dsl)
 
         result = mod.handle_query_vulnerabilities(
@@ -429,7 +429,7 @@ class TestCombinedSeverityAndAge:
             'hits': {'total': {'value': 1}, 'hits': [hit]},
         }
         # Only CVE-001 is old enough, CVE-002 is not
-        mock_dsl.query_advisories.return_value = {'CVE-001'}
+        mock_dsl.query_advisories.return_value = ({'CVE-001'}, False)
         mod, _ = _load_vulnerabilities_handler(mock_dsl=mock_dsl)
 
         result = mod.handle_query_vulnerabilities(

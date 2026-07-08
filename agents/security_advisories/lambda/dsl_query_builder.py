@@ -18,7 +18,7 @@ import json
 import logging
 import re
 from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, List, Optional, Set
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 import semver
 from aws_utils import get_latest_scans_index, opensearch_request
@@ -329,7 +329,7 @@ def query_advisories(
     cve_ids: List[str],
     age_days: Optional[int] = None,
     severity: Optional[Set[str]] = None,
-) -> Set[str]:
+) -> Tuple[Set[str], bool]:
     """Query the advisories index to filter CVEs by age and/or severity.
 
     Constructs a bool/filter query that:
@@ -352,10 +352,12 @@ def query_advisories(
             If None, no severity filter is applied.
 
     Returns:
-        A set of CVE IDs matching the specified criteria.
+        A tuple of (matched_cve_ids, is_partial) where matched_cve_ids is the
+        set of CVE IDs matching the specified criteria, and is_partial is True
+        if one or more query batches failed (meaning results may be incomplete).
     """
     if (not cve_ids) or (not age_days and not severity):
-        return set()
+        return set(), False
 
     # Calculate the cutoff date if age filtering is requested
     cutoff_iso = None
@@ -368,6 +370,7 @@ def query_advisories(
     unique_ids = list(set(cve_ids))
 
     matched_cve_ids: Set[str] = set()
+    is_partial = False
 
     # Batch the terms query to avoid hitting OpenSearch limits
     for i in range(0, len(unique_ids), _ADVISORIES_BATCH_SIZE):
@@ -401,8 +404,9 @@ def query_advisories(
             logger.error(
                 f'SECURITY_ADVISORIES_ADVISORIES_QUERY_FAILED: {error_msg}',
             )
-            # Return what we have so far rather than failing entirely
-            return matched_cve_ids
+            # Mark results as partial and continue with remaining batches
+            is_partial = True
+            continue
 
         hits = result.get('hits', {}).get('hits', [])
 
@@ -413,7 +417,8 @@ def query_advisories(
                     matched_cve_ids.add(alias)
 
     logger.info(
-        f'ADVISORIES_QUERY: Found {len(matched_cve_ids)} matching CVE(s)',
+        f'ADVISORIES_QUERY: Found {len(matched_cve_ids)} matching CVE(s)'
+        f'{" (partial results due to batch failure)" if is_partial else ""}',
     )
 
-    return matched_cve_ids
+    return matched_cve_ids, is_partial

@@ -241,6 +241,7 @@ def handle_query_vulnerabilities(params: Dict[str, Any], request_id: str) -> Dic
     # advisories index to get the authoritative set of CVE IDs matching those
     # criteria. This single allowlist replaces separate application-side filters.
     allowed_cve_ids = None
+    advisories_partial = False
     if severity or age_days:
         # Collect all CVE IDs across all scan hits
         all_cve_ids = []
@@ -252,7 +253,9 @@ def handle_query_vulnerabilities(params: Dict[str, Any], request_id: str) -> Dic
                     all_cve_ids.append(vuln_id)
 
         if all_cve_ids:
-            allowed_cve_ids = query_advisories(all_cve_ids, age_days=age_days, severity=severity)
+            allowed_cve_ids, advisories_partial = query_advisories(
+                all_cve_ids, age_days=age_days, severity=severity,
+            )
             logger.info(
                 f"[{request_id}] ADVISORIES_FILTER: {len(allowed_cve_ids)} of "
                 f"{len(set(all_cve_ids))} unique CVE(s) match criteria "
@@ -286,6 +289,12 @@ def handle_query_vulnerabilities(params: Dict[str, Any], request_id: str) -> Dic
         'results': results,
         'neglected_page_url': neglected_url,
     }
+
+    if advisories_partial:
+        result['advisory_filter_warning'] = (
+            "Some advisory lookups failed. The severity/age filter results "
+            "shown may be incomplete — some matching CVEs could be missing."
+        )
 
     if results_truncated:
         result['truncation_message'] = (
