@@ -92,7 +92,7 @@ def resolve_version_tag(version: str) -> str:
         case _:
             resolved = version
 
-    logger.debug(f"RESOLVE_TAG: '{version}' -> '{resolved}'")
+    logger.info(f"RESOLVE_TAG: '{version}' -> '{resolved}'")
     return resolved
 
 
