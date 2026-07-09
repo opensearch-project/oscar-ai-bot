@@ -173,13 +173,15 @@ def _execute_query(index: str, query_body: str) -> Dict[str, Any]:
 
     result = opensearch_request('GET', path, body=query_body)
 
-    # Log truncation warning when result count equals the configured size
-    hits = result.get('hits') if isinstance(result, dict) else None
-    documents = hits.get('hits', []) if isinstance(hits, dict) else []
-    if len(documents) == _DEFAULT_QUERY_SIZE:
+    # Log truncation warning when total hits exceed the returned count
+    hits = result.get('hits', {}) if isinstance(result, dict) else {}
+    total_hits = hits.get('total', {}).get('value', 0)
+    returned_count = len(hits.get('hits', []))
+    if total_hits > returned_count:
         logger.warning(
-            f'DSL_QUERY: results may be truncated — '
-            f'returned {_DEFAULT_QUERY_SIZE} documents (equals size limit of {_DEFAULT_QUERY_SIZE})',
+            f'DSL_QUERY: results truncated — '
+            f'returned {returned_count} of {total_hits} total hits '
+            f'(size limit: {_DEFAULT_QUERY_SIZE})',
         )
 
     return result

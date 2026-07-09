@@ -11,6 +11,7 @@ Validates: Requirements 1.4, 1.7, 3.2
 
 import importlib
 import json
+import logging
 import os
 import sys
 from unittest.mock import MagicMock, patch
@@ -515,3 +516,64 @@ class TestMalformedResponse:
         result = mod.query_vulnerabilities(version='3.7')
 
         assert 'status' not in result
+
+
+# ---------------------------------------------------------------------------
+# Test: Truncation warning logged when total hits exceed returned count
+# ---------------------------------------------------------------------------
+
+
+class TestTruncationWarning:
+    """Test that a warning is logged when results are truncated."""
+
+    def test_warning_logged_when_total_exceeds_returned(self, caplog):
+        """Validates: truncation warning uses hits.total.value."""
+        mock_response = {
+            'hits': {
+                'total': {'value': 2500, 'relation': 'eq'},
+                'hits': [{'_id': f'doc-{i}'} for i in range(1000)],
+            },
+        }
+        mod, _ = _load_dsl_query_builder(
+            mock_opensearch_request=mock_response,
+        )
+
+        with caplog.at_level(logging.WARNING):
+            mod.query_vulnerabilities(version='3.7')
+
+        assert any('results truncated' in record.message for record in caplog.records)
+        assert any('returned 1000 of 2500 total hits' in record.message for record in caplog.records)
+
+    def test_no_warning_when_all_results_returned(self, caplog):
+        """Validates: no warning when total equals returned count."""
+        mock_response = {
+            'hits': {
+                'total': {'value': 5, 'relation': 'eq'},
+                'hits': [{'_id': f'doc-{i}'} for i in range(5)],
+            },
+        }
+        mod, _ = _load_dsl_query_builder(
+            mock_opensearch_request=mock_response,
+        )
+
+        with caplog.at_level(logging.WARNING):
+            mod.query_vulnerabilities(version='3.7')
+
+        assert not any('truncated' in record.message for record in caplog.records)
+
+    def test_no_warning_when_zero_results(self, caplog):
+        """Validates: no warning when zero results."""
+        mock_response = {
+            'hits': {
+                'total': {'value': 0, 'relation': 'eq'},
+                'hits': [],
+            },
+        }
+        mod, _ = _load_dsl_query_builder(
+            mock_opensearch_request=mock_response,
+        )
+
+        with caplog.at_level(logging.WARNING):
+            mod.query_vulnerabilities(version='3.7')
+
+        assert not any('truncated' in record.message for record in caplog.records)
