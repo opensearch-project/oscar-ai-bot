@@ -236,6 +236,10 @@ def handle_query_vulnerabilities(params: Dict[str, Any], request_id: str) -> Dic
     allowed_cve_ids = None
     advisories_partial = False
     if severity or age_days:
+        # Initialize to empty set so the filter intent is preserved even when
+        # no CVE IDs are found across scan hits (avoids falling back to "no filter").
+        allowed_cve_ids = set()
+
         # Collect all CVE IDs across all scan hits
         all_cve_ids = []
         for hit in hits:

@@ -598,3 +598,32 @@ class TestPrivilegedResponseEnrichment:
 
         # Empty results return a message-style response
         assert result['status'] == 'success'
+
+    def test_severity_filter_with_empty_vulnerabilities_returns_zero_filtered(self):
+        """When severity is specified but scan hits have empty vulnerabilities arrays,
+        filtered_count should be 0 (not unfiltered passthrough)."""
+        hit_no_vulns = {
+            '_index': 'scans',
+            '_source': {
+                'project': {'name': 'OpenSearch', 'tag': '2.19.6'},
+                'vulnerabilities': [],
+                'count': {'severe': 0, 'minor': 0},
+                'timestamp': {'scan': '2024-01-15T10:30:00Z'},
+            },
+        }
+        mock_dsl = _make_mock_dsl_query_builder()
+        mock_dsl.query_vulnerabilities.return_value = {
+            'hits': {'total': {'value': 1}, 'hits': [hit_no_vulns]},
+        }
+        mod, _ = _load_vulnerabilities_handler(mock_dsl=mock_dsl)
+
+        result = mod.handle_query_vulnerabilities(
+            {'query': 'Show critical CVEs', 'severity': 'CRITICAL'}, 'test-048',
+        )
+
+        assert result['status'] == 'success'
+        assert result['result_count'] == 1
+        # The key assertion: with severity filter active but no CVEs in the scan,
+        # filtered_count must be 0 (not passthrough of all vulnerabilities).
+        assert result['results'][0]['filtered_count'] == 0
+        assert result['results'][0]['filtered_vulnerabilities'] == []
