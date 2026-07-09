@@ -175,6 +175,8 @@ def _execute_query(index: str, query_body: str) -> Dict[str, Any]:
 
     # Log truncation warning when total hits exceed the returned count
     hits = result.get('hits', {}) if isinstance(result, dict) else {}
+    if not isinstance(hits, dict):
+        hits = {}
     total_hits = hits.get('total', {}).get('value', 0)
     returned_count = len(hits.get('hits', []))
     if total_hits > returned_count:
