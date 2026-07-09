@@ -50,7 +50,7 @@ Security Advisories Lambda
 | `version` | No | Version to scope the query (e.g., "2.19.6", "3.0.0") |
 | `project_name` | No | Project name to scope the query (e.g., "OpenSearch Dashboards", "OpenSearch") |
 | `severity` | No | Comma-separated severity filter (e.g., "CRITICAL", "CRITICAL,HIGH"). Valid: CRITICAL, HIGH, MEDIUM, LOW |
-| `age_days` | No | Maximum age in days for scan results (e.g., 30 for the past month) |
+| `age_days` | No | Minimum age in days — only return CVEs that have been published for at least this many days (e.g., 60 for release preparation) |
 
 ### list_projects
 

@@ -11,6 +11,7 @@ Validates: Requirements 1.4, 1.7, 3.2
 
 import importlib
 import json
+import logging
 import os
 import sys
 from unittest.mock import MagicMock, patch
@@ -515,3 +516,470 @@ class TestMalformedResponse:
         result = mod.query_vulnerabilities(version='3.7')
 
         assert 'status' not in result
+
+
+# ---------------------------------------------------------------------------
+# Test: Truncation warning logged when total hits exceed returned count
+# ---------------------------------------------------------------------------
+
+
+class TestTruncationWarning:
+    """Test that a warning is logged when results are truncated."""
+
+    def test_warning_logged_when_total_exceeds_returned(self, caplog):
+        """Validates: truncation warning uses hits.total.value."""
+        mock_response = {
+            'hits': {
+                'total': {'value': 2500, 'relation': 'eq'},
+                'hits': [{'_id': f'doc-{i}'} for i in range(1000)],
+            },
+        }
+        mod, _ = _load_dsl_query_builder(
+            mock_opensearch_request=mock_response,
+        )
+
+        with caplog.at_level(logging.WARNING):
+            mod.query_vulnerabilities(version='3.7')
+
+        assert any('results truncated' in record.message for record in caplog.records)
+        assert any('returned 1000 of 2500 total hits' in record.message for record in caplog.records)
+
+    def test_no_warning_when_all_results_returned(self, caplog):
+        """Validates: no warning when total equals returned count."""
+        mock_response = {
+            'hits': {
+                'total': {'value': 5, 'relation': 'eq'},
+                'hits': [{'_id': f'doc-{i}'} for i in range(5)],
+            },
+        }
+        mod, _ = _load_dsl_query_builder(
+            mock_opensearch_request=mock_response,
+        )
+
+        with caplog.at_level(logging.WARNING):
+            mod.query_vulnerabilities(version='3.7')
+
+        assert not any('truncated' in record.message for record in caplog.records)
+
+    def test_no_warning_when_zero_results(self, caplog):
+        """Validates: no warning when zero results."""
+        mock_response = {
+            'hits': {
+                'total': {'value': 0, 'relation': 'eq'},
+                'hits': [],
+            },
+        }
+        mod, _ = _load_dsl_query_builder(
+            mock_opensearch_request=mock_response,
+        )
+
+        with caplog.at_level(logging.WARNING):
+            mod.query_vulnerabilities(version='3.7')
+
+        assert not any('truncated' in record.message for record in caplog.records)
+
+
+# ---------------------------------------------------------------------------
+# Test: query_advisories — aliases extraction, batching, partial results
+# ---------------------------------------------------------------------------
+
+
+class TestQueryAdvisoriesBasicBehavior:
+    """Test query_advisories early-return conditions and basic behavior."""
+
+    def test_empty_cve_ids_returns_empty_set(self):
+        """Empty input list returns empty set immediately without querying."""
+        mod, mock_aws = _load_dsl_query_builder()
+
+        result, is_partial = mod.query_advisories(cve_ids=[], age_days=30)
+
+        assert result == set()
+        assert is_partial is False
+        # No query should have been made
+        mock_aws.opensearch_request.assert_not_called()
+
+    def test_no_filter_criteria_returns_empty_set(self):
+        """When neither age_days nor severity is provided, returns empty set."""
+        mod, mock_aws = _load_dsl_query_builder()
+
+        result, is_partial = mod.query_advisories(
+            cve_ids=['CVE-2024-0001'],
+            age_days=None,
+            severity=None,
+        )
+
+        assert result == set()
+        assert is_partial is False
+        mock_aws.opensearch_request.assert_not_called()
+
+    def test_zero_age_days_no_severity_returns_empty_set(self):
+        """age_days=0 is falsy, so without severity, returns empty set."""
+        mod, mock_aws = _load_dsl_query_builder()
+
+        result, is_partial = mod.query_advisories(
+            cve_ids=['CVE-2024-0001'],
+            age_days=0,
+            severity=None,
+        )
+
+        assert result == set()
+        assert is_partial is False
+        mock_aws.opensearch_request.assert_not_called()
+
+
+class TestQueryAdvisoriesAliasesExtraction:
+    """Test that aliases from hits are correctly matched to input CVE IDs."""
+
+    def test_single_cve_matched_via_aliases(self):
+        """A hit with aliases containing the queried CVE is returned."""
+        mock_response = {
+            'hits': {
+                'hits': [
+                    {
+                        '_source': {
+                            'aliases': ['CVE-2024-0001', 'GHSA-xxxx-yyyy-zzzz'],
+                        },
+                    },
+                ],
+            },
+        }
+        mod, _ = _load_dsl_query_builder(mock_opensearch_request=mock_response)
+
+        result, is_partial = mod.query_advisories(
+            cve_ids=['CVE-2024-0001'],
+            age_days=30,
+        )
+
+        assert result == {'CVE-2024-0001'}
+        assert is_partial is False
+
+    def test_multiple_cves_matched_via_aliases(self):
+        """Multiple CVEs matched across different hits."""
+        mock_response = {
+            'hits': {
+                'hits': [
+                    {
+                        '_source': {
+                            'aliases': ['CVE-2024-0001', 'GHSA-aaaa-bbbb-cccc'],
+                        },
+                    },
+                    {
+                        '_source': {
+                            'aliases': ['CVE-2024-0003'],
+                        },
+                    },
+                ],
+            },
+        }
+        mod, _ = _load_dsl_query_builder(mock_opensearch_request=mock_response)
+
+        result, is_partial = mod.query_advisories(
+            cve_ids=['CVE-2024-0001', 'CVE-2024-0002', 'CVE-2024-0003'],
+            age_days=90,
+        )
+
+        # CVE-2024-0002 is not in any aliases, so not returned
+        assert result == {'CVE-2024-0001', 'CVE-2024-0003'}
+        assert is_partial is False
+
+    def test_alias_not_in_batch_is_ignored(self):
+        """Aliases in the hit that are not in the queried batch are not returned."""
+        mock_response = {
+            'hits': {
+                'hits': [
+                    {
+                        '_source': {
+                            'aliases': ['CVE-2024-0001', 'CVE-2024-9999'],
+                        },
+                    },
+                ],
+            },
+        }
+        mod, _ = _load_dsl_query_builder(mock_opensearch_request=mock_response)
+
+        result, is_partial = mod.query_advisories(
+            cve_ids=['CVE-2024-0001'],
+            age_days=30,
+        )
+
+        # Only CVE-2024-0001 was queried, so CVE-2024-9999 is not included
+        assert result == {'CVE-2024-0001'}
+        assert is_partial is False
+
+    def test_no_matching_aliases_returns_empty_set(self):
+        """If no aliases match the queried IDs, returns empty set."""
+        mock_response = {
+            'hits': {
+                'hits': [
+                    {
+                        '_source': {
+                            'aliases': ['CVE-2024-9999', 'GHSA-xxxx-yyyy-zzzz'],
+                        },
+                    },
+                ],
+            },
+        }
+        mod, _ = _load_dsl_query_builder(mock_opensearch_request=mock_response)
+
+        result, is_partial = mod.query_advisories(
+            cve_ids=['CVE-2024-0001'],
+            age_days=30,
+        )
+
+        assert result == set()
+        assert is_partial is False
+
+    def test_deduplicates_input_cve_ids(self):
+        """Duplicate CVE IDs in input are deduplicated before querying."""
+        mock_response = {
+            'hits': {
+                'hits': [
+                    {
+                        '_source': {
+                            'aliases': ['CVE-2024-0001'],
+                        },
+                    },
+                ],
+            },
+        }
+        mod, mock_aws = _load_dsl_query_builder(mock_opensearch_request=mock_response)
+
+        result, is_partial = mod.query_advisories(
+            cve_ids=['CVE-2024-0001', 'CVE-2024-0001', 'CVE-2024-0001'],
+            age_days=30,
+        )
+
+        assert result == {'CVE-2024-0001'}
+        assert is_partial is False
+        # Only one query should be made (1 unique ID, fits in one batch)
+        assert mock_aws.opensearch_request.call_count == 1
+
+
+class TestQueryAdvisoriesBatchFailure:
+    """Test is_partial flag when batch queries fail."""
+
+    def test_single_batch_failure_sets_is_partial(self):
+        """When the only batch fails, is_partial=True and result is empty."""
+        mod, _ = _load_dsl_query_builder(
+            mock_opensearch_request=Exception('OpenSearch request failed: 500 - Internal Server Error'),
+        )
+
+        result, is_partial = mod.query_advisories(
+            cve_ids=['CVE-2024-0001'],
+            age_days=30,
+        )
+
+        assert result == set()
+        assert is_partial is True
+
+    def test_partial_batch_failure_continues_processing(self):
+        """When one batch fails and another succeeds, results are partial."""
+        call_count = [0]
+
+        def mock_execute_query(index, query_body):
+            """First call raises, second call returns a hit matching one of the batch IDs."""
+            idx = call_count[0]
+            call_count[0] += 1
+            if idx == 0:
+                raise Exception('Connection timeout')
+            # Return a hit whose alias matches the first ID in this batch
+            import json as _json
+            body = _json.loads(query_body)
+            batch_ids = body['query']['bool']['filter'][0]['terms']['aliases']
+            return {
+                'hits': {
+                    'hits': [
+                        {'_source': {'aliases': [batch_ids[0]]}},
+                    ],
+                },
+            }
+
+        mod, _ = _load_dsl_query_builder()
+
+        # Patch _ADVISORIES_BATCH_SIZE to 2 so we get multiple batches
+        mod._ADVISORIES_BATCH_SIZE = 2
+        # Patch _execute_query directly since opensearch_request is bound at import
+        original_execute = mod._execute_query
+        mod._execute_query = mock_execute_query
+
+        try:
+            result, is_partial = mod.query_advisories(
+                cve_ids=['CVE-2024-0001', 'CVE-2024-0002', 'CVE-2024-1001', 'CVE-2024-1002'],
+                age_days=30,
+            )
+
+            # One batch failed, one succeeded — result should have exactly 1 match
+            assert len(result) == 1
+            # is_partial because first batch failed
+            assert is_partial is True
+        finally:
+            mod._execute_query = original_execute
+
+    def test_all_batches_succeed_is_partial_false(self):
+        """When all batches succeed, is_partial=False."""
+        def mock_execute_query(index, query_body):
+            """Return a hit matching the first ID in each batch."""
+            import json as _json
+            body = _json.loads(query_body)
+            batch_ids = body['query']['bool']['filter'][0]['terms']['aliases']
+            return {
+                'hits': {
+                    'hits': [
+                        {'_source': {'aliases': [batch_ids[0]]}},
+                    ],
+                },
+            }
+
+        mod, _ = _load_dsl_query_builder()
+
+        # Patch batch size to create two batches
+        mod._ADVISORIES_BATCH_SIZE = 2
+        # Patch _execute_query directly since opensearch_request is bound at import
+        original_execute = mod._execute_query
+        mod._execute_query = mock_execute_query
+
+        try:
+            result, is_partial = mod.query_advisories(
+                cve_ids=['CVE-2024-0001', 'CVE-2024-0002', 'CVE-2024-1001', 'CVE-2024-1002'],
+                age_days=30,
+            )
+
+            # Both batches succeeded — should have 2 matches (one per batch)
+            assert len(result) == 2
+            assert is_partial is False
+        finally:
+            mod._execute_query = original_execute
+
+
+class TestQueryAdvisoriesQueryConstruction:
+    """Test that the DSL query body is constructed correctly."""
+
+    def test_age_filter_produces_range_clause(self):
+        """When age_days is provided, a range filter on timestamp.publish is added."""
+        mock_response = {'hits': {'hits': []}}
+        mod, mock_aws = _load_dsl_query_builder(mock_opensearch_request=mock_response)
+
+        mod.query_advisories(cve_ids=['CVE-2024-0001'], age_days=30)
+
+        call_args = mock_aws.opensearch_request.call_args
+        body_str = call_args[0][2] if len(call_args[0]) > 2 else call_args[1].get('body')
+        body = json.loads(body_str)
+
+        filter_clauses = body['query']['bool']['filter']
+        # Should have terms (aliases) + range (timestamp.publish)
+        assert len(filter_clauses) == 2
+        assert filter_clauses[0] == {'terms': {'aliases': ['CVE-2024-0001']}}
+        assert 'range' in filter_clauses[1]
+        assert 'timestamp.publish' in filter_clauses[1]['range']
+        assert 'lte' in filter_clauses[1]['range']['timestamp.publish']
+
+    def test_severity_filter_produces_terms_clause(self):
+        """When severity is provided, a terms filter on severity is added."""
+        mock_response = {'hits': {'hits': []}}
+        mod, mock_aws = _load_dsl_query_builder(mock_opensearch_request=mock_response)
+
+        mod.query_advisories(
+            cve_ids=['CVE-2024-0001'],
+            severity={'HIGH', 'CRITICAL'},
+        )
+
+        call_args = mock_aws.opensearch_request.call_args
+        body_str = call_args[0][2] if len(call_args[0]) > 2 else call_args[1].get('body')
+        body = json.loads(body_str)
+
+        filter_clauses = body['query']['bool']['filter']
+        # Should have terms (aliases) + terms (severity)
+        assert len(filter_clauses) == 2
+        severity_clause = filter_clauses[1]
+        assert 'terms' in severity_clause
+        assert 'severity' in severity_clause['terms']
+        assert set(severity_clause['terms']['severity']) == {'HIGH', 'CRITICAL'}
+
+    def test_both_age_and_severity_produces_three_clauses(self):
+        """When both age_days and severity are provided, three filter clauses are produced."""
+        mock_response = {'hits': {'hits': []}}
+        mod, mock_aws = _load_dsl_query_builder(mock_opensearch_request=mock_response)
+
+        mod.query_advisories(
+            cve_ids=['CVE-2024-0001'],
+            age_days=60,
+            severity={'HIGH'},
+        )
+
+        call_args = mock_aws.opensearch_request.call_args
+        body_str = call_args[0][2] if len(call_args[0]) > 2 else call_args[1].get('body')
+        body = json.loads(body_str)
+
+        filter_clauses = body['query']['bool']['filter']
+        assert len(filter_clauses) == 3
+        # aliases terms, range, severity terms
+        assert filter_clauses[0] == {'terms': {'aliases': ['CVE-2024-0001']}}
+        assert 'range' in filter_clauses[1]
+        assert 'terms' in filter_clauses[2]
+        assert 'severity' in filter_clauses[2]['terms']
+
+    def test_query_targets_advisories_index(self):
+        """The query should target the 'advisories' index."""
+        mock_response = {'hits': {'hits': []}}
+        mod, mock_aws = _load_dsl_query_builder(mock_opensearch_request=mock_response)
+
+        mod.query_advisories(cve_ids=['CVE-2024-0001'], age_days=30)
+
+        call_args = mock_aws.opensearch_request.call_args
+        path = call_args[0][1]
+        assert path == '/advisories/_search'
+
+    def test_query_source_limited_to_aliases(self):
+        """The query should request only the aliases field in _source."""
+        mock_response = {'hits': {'hits': []}}
+        mod, mock_aws = _load_dsl_query_builder(mock_opensearch_request=mock_response)
+
+        mod.query_advisories(cve_ids=['CVE-2024-0001'], age_days=30)
+
+        call_args = mock_aws.opensearch_request.call_args
+        body_str = call_args[0][2] if len(call_args[0]) > 2 else call_args[1].get('body')
+        body = json.loads(body_str)
+
+        assert body['_source'] == ['aliases']
+
+    def test_query_size_equals_batch_length(self):
+        """The query size should equal the number of IDs in the batch."""
+        mock_response = {'hits': {'hits': []}}
+        mod, mock_aws = _load_dsl_query_builder(mock_opensearch_request=mock_response)
+
+        mod.query_advisories(
+            cve_ids=['CVE-2024-0001', 'CVE-2024-0002', 'CVE-2024-0003'],
+            age_days=30,
+        )
+
+        call_args = mock_aws.opensearch_request.call_args
+        body_str = call_args[0][2] if len(call_args[0]) > 2 else call_args[1].get('body')
+        body = json.loads(body_str)
+
+        assert body['size'] == 3
+
+    def test_severity_only_without_age_days_queries_successfully(self):
+        """Severity alone (without age_days) still triggers a query."""
+        mock_response = {
+            'hits': {
+                'hits': [
+                    {'_source': {'aliases': ['CVE-2024-0001']}},
+                ],
+            },
+        }
+        mod, mock_aws = _load_dsl_query_builder(mock_opensearch_request=mock_response)
+
+        result, is_partial = mod.query_advisories(
+            cve_ids=['CVE-2024-0001'],
+            severity={'CRITICAL'},
+        )
+
+        assert result == {'CVE-2024-0001'}
+        assert is_partial is False
+        # Verify no range clause was added
+        call_args = mock_aws.opensearch_request.call_args
+        body_str = call_args[0][2] if len(call_args[0]) > 2 else call_args[1].get('body')
+        body = json.loads(body_str)
+        filter_clauses = body['query']['bool']['filter']
+        assert len(filter_clauses) == 2  # aliases + severity only
+        assert not any('range' in clause for clause in filter_clauses)

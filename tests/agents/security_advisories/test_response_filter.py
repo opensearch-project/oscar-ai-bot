@@ -75,65 +75,56 @@ class TestFilterVulnerabilities(unittest.TestCase):
 
         self.assertEqual(len(result), 5)
 
-    def test_filter_high_severity(self):
-        """'Show me high severity CVEs' — severity={"HIGH"}."""
-        result = filter_vulnerabilities(MOCK_VULNERABILITIES, severity={"HIGH"})
+    def test_allowlist_keeps_only_listed_cves(self):
+        """Only CVEs in the allowlist are returned (excluded still filtered)."""
+        allowed = {"CVE-2024-001", "CVE-2024-002"}
+        result = filter_vulnerabilities(MOCK_VULNERABILITIES, allowed_cve_ids=allowed)
+
+        self.assertEqual(len(result), 2)
+        ids = {v["id"] for v in result}
+        self.assertEqual(ids, {"CVE-2024-001", "CVE-2024-002"})
+
+    def test_allowlist_with_excluded_cve(self):
+        """Excluded CVEs are still filtered even if they're in the allowlist."""
+        allowed = {"CVE-2024-002", "CVE-2024-003"}  # CVE-003 is excluded
+        result = filter_vulnerabilities(MOCK_VULNERABILITIES, allowed_cve_ids=allowed)
 
         self.assertEqual(len(result), 1)
         self.assertEqual(result[0]["id"], "CVE-2024-002")
 
-    def test_filter_high_severity_include_excluded(self):
-        """'Show me all high severity CVEs including excluded'."""
+    def test_allowlist_include_excluded(self):
+        """With include_excluded=True, excluded CVEs in the allowlist are kept."""
+        allowed = {"CVE-2024-002", "CVE-2024-003"}
         result = filter_vulnerabilities(
-            MOCK_VULNERABILITIES, severity={"HIGH"}, include_excluded=True
+            MOCK_VULNERABILITIES, allowed_cve_ids=allowed, include_excluded=True,
         )
 
         self.assertEqual(len(result), 2)
         ids = {v["id"] for v in result}
-        self.assertIn("CVE-2024-002", ids)
-        self.assertIn("CVE-2024-003", ids)
+        self.assertEqual(ids, {"CVE-2024-002", "CVE-2024-003"})
 
-    def test_filter_critical_severity(self):
-        """'Show me critical CVEs'."""
-        result = filter_vulnerabilities(MOCK_VULNERABILITIES, severity={"CRITICAL"})
+    def test_allowlist_no_match(self):
+        """Allowlist with no matching CVEs returns empty."""
+        allowed = {"CVE-9999-999"}
+        result = filter_vulnerabilities(MOCK_VULNERABILITIES, allowed_cve_ids=allowed)
+        self.assertEqual(result, [])
 
-        self.assertEqual(len(result), 1)
-        self.assertEqual(result[0]["id"], "CVE-2024-001")
+    def test_allowlist_none_means_no_filtering(self):
+        """When allowed_cve_ids is None, all non-excluded CVEs pass through."""
+        result = filter_vulnerabilities(MOCK_VULNERABILITIES, allowed_cve_ids=None)
 
-    def test_filter_multiple_severities(self):
-        """'Show me high and critical CVEs'."""
-        result = filter_vulnerabilities(
-            MOCK_VULNERABILITIES, severity={"HIGH", "CRITICAL"}
-        )
-
-        self.assertEqual(len(result), 2)
+        self.assertEqual(len(result), 3)
         ids = {v["id"] for v in result}
-        self.assertIn("CVE-2024-001", ids)
-        self.assertIn("CVE-2024-002", ids)
-
-    def test_filter_low_severity(self):
-        """'Show me low severity CVEs' — the only LOW one is excluded."""
-        result = filter_vulnerabilities(MOCK_VULNERABILITIES, severity={"LOW"})
-
-        self.assertEqual(len(result), 0)
-
-    def test_filter_low_severity_include_excluded(self):
-        """'Show me low severity CVEs including excluded'."""
-        result = filter_vulnerabilities(
-            MOCK_VULNERABILITIES, severity={"LOW"}, include_excluded=True
-        )
-
-        self.assertEqual(len(result), 1)
-        self.assertEqual(result[0]["id"], "CVE-2024-005")
+        self.assertEqual(ids, {"CVE-2024-001", "CVE-2024-002", "CVE-2024-004"})
 
     def test_empty_vulnerabilities(self):
         """No vulnerabilities at all."""
         result = filter_vulnerabilities([])
         self.assertEqual(result, [])
 
-    def test_severity_filter_no_match(self):
-        """Filter for a severity that doesn't exist."""
-        result = filter_vulnerabilities(MOCK_VULNERABILITIES, severity={"UNKNOWN"})
+    def test_empty_allowlist_returns_empty(self):
+        """An empty allowlist (not None) means nothing passes."""
+        result = filter_vulnerabilities(MOCK_VULNERABILITIES, allowed_cve_ids=set())
         self.assertEqual(result, [])
 
 
@@ -157,26 +148,28 @@ class TestBuildSummary(unittest.TestCase):
         self.assertEqual(summary, {})
 
     def test_summary_single_severity(self):
-        filtered = filter_vulnerabilities(MOCK_VULNERABILITIES, severity={"CRITICAL"})
+        # Use allowlist to keep only the CRITICAL CVE
+        filtered = filter_vulnerabilities(
+            MOCK_VULNERABILITIES, allowed_cve_ids={"CVE-2024-001"},
+        )
         summary = build_summary(filtered)
 
         self.assertEqual(summary, {"CRITICAL": 1})
 
 
-class TestProperty2SeverityFilterCorrectness(unittest.TestCase):
+class TestProperty2AllowlistFilterCorrectness(unittest.TestCase):
     """**Validates: Requirements 3.2**
 
-    Property 2: Severity filter returns only matching severities and drops
-    none that match.
+    Property 2: Allowlist filter returns only CVEs in the allowed set and
+    drops none that match.
 
-    For any list of vulnerability dicts and any non-empty subset of severity
-    levels, filter_vulnerabilities with that severity set SHALL return only
-    vulnerabilities whose severity is in the filter set, and SHALL return all
-    vulnerabilities from the input whose severity is in the filter set (no
-    false drops).
+    For any list of vulnerability dicts and any non-empty allowlist,
+    filter_vulnerabilities with that allowlist SHALL return only
+    vulnerabilities whose ID is in the allowed set, and SHALL return all
+    non-excluded vulnerabilities from the input whose ID is in the allowed set.
     """
 
-    def _make_vuln(self, vuln_id, severity, excluded=None):
+    def _make_vuln(self, vuln_id, severity="HIGH", excluded=None):
         """Helper to create a vulnerability dict."""
         vuln = {
             "id": vuln_id,
@@ -187,8 +180,8 @@ class TestProperty2SeverityFilterCorrectness(unittest.TestCase):
             vuln["excluded"] = excluded
         return vuln
 
-    def test_single_severity_returns_only_matching(self):
-        """Only vulns with the requested severity are returned."""
+    def test_allowlist_returns_only_matching(self):
+        """Only vulns with IDs in the allowlist are returned."""
         vulns = [
             self._make_vuln("CVE-1", "CRITICAL"),
             self._make_vuln("CVE-2", "HIGH"),
@@ -196,14 +189,14 @@ class TestProperty2SeverityFilterCorrectness(unittest.TestCase):
             self._make_vuln("CVE-4", "HIGH"),
             self._make_vuln("CVE-5", "LOW"),
         ]
-        result = filter_vulnerabilities(vulns, severity={"HIGH"})
+        allowed = {"CVE-2", "CVE-4"}
+        result = filter_vulnerabilities(vulns, allowed_cve_ids=allowed)
 
-        # All returned vulns must have severity HIGH
         for v in result:
-            self.assertEqual(v["severity"], "HIGH")
+            self.assertIn(v["id"], allowed)
 
-    def test_single_severity_drops_none_that_match(self):
-        """All non-excluded vulns matching the severity are returned."""
+    def test_allowlist_drops_none_that_match(self):
+        """All non-excluded vulns in the allowlist are returned."""
         vulns = [
             self._make_vuln("CVE-1", "CRITICAL"),
             self._make_vuln("CVE-2", "HIGH"),
@@ -211,76 +204,64 @@ class TestProperty2SeverityFilterCorrectness(unittest.TestCase):
             self._make_vuln("CVE-4", "HIGH"),
             self._make_vuln("CVE-5", "LOW"),
         ]
-        result = filter_vulnerabilities(vulns, severity={"HIGH"})
+        allowed = {"CVE-2", "CVE-4"}
+        result = filter_vulnerabilities(vulns, allowed_cve_ids=allowed)
 
         result_ids = {v["id"] for v in result}
         self.assertEqual(result_ids, {"CVE-2", "CVE-4"})
 
-    def test_multiple_severities_returns_only_matching(self):
-        """Only vulns with one of the requested severities are returned."""
+    def test_allowlist_with_multiple_ids(self):
+        """Multiple IDs in allowlist all pass through."""
         vulns = [
             self._make_vuln("CVE-1", "CRITICAL"),
             self._make_vuln("CVE-2", "HIGH"),
             self._make_vuln("CVE-3", "MEDIUM"),
             self._make_vuln("CVE-4", "LOW"),
         ]
+        allowed = {"CVE-1", "CVE-4"}
         result = filter_vulnerabilities(
-            vulns, severity={"CRITICAL", "LOW"}, include_excluded=True
-        )
-
-        severities = {v["severity"] for v in result}
-        self.assertTrue(severities.issubset({"CRITICAL", "LOW"}))
-
-    def test_multiple_severities_drops_none_that_match(self):
-        """All non-excluded vulns matching any of the severities are returned."""
-        vulns = [
-            self._make_vuln("CVE-1", "CRITICAL"),
-            self._make_vuln("CVE-2", "HIGH"),
-            self._make_vuln("CVE-3", "MEDIUM"),
-            self._make_vuln("CVE-4", "LOW"),
-        ]
-        result = filter_vulnerabilities(
-            vulns, severity={"CRITICAL", "LOW"}, include_excluded=True
+            vulns, allowed_cve_ids=allowed, include_excluded=True,
         )
 
         result_ids = {v["id"] for v in result}
         self.assertEqual(result_ids, {"CVE-1", "CVE-4"})
 
-    def test_severity_filter_with_excluded_vulns(self):
-        """Excluded vulns matching severity are dropped when include_excluded=False."""
+    def test_allowlist_respects_exclusion(self):
+        """Excluded vulns in the allowlist are dropped when include_excluded=False."""
         vulns = [
             self._make_vuln("CVE-1", "HIGH"),
             self._make_vuln("CVE-2", "HIGH", excluded="AT_PROJECT"),
             self._make_vuln("CVE-3", "HIGH"),
         ]
-        result = filter_vulnerabilities(vulns, severity={"HIGH"})
+        allowed = {"CVE-1", "CVE-2", "CVE-3"}
+        result = filter_vulnerabilities(vulns, allowed_cve_ids=allowed)
 
         # CVE-2 is excluded, so only CVE-1 and CVE-3 should be returned
         result_ids = {v["id"] for v in result}
         self.assertEqual(result_ids, {"CVE-1", "CVE-3"})
 
-    def test_severity_filter_with_all_severities(self):
-        """Filtering with all four severity levels returns all non-excluded vulns."""
+    def test_allowlist_all_ids_returns_all_non_excluded(self):
+        """Allowlist containing all IDs returns all non-excluded vulns."""
         vulns = [
             self._make_vuln("CVE-1", "CRITICAL"),
             self._make_vuln("CVE-2", "HIGH"),
             self._make_vuln("CVE-3", "MEDIUM"),
             self._make_vuln("CVE-4", "LOW"),
         ]
-        all_severities = {"CRITICAL", "HIGH", "MEDIUM", "LOW"}
-        result = filter_vulnerabilities(vulns, severity=all_severities)
+        all_ids = {"CVE-1", "CVE-2", "CVE-3", "CVE-4"}
+        result = filter_vulnerabilities(vulns, allowed_cve_ids=all_ids)
 
         self.assertEqual(len(result), 4)
 
-    def test_severity_none_returns_all_non_excluded(self):
-        """When severity is None, all non-excluded vulns are returned regardless of severity."""
+    def test_allowlist_none_returns_all_non_excluded(self):
+        """When allowed_cve_ids is None, all non-excluded vulns are returned."""
         vulns = [
             self._make_vuln("CVE-1", "CRITICAL"),
             self._make_vuln("CVE-2", "HIGH"),
             self._make_vuln("CVE-3", "MEDIUM"),
             self._make_vuln("CVE-4", "LOW"),
         ]
-        result = filter_vulnerabilities(vulns, severity=None)
+        result = filter_vulnerabilities(vulns, allowed_cve_ids=None)
 
         self.assertEqual(len(result), 4)
 
@@ -354,16 +335,17 @@ class TestProperty3ExclusionFilterCorrectness(unittest.TestCase):
         expected_ids = {v["id"] for v in vulns}
         self.assertEqual(result_ids, expected_ids)
 
-    def test_include_excluded_true_with_severity_filter(self):
-        """With include_excluded=True and severity filter, excluded vulns matching severity are kept."""
+    def test_include_excluded_true_with_allowlist(self):
+        """With include_excluded=True and allowlist, excluded vulns in allowlist are kept."""
         vulns = [
             self._make_vuln("CVE-1", severity="HIGH"),
             self._make_vuln("CVE-2", severity="HIGH", excluded="AT_PROJECT"),
             self._make_vuln("CVE-3", severity="LOW"),
             self._make_vuln("CVE-4", severity="LOW", excluded="AT_RULE"),
         ]
+        allowed = {"CVE-1", "CVE-2"}
         result = filter_vulnerabilities(
-            vulns, severity={"HIGH"}, include_excluded=True
+            vulns, allowed_cve_ids=allowed, include_excluded=True,
         )
 
         result_ids = {v["id"] for v in result}
@@ -500,7 +482,8 @@ class TestProperty4SeveritySummaryAccuracy(unittest.TestCase):
             self._make_vuln("CVE-3", "MEDIUM"),
             self._make_vuln("CVE-4", "LOW"),
         ]
-        filtered = filter_vulnerabilities(vulns, severity={"CRITICAL", "HIGH"})
+        allowed = {"CVE-1", "CVE-2"}
+        filtered = filter_vulnerabilities(vulns, allowed_cve_ids=allowed)
         summary = build_summary(filtered)
 
         self.assertEqual(summary, {"CRITICAL": 1, "HIGH": 1})

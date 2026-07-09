@@ -67,7 +67,7 @@ If the user does NOT specify a version or tag (e.g., "CVEs for OpenSearch"), def
 | `version` | No | Version to scope the query (e.g., "2.19.6") |
 | `project_name` | No | Project name to scope the query (e.g., "OpenSearch Dashboards") |
 | `severity` | No | Comma-separated severity filter applied to results (e.g., "CRITICAL", "CRITICAL,HIGH"). Valid values: CRITICAL, HIGH, MEDIUM, LOW |
-| `age_days` | No | Maximum age in days for scan results. Only scans within this window are returned (e.g., 30 for the past month) |
+| `age_days` | No | Integer minimum age in days — only return CVEs published at least this many days ago. Extract from phrases like "older than 60 days" → age_days=60, "2 weeks" → age_days=14. Default to 60 for release prep queries. |
 
 ## HANDLING AMBIGUOUS VERSION QUERIES
 When the user's query contains vague version language ("most recent", "latest", "newest", "current") instead of a concrete tag or version number:
@@ -86,8 +86,6 @@ NOTE: In all examples below, the agent MUST call `list_projects()` first to reso
 
 - "Show me all CVEs for 2.19.6" → query_vulnerabilities(query="Show me all CVEs for 2.19.6", version="2.19.6") — no project_name needed, returns CVEs across all projects for that version
 - "High severity CVEs for Dashboards" → FIRST list_projects() to resolve "Dashboards" to the canonical name, THEN query_vulnerabilities(query="High severity CVEs for Dashboards", project_name=<canonical name from list_projects>, severity="HIGH", version="origin/main")
-- "Critical vulnerabilities in the past 30 days" → query_vulnerabilities(query="Critical vulnerabilities in the past 30 days", severity="CRITICAL", age_days="30", version="origin/main")
-- "Critical and high CVEs for OpenSearch 3.0.0 from the last week" → FIRST list_projects() to confirm "OpenSearch" is a valid canonical name, THEN query_vulnerabilities(query="Critical and high CVEs for OpenSearch 3.0.0 from the last week", version="3.0.0", project_name=<canonical name from list_projects>, severity="CRITICAL,HIGH", age_days="7")
 - "CVEs for OpenSearch Dashboards most recent release" → FIRST list_projects(), THEN present available tags and ask which one the user wants, THEN query_vulnerabilities with the user's choice
 - "Show me CVEs for 3.7" → query_vulnerabilities(query="Show me CVEs for 3.7", version="origin/3.7")
 - "Show me CVEs for origin/3.7" → query_vulnerabilities(query="Show me CVEs for origin/3.7", version="origin/3.7")
