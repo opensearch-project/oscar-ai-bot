@@ -39,6 +39,19 @@ CORE_MONITORING = [
         alarm_threshold=3,
         description="Prompt injection attempts detected",
     ),
+    MonitoringConfig(
+        pattern="IDENTITY_SPOOFING_ATTEMPT",
+        alarm_threshold=3,
+        description="USER_ID marker injection attempts detected",
+    ),
+]
+
+WEBHOOK_MONITORING = [
+    MonitoringConfig(
+        pattern="WEBHOOK_REPLAY_REJECTED",
+        alarm_threshold=10,
+        description="Webhook replay attack attempts detected",
+    ),
 ]
 
 
@@ -81,6 +94,14 @@ class OscarSecurityMonitoringStack(Stack):
         )
         for config in CORE_MONITORING:
             self._create_filter_and_alarm("core", supervisor_log_group, config)
+
+        # Webhook handler monitoring
+        webhook_log_group = logs.LogGroup.from_log_group_name(
+            self, "WebhookHandlerLogs",
+            f"/aws/lambda/oscar-github-webhook-handler-{environment}",
+        )
+        for config in WEBHOOK_MONITORING:
+            self._create_filter_and_alarm("webhook", webhook_log_group, config)
 
         # Agent-declared monitoring
         for agent in (agents or []):
@@ -139,8 +160,9 @@ class OscarSecurityMonitoringStack(Stack):
 
         # Core security metrics
         security_widgets = []
-        for config in CORE_MONITORING:
-            metric_name = f"core-{config.pattern.replace(' ', '-')}"
+        for config in CORE_MONITORING + WEBHOOK_MONITORING:
+            source = "webhook" if config in WEBHOOK_MONITORING else "core"
+            metric_name = f"{source}-{config.pattern.replace(' ', '-')}"
             security_widgets.append(cloudwatch.GraphWidget(
                 title=config.description or config.pattern,
                 left=[cloudwatch.Metric(

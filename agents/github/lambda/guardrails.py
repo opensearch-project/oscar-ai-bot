@@ -10,13 +10,14 @@ import logging
 import re
 from typing import Any, Dict, List, Optional, Tuple
 
-import requests
-from http_client import API_BASE, get, put
+from http_client import API_BASE, GitHubAPIError, get, put
 
 logger = logging.getLogger(__name__)
 
 # TODO: Add author verification — version increment PRs must be by opensearch-trigger-bot[bot],
 # release notes PRs by opensearch-ci-bot.
+BULK_MERGE_MAX_PRS = 25
+
 PR_TYPES = {
     "version_increment": {
         "title_pattern": re.compile(
@@ -64,7 +65,7 @@ def _get_ci_status(token: str, repo: str, sha: str) -> Dict[str, Any]:
     check_runs = checks_data.get("check_runs", [])
 
     if total_statuses == 0 and len(check_runs) == 0:
-        return {"passed": True, "detail": "No CI checks configured"}
+        return {"passed": False, "detail": "No CI checks configured — treating as failure"}
 
     if total_statuses > 0 and combined_state != "success":
         return {"passed": False, "detail": f"Commit status: {combined_state}"}
@@ -75,7 +76,7 @@ def _get_ci_status(token: str, repo: str, sha: str) -> Dict[str, Any]:
                 "passed": False,
                 "detail": f"Check '{run['name']}' still {run['status']}",
             }
-        if run["conclusion"] not in ("success", "skipped", "neutral"):
+        if run["conclusion"] not in ("success", "skipped"):
             return {
                 "passed": False,
                 "detail": f"Check '{run['name']}' concluded {run['conclusion']}",
@@ -162,20 +163,33 @@ def validate_single_pr(token: str, org: str, repo: str, pr_number: int) -> Dict[
     pr_detail = get(token, f"/repos/{full_repo}/pulls/{pr_number}")
 
     title = pr_detail["title"]
+    head_sha = pr_detail["head"]["sha"]
     pr_type = _classify_pr(title)
 
     if pr_type is None:
-        return {
-            "status": "success",
-            "is_auto_pr": False,
-            "message": "Not an automated PR — no merge guardrails apply.",
+        checks: Dict[str, Dict[str, Any]] = {}
+
+        checks["not_draft"] = {
+            "passed": not pr_detail.get("draft", False),
+            "detail": "Draft" if pr_detail.get("draft") else "Ready",
         }
+        mergeable = pr_detail.get("mergeable")
+        checks["no_conflicts"] = {
+            "passed": mergeable is True,
+            "detail": f"mergeable={mergeable}",
+        }
+        checks["ci_passing"] = _get_ci_status(token, full_repo, head_sha)
+
+        result = _checks_result(f"{full_repo}#{pr_number}", checks, {"is_auto_pr": False})
+        result["head_sha"] = head_sha
+        return result
 
     match = PR_TYPES[pr_type]["title_pattern"].match(title)
     version = match.group(1) if match else None
     checks = _validate_pr(token, pr_detail, version, pr_type)
 
     result = _checks_result(f"{full_repo}#{pr_number}", checks, {"is_auto_pr": True, "type": pr_type})
+    result["head_sha"] = head_sha
     return result
 
 
@@ -205,7 +219,7 @@ def list_merge_candidates(token: str, version: str, org: str) -> Dict[str, Any]:
 
             try:
                 pr_detail = get(token, f"/repos/{repo}/pulls/{item['number']}")
-            except requests.HTTPError as e:
+            except GitHubAPIError as e:
                 logger.warning("Failed to fetch %s#%d: %s", repo, item["number"], e)
                 candidates.append({
                     "repo": repo, "number": item["number"], "title": item["title"],
@@ -220,6 +234,7 @@ def list_merge_candidates(token: str, version: str, org: str) -> Dict[str, Any]:
                 "repo": repo, "number": pr_detail["number"],
                 "title": pr_detail["title"], "html_url": pr_detail["html_url"],
                 "type": pr_type, "checks": checks,
+                "head_sha": pr_detail["head"]["sha"],
                 "all_passed": all(c["passed"] for c in checks.values()),
             })
 
@@ -251,32 +266,50 @@ def list_merge_candidates(token: str, version: str, org: str) -> Dict[str, Any]:
 
 
 def bulk_merge(token: str, version: str, org: str) -> Dict[str, Any]:
-    """Re-validate all candidates and merge those passing all guardrails."""
+    """Re-validate all candidates and merge those passing all guardrails in batches."""
     report = list_merge_candidates(token, version, org)
 
+    candidates = report["candidates"]
+    ready = [c for c in candidates if c["all_passed"]]
+
     merged, skipped, failed = [], [], []
-    for c in report["candidates"]:
+    for c in candidates:
         if not c["all_passed"]:
             failed_names = [n for n, chk in c["checks"].items() if not chk["passed"]]
             skipped.append({"repo": c["repo"], "number": c["number"],
                             "title": c["title"], "reason": f"Failed: {', '.join(failed_names)}"})
-            continue
-        try:
-            put(token, f"/repos/{c['repo']}/pulls/{c['number']}/merge", {"merge_method": "merge"})
-            merged.append({"repo": c["repo"], "number": c["number"], "title": c["title"]})
-            logger.info("BULK_MERGE_SUCCESS %s#%d — %s", c["repo"], c["number"], c["title"])
-        except Exception as e:
-            logger.error("BULK_MERGE_FAILED %s#%d: %s", c["repo"], c["number"], e)
-            failed.append({"repo": c["repo"], "number": c["number"],
-                           "title": c["title"], "reason": str(e)})
+
+    total_batches = (len(ready) + BULK_MERGE_MAX_PRS - 1) // BULK_MERGE_MAX_PRS
+    for batch_idx in range(total_batches):
+        batch_start = batch_idx * BULK_MERGE_MAX_PRS
+        batch = ready[batch_start:batch_start + BULK_MERGE_MAX_PRS]
+        logger.info(
+            "BULK_MERGE batch %d/%d — merging %d PRs",
+            batch_idx + 1, total_batches, len(batch),
+        )
+        for c in batch:
+            sha = c.get("head_sha")
+            merge_payload = {"merge_method": "merge"}
+            if sha:
+                merge_payload["sha"] = sha
+            try:
+                put(token, f"/repos/{c['repo']}/pulls/{c['number']}/merge", merge_payload)
+                merged.append({"repo": c["repo"], "number": c["number"], "title": c["title"]})
+                logger.info("BULK_MERGE_SUCCESS %s#%d — %s", c["repo"], c["number"], c["title"])
+            except Exception as e:
+                logger.error("BULK_MERGE_FAILED %s#%d: %s", c["repo"], c["number"], e)
+                failed.append({"repo": c["repo"], "number": c["number"],
+                               "title": c["title"], "reason": str(e)})
 
     return {
         "status": "success", "version": version, "organization": org,
         "merged_count": len(merged), "skipped_count": len(skipped), "failed_count": len(failed),
+        "total_batches": total_batches,
         "merged": merged, "skipped": skipped, "failed": failed,
         "message": (
             f"Bulk merge complete for version {version}: "
-            f"{len(merged)} merged, {len(skipped)} skipped, {len(failed)} failed."
+            f"{len(merged)} merged, {len(skipped)} skipped, {len(failed)} failed "
+            f"(processed in {total_batches} batch(es) of up to {BULK_MERGE_MAX_PRS})."
         ),
     }
 
@@ -295,8 +328,8 @@ def _get_issue_state(
     try:
         data = get(token, f"/repos/{full_repo}/issues/{issue_number}")
         return data.get("state"), data.get("locked", False)
-    except requests.HTTPError as e:
-        if e.response is not None and e.response.status_code == 404:
+    except GitHubAPIError as e:
+        if e.status_code == 404:
             return None, None
         raise
 
@@ -394,7 +427,7 @@ def validate_transfer_issue(
     try:
         get(token, f"/repos/{full_target}")
         checks["target_repo_exists"] = {"passed": True, "detail": f"{full_target} found"}
-    except requests.HTTPError:
+    except GitHubAPIError:
         checks["target_repo_exists"] = {"passed": False, "detail": f"{full_target} not found"}
 
     return _checks_result(

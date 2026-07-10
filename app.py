@@ -16,6 +16,8 @@ from typing import Optional
 from aws_cdk import App, Environment
 from dotenv import load_dotenv
 
+load_dotenv()
+
 from agents.github import GitHubAgent
 from agents.jenkins import JenkinsAgent
 from agents.metrics import MetricsAgent
@@ -30,7 +32,6 @@ from stacks.security_monitoring_stack import OscarSecurityMonitoringStack
 from stacks.storage_stack import OscarStorageStack
 from stacks.vpc_stack import OscarVpcStack
 
-load_dotenv()
 
 
 # Configure logging

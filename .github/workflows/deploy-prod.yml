@@ -11,6 +11,7 @@ jobs:
       issues: write
     env:
       PYTHON_VERSION: 3.12
+      ARTIFACTS_BUCKET: ${{ secrets.ARTIFACTS_BUCKET }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Repository
@@ -28,13 +29,6 @@ jobs:
         run: |
           python -m pip install --upgrade pipenv==2026.0.3 wheel
           pipenv install --deploy --dev
-
-      - name: Download GitHub MCP Server binary
-        run: |
-          mkdir -p agents/github/lambda/bin
-          curl -sL https://github.com/github/github-mcp-server/releases/download/v1.0.4/github-mcp-server_Linux_x86_64.tar.gz | tar xz -C agents/github/lambda/bin github-mcp-server
-          chmod +x agents/github/lambda/bin/github-mcp-server
-          ls -lh agents/github/lambda/bin/github-mcp-server
 
       - id: get_approvers
         uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
@@ -59,6 +53,20 @@ jobs:
         with:
           role-to-assume: ${{ secrets.PROD_DEPLOYMENT_ROLE }}
           aws-region: 'us-east-1'
+
+      - name: Download GitHub MCP Server binary from S3
+        run: |
+          S3_KEY=$(python -c "import json; print(json.load(open('agents/github/mcp-server.json'))['s3_key'])")
+          EXPECTED_SHA=$(python -c "import json; print(json.load(open('agents/github/mcp-server.json'))['sha256'])")
+          mkdir -p agents/github/lambda/bin
+          aws s3 cp "s3://${ARTIFACTS_BUCKET}/${S3_KEY}" agents/github/lambda/bin/github-mcp-server
+          ACTUAL_SHA=$(sha256sum agents/github/lambda/bin/github-mcp-server | awk '{print $1}')
+          if [ "${ACTUAL_SHA}" != "${EXPECTED_SHA}" ]; then
+            echo "FATAL: SHA256 mismatch! Expected ${EXPECTED_SHA}, got ${ACTUAL_SHA}"
+            exit 1
+          fi
+          chmod +x agents/github/lambda/bin/github-mcp-server
+          ls -lh agents/github/lambda/bin/github-mcp-server
 
       - name: Create Production change-set for approval
         id: prod_stack_diff

@@ -1,0 +1,8 @@
+{
+  "name": "github-mcp-server",
+  "version": "v1.0.4",
+  "source": "https://github.com/github/github-mcp-server/releases",
+  "platform": "Linux_x86_64",
+  "sha256": "6ec1f1c1dbb068519424da48d2e91654a16b0897a951d6b26a919407fe08ef73",
+  "s3_key": "github-mcp-server/v1.0.4/github-mcp-server"
+}

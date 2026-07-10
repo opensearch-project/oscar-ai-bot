@@ -5,7 +5,7 @@
 
 import os
 
-from agents.base_agent import LambdaConfig, OscarAgent, SecretConfig
+from agents.base_agent import LambdaConfig, MonitoringConfig, OscarAgent, SecretConfig
 from agents.github.action_groups import get_action_groups
 from agents.github.iam_policies import get_policies
 from agents.github.instructions import (AGENT_INSTRUCTION,
@@ -63,3 +63,17 @@ class GitHubAgent(OscarAgent):
 
     def uses_knowledge_base(self):
         return False
+
+    def get_monitoring_config(self):
+        return [
+            MonitoringConfig(
+                pattern="GITHUB_FORCE_MERGE",
+                alarm_threshold=3,
+                description="Force-merges bypassing guardrails",
+            ),
+            MonitoringConfig(
+                pattern="BULK_MERGE_SUCCESS",
+                alarm_threshold=75,
+                description="Bulk merge volume exceeds threshold (runaway operation)",
+            ),
+        ]

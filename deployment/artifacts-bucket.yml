@@ -1,0 +1,91 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >
+  S3 bucket for OSCAR build artifacts (MCP server binary).
+  Deploy once per account. Restricts access via bucket policy:
+  - Upload: only the ARTIFACTS_UPLOAD_ROLE can PutObject
+  - Download: only the deploy roles (beta + prod) can GetObject
+  - All uploads must use server-side encryption
+  Access beyond these three roles is controlled by IAM (no bucket policy grant).
+
+Parameters:
+  BucketName:
+    Type: String
+    Description: Name for the artifacts bucket
+    Default: oscar-build-artifacts
+
+  UploadRoleArn:
+    Type: String
+    Description: IAM role ARN used by the upload-mcp-binary workflow
+
+  BetaDeployRoleArn:
+    Type: String
+    Description: IAM role ARN used by the beta deploy workflow
+
+  ProdDeployRoleArn:
+    Type: String
+    Description: IAM role ARN used by the prod deploy workflow
+
+Resources:
+  ArtifactsBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Ref BucketName
+      VersioningConfiguration:
+        Status: Enabled
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      LifecycleConfiguration:
+        Rules:
+          - Id: DeleteOldVersions
+            Status: Enabled
+            NoncurrentVersionExpiration:
+              NoncurrentDays: 90
+
+  ArtifactsBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref ArtifactsBucket
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: AllowUploadFromCIRole
+            Effect: Allow
+            Principal:
+              AWS: !Ref UploadRoleArn
+            Action:
+              - s3:PutObject
+            Resource: !Sub '${ArtifactsBucket.Arn}/*'
+
+          - Sid: AllowDownloadFromDeployRoles
+            Effect: Allow
+            Principal:
+              AWS:
+                - !Ref BetaDeployRoleArn
+                - !Ref ProdDeployRoleArn
+            Action:
+              - s3:GetObject
+            Resource: !Sub '${ArtifactsBucket.Arn}/*'
+
+          - Sid: DenyUnencryptedUploads
+            Effect: Deny
+            Principal: '*'
+            Action: s3:PutObject
+            Resource: !Sub '${ArtifactsBucket.Arn}/*'
+            Condition:
+              StringNotEquals:
+                s3:x-amz-server-side-encryption: AES256
+
+Outputs:
+  BucketName:
+    Description: Artifacts bucket name (set as ARTIFACTS_BUCKET repo secret)
+    Value: !Ref ArtifactsBucket
+  BucketArn:
+    Description: Artifacts bucket ARN
+    Value: !GetAtt ArtifactsBucket.Arn

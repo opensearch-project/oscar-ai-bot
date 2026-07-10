@@ -64,7 +64,6 @@ class OscarAgentsStack(Stack):
         self.env_name = environment
         self._deploy_ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
 
-        # Create guardrail for supervisor agents (not attached — enable via guardrail_config when ready)
         self.guardrail, self.guardrail_version = create_guardrail(self, self.env_name)
         self.guardrail_config = get_guardrail_configuration(self.guardrail, self.guardrail_version)
 
@@ -91,6 +90,9 @@ class OscarAgentsStack(Stack):
                     knowledge_base_id=self.knowledge_base_id,
                 )]
 
+            # Attach guardrail to agents that process untrusted external content
+            agent_guardrail = self.guardrail_config if agent.name == "github" else None
+
             # Create agent
             cfn_agent = bedrock.CfnAgent(
                 self, f"Oscar{construct_name}Agent",
@@ -104,16 +106,20 @@ class OscarAgentsStack(Stack):
                 action_groups=agent.get_action_groups(lambda_fn.function_arn),
                 instruction=agent.get_agent_instruction(),
                 knowledge_bases=kb_config,
+                guardrail_configuration=agent_guardrail,
             )
 
-            # Create alias — description uses content hash so new version is only
-            # created when agent code actually changes
+            # Create alias — description uses content hash + instruction hash so
+            # new version is created when agent code OR env-driven config changes
             agent_hash = _dir_hash(f"agents/{agent.name}")
+            instruction_hash = hashlib.md5(
+                agent.get_agent_instruction().encode()
+            ).hexdigest()[:8]
             alias = bedrock.CfnAgentAlias(
                 self, f"Oscar{construct_name}Alias",
                 agent_alias_name="LIVE",
                 agent_id=cfn_agent.attr_agent_id,
-                description=f"Live alias for OSCAR {agent.name} agent ({agent_hash})",
+                description=f"Live alias for OSCAR {agent.name} agent ({agent_hash}-{instruction_hash})",
             )
             alias.node.add_dependency(cfn_agent)
 

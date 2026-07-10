@@ -8,16 +8,43 @@ Used for: transfer_issue, add_comment, bulk_comment, get_repo_maintainers.
 
 import json
 import logging
-import os
 import re
 from typing import Dict, List
 
-import boto3
 import requests
 from http_client import API_BASE, GitHubAPIError, get, post
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
+
+# Patterns that should never appear in outbound comments — they could be used
+# to inject prompts into downstream LLM-based tools that read GitHub comments.
+_OUTBOUND_INJECTION_PATTERNS = [
+    re.compile(r'<\s*/?system\s*>', re.IGNORECASE),
+    re.compile(r'\[INST\]|\[/INST\]', re.IGNORECASE),
+    re.compile(r'(ignore|disregard|override|forget)\s+(all\s+)?(previous|prior|above)\s+(instructions?|rules?|prompts?)', re.IGNORECASE),
+    re.compile(r'(new|updated?)\s+system\s+prompt', re.IGNORECASE),
+    re.compile(r'you\s+are\s+now', re.IGNORECASE),
+    re.compile(r'```\s*system', re.IGNORECASE),
+]
+
+
+def _screen_outbound_body(body: str) -> str:
+    """Screen outbound comment body for prompt injection patterns.
+
+    Raises GitHubAPIError if suspicious content is detected, preventing
+    the agent from being used as a vector to inject into other LLM tools.
+    """
+    for pattern in _OUTBOUND_INJECTION_PATTERNS:
+        if pattern.search(body):
+            raise GitHubAPIError(
+                400,
+                "Comment body rejected: contains content that resembles a prompt "
+                "injection payload. The comment was not posted to protect downstream "
+                "systems. Please rephrase the comment.",
+                "outbound_screening",
+            )
+    return body
 
 
 def _get_issue_node_id(token: str, owner: str, repo: str, issue_number: int) -> str:
@@ -85,6 +112,7 @@ def add_comment(
     token: str, owner: str, repo: str, issue_number: int, body: str,
 ) -> str:
     """Add a comment to an issue or pull request."""
+    _screen_outbound_body(body)
     result = post(token, f"/repos/{owner}/{repo}/issues/{issue_number}/comments",
                   json_body={"body": body})
     return json.dumps(result)
@@ -101,6 +129,7 @@ def bulk_comment(
         issue_targets: List of (repo, issue_number) tuples
         body: Comment body text
     """
+    _screen_outbound_body(body)
     results = []
     for repo, num in issue_targets:
         try:
@@ -120,28 +149,9 @@ _MAINTAINERS_LINK_RE = re.compile(
     r"\[([^\]]+)\]\(https?://github\.com/([^)]+)\)",
 )
 
-LLM_MODEL_ID = os.environ.get("LLM_MODEL_ID", "us.anthropic.claude-haiku-4-5-20251001-v1:0")
 
-
-def _invoke_llm(prompt: str, max_tokens: int = 256) -> str:
-    """Invoke Bedrock Claude Haiku and return the text response."""
-    bedrock = boto3.client("bedrock-runtime")
-    response = bedrock.invoke_model(
-        modelId=LLM_MODEL_ID,
-        contentType="application/json",
-        accept="application/json",
-        body=json.dumps({
-            "anthropic_version": "bedrock-2023-05-31",
-            "max_tokens": max_tokens,
-            "messages": [{"role": "user", "content": prompt}],
-        }),
-    )
-    result = json.loads(response["body"].read())
-    return result.get("content", [{}])[0].get("text", "")
-
-
-def _parse_maintainers_fallback(content: str) -> List[Dict]:
-    """Regex fallback: extract GitHub handles from the Current Maintainers section."""
+def _parse_maintainers(content: str) -> List[Dict]:
+    """Deterministic regex parser: extract GitHub handles from the Current Maintainers section."""
     in_current = False
     maintainers = []
     for line in content.splitlines():
@@ -163,7 +173,7 @@ def _parse_maintainers_fallback(content: str) -> List[Dict]:
 
 
 def get_repo_maintainers(token: str, owner: str, repo: str) -> str:
-    """Fetch current maintainers from MAINTAINERS.md using LLM with regex fallback."""
+    """Fetch current maintainers from MAINTAINERS.md using deterministic regex parsing."""
     try:
         resp = requests.get(
             f"{API_BASE}/repos/{owner}/{repo}/contents/MAINTAINERS.md",
@@ -179,25 +189,7 @@ def get_repo_maintainers(token: str, owner: str, repo: str) -> str:
                 "message": f"MAINTAINERS.md not found in {owner}/{repo} (HTTP {resp.status_code})",
             })
 
-        content = resp.text
-        maintainers = None
-
-        try:
-            prompt = (
-                "Extract ONLY the current/active maintainers from this MAINTAINERS.md file. "
-                "Do NOT include emeritus, former, or inactive maintainers.\n\n"
-                f"{content}\n\n"
-                "Respond with ONLY a JSON array of objects like:\n"
-                '[{"github_id": "username", "name": "Display Name"}]\n'
-                "If you cannot determine any maintainers, return an empty array []."
-            )
-            text = _invoke_llm(prompt, max_tokens=1000)
-            maintainers = json.loads(text)
-        except Exception as e:
-            logger.warning("LLM maintainer parsing failed for %s/%s: %s, using regex fallback", owner, repo, e)
-
-        if not maintainers:
-            maintainers = _parse_maintainers_fallback(content)
+        maintainers = _parse_maintainers(resp.text)
 
         return json.dumps({
             "status": "success",

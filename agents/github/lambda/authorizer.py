@@ -33,6 +33,14 @@ def validate_org_scope(function_name: str, params: Dict[str, str]) -> Optional[s
 
     Returns an error message if validation fails, None if valid.
     """
+    # Reject any model-supplied organization that differs from the configured ORG
+    org_param = params.get("organization", "")
+    if org_param and org_param != ORG:
+        return (
+            f"Operation rejected: organization '{org_param}' is not permitted. "
+            f"Only operations within {ORG} are allowed."
+        )
+
     # For transfer_issue, validate the target repo is within the org
     if function_name == "transfer_issue":
         target_repo = params.get("target_repo", "")
@@ -74,6 +82,14 @@ def audit_log(
         "repo": repo,
         "success": success,
     }
+
+    # Include authenticated actor IDs when available (from 2PR params)
+    requester = params.get("requester_user_id")
+    approver = params.get("approver_user_id")
+    if requester:
+        log_entry["requester_user_id"] = requester
+    if approver:
+        log_entry["approver_user_id"] = approver
 
     if is_write:
         if "pr_number" in params:

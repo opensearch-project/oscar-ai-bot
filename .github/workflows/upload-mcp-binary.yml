@@ -1,0 +1,82 @@
+name: upload-mcp-binary
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'GitHub MCP Server version tag (e.g., v1.0.4)'
+        required: true
+        type: string
+
+jobs:
+  upload:
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: write
+    env:
+      ARTIFACTS_BUCKET: ${{ secrets.ARTIFACTS_BUCKET }}
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+
+      - name: Download binary from upstream
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          TARBALL="github-mcp-server_Linux_x86_64.tar.gz"
+          curl -sfL "https://github.com/github/github-mcp-server/releases/download/${VERSION}/${TARBALL}" -o "${TARBALL}"
+          tar xz github-mcp-server < "${TARBALL}"
+          chmod +x github-mcp-server
+          rm "${TARBALL}"
+
+      - name: Compute SHA256
+        id: sha
+        run: |
+          SHA=$(sha256sum github-mcp-server | awk '{print $1}')
+          echo "sha256=${SHA}" >> $GITHUB_OUTPUT
+          echo "SHA256: ${SHA}"
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@61815dcd50bd041e203e49132bacad1fd04d2708 # v5
+        with:
+          role-to-assume: ${{ secrets.ARTIFACTS_UPLOAD_ROLE }}
+          aws-region: 'us-east-1'
+
+      - name: Upload to S3
+        env:
+          VERSION: ${{ inputs.version }}
+          SHA256: ${{ steps.sha.outputs.sha256 }}
+        run: |
+          S3_KEY="github-mcp-server/${VERSION}/github-mcp-server"
+          aws s3 cp github-mcp-server "s3://${ARTIFACTS_BUCKET}/${S3_KEY}" \
+            --metadata "sha256=${SHA256},version=${VERSION}"
+          echo "Uploaded to s3://${ARTIFACTS_BUCKET}/${S3_KEY}"
+
+      - name: Update manifest
+        env:
+          VERSION: ${{ inputs.version }}
+          SHA256: ${{ steps.sha.outputs.sha256 }}
+        run: |
+          python -c "
+          import json
+          manifest = {
+              'name': 'github-mcp-server',
+              'version': '${{ inputs.version }}',
+              'source': 'https://github.com/github/github-mcp-server/releases',
+              'platform': 'Linux_x86_64',
+              'sha256': '${SHA256}',
+              's3_key': 'github-mcp-server/${VERSION}/github-mcp-server',
+          }
+          with open('agents/github/mcp-server.json', 'w') as f:
+              json.dump(manifest, f, indent=2)
+              f.write('\n')
+          "
+
+      - name: Commit updated manifest
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add agents/github/mcp-server.json
+          git diff --cached --quiet && echo "No changes to commit" && exit 0
+          git commit -m "Update MCP server manifest to ${{ inputs.version }}"
+          git push

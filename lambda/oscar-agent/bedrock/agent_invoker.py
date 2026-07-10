@@ -12,6 +12,7 @@ and response processing for the OSCAR agent system.
 import json
 import logging
 import time
+import uuid
 from typing import Any, Dict, Optional, Tuple
 
 import boto3
@@ -77,7 +78,7 @@ class BedrockAgentCore:
             'agentId': agent_id,
             'agentAliasId': alias_id,
             'inputText': query,
-            'sessionId': session_id or f"session-{int(time.time())}",
+            'sessionId': session_id or f"session-{uuid.uuid4().hex}",
             'enableTrace': True,  # Enable trace to see raw model output
             'sessionState': {
                 'sessionAttributes': {
@@ -150,7 +151,7 @@ class BedrockAgentCore:
 
             # If still no session ID, generate one for consistency
             else:
-                returned_session_id = f"session-{int(time.time())}"
+                returned_session_id = f"session-{uuid.uuid4().hex}"
                 logger.debug(f"Generated new session ID: {returned_session_id}")
 
             logger.info(f"Agent response received, length: {len(response_text)} characters")

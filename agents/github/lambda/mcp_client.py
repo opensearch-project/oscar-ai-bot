@@ -23,6 +23,17 @@ BINARY_NAME = "github-mcp-server"
 BINARY_SOURCE = os.path.join(os.path.dirname(__file__), "bin", BINARY_NAME)
 BINARY_PATH = f"/tmp/{BINARY_NAME}"
 
+ALLOWED_MCP_TOOLS = frozenset({
+    "pull_request_read",
+    "list_pull_requests",
+    "issue_read",
+    "list_issues",
+    "search_issues",
+    "search_pull_requests",
+    "merge_pull_request",
+    "issue_write",
+})
+
 
 class MCPClient:
     """Manages a GitHub MCP Server subprocess and communicates via JSON-RPC over stdio."""
@@ -188,9 +199,13 @@ class MCPClient:
 
     # ----------------------------------------------------------------- public
 
-    def get_token(self) -> str:
-        """Get a valid installation access token for direct GitHub API calls."""
-        token, _ = self._tokens.get_token()
+    def get_token(self, repositories: "Optional[list]" = None) -> str:
+        """Get a valid installation access token for direct GitHub API calls.
+
+        If repositories is provided, the token is scoped to only those repos.
+        Pass None for org-wide access (bulk operations).
+        """
+        token, _ = self._tokens.get_token(repositories=repositories)
         return token
 
     def call_tool(self, tool_name: str, arguments: Dict[str, Any]) -> str:
@@ -199,6 +214,13 @@ class MCPClient:
         Retries on server errors (5xx patterns) and rate limit errors with
         exponential backoff. Non-retryable errors are raised immediately.
         """
+        if tool_name not in ALLOWED_MCP_TOOLS:
+            logger.error("MCP tool '%s' not in allowlist — blocked", tool_name)
+            raise ValueError(
+                f"Tool '{tool_name}' is not permitted. "
+                f"Allowed tools: {sorted(ALLOWED_MCP_TOOLS)}"
+            )
+
         last_error = None
 
         for attempt in range(MAX_TOOL_RETRIES):

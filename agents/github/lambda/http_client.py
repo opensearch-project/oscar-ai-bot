@@ -10,7 +10,7 @@ import logging
 import os
 import time
 from datetime import datetime
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 import jwt
 import requests
@@ -130,30 +130,53 @@ class TokenManager:
         self._installation_id = installation_id
         self._token: Optional[str] = None
         self._token_expires_at: float = 0
+        self._token_repos: Optional[frozenset] = None
 
     def _generate_jwt(self) -> str:
         now = int(time.time())
         payload = {"iat": now - 60, "exp": now + (10 * 60), "iss": self._app_id}
         return jwt.encode(payload, self._private_key, algorithm="RS256")
 
-    def needs_refresh(self) -> bool:
-        return time.time() >= (self._token_expires_at - TOKEN_EXPIRY_BUFFER)
+    def needs_refresh(self, repositories: Optional[List[str]] = None) -> bool:
+        if time.time() >= (self._token_expires_at - TOKEN_EXPIRY_BUFFER):
+            return True
+        if repositories is not None:
+            requested = frozenset(repositories)
+            if self._token_repos is not None and not requested.issubset(self._token_repos):
+                return True
+        return False
 
-    def get_token(self) -> Tuple[str, float]:
-        """Return (token, expires_at), refreshing if needed."""
-        if self._token and time.time() < (self._token_expires_at - TOKEN_EXPIRY_BUFFER):
+    def get_token(self, repositories: Optional[List[str]] = None) -> Tuple[str, float]:
+        """Return (token, expires_at), refreshing if needed.
+
+        If repositories is provided, the token is scoped to only those repos.
+        Pass None for org-wide access (bulk operations).
+        """
+        requested_set = frozenset(repositories) if repositories else None
+
+        if (
+            self._token
+            and time.time() < (self._token_expires_at - TOKEN_EXPIRY_BUFFER)
+            and (requested_set is None or (self._token_repos is not None and requested_set.issubset(self._token_repos)))
+        ):
             return self._token, self._token_expires_at
 
         token_jwt = self._generate_jwt()
+        body: Dict[str, Any] = {}
+        if repositories:
+            body["repositories"] = repositories
+
         resp = requests.post(
             f"{API_BASE}/app/installations/{self._installation_id}/access_tokens",
             headers={"Authorization": f"Bearer {token_jwt}", "Accept": "application/vnd.github+json"},
+            json=body if body else None,
             timeout=30,
         )
         resp.raise_for_status()
         data = resp.json()
 
         self._token = data["token"]
+        self._token_repos = requested_set
         expires_str = data.get("expires_at", "")
         if expires_str:
             dt = datetime.fromisoformat(expires_str.replace("Z", "+00:00"))
@@ -161,5 +184,6 @@ class TokenManager:
         else:
             self._token_expires_at = time.time() + 3600
 
-        logger.info("GitHub installation token refreshed")
+        scope_desc = f"repos={repositories}" if repositories else "org-wide"
+        logger.info("GitHub installation token refreshed (%s)", scope_desc)
         return self._token, self._token_expires_at

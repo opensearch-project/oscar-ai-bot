@@ -13,6 +13,8 @@ import hmac
 import json
 import logging
 import os
+import re
+from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 
 import boto3
@@ -22,6 +24,16 @@ logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
 BOT_MENTION = os.environ.get("GITHUB_BOT_USERNAME", "oscar-github-agent-test")
+if not BOT_MENTION or BOT_MENTION == "oscar-github-agent-test":
+    logger.warning("GITHUB_BOT_USERNAME is not set or using test default — set explicitly in production")
+WEBHOOK_TIMESTAMP_TOLERANCE = 300  # 5 minutes
+
+_BOT_MENTION_RE = re.compile(r'(?<![a-zA-Z0-9_-])@' + re.escape(BOT_MENTION) + r'(?![a-zA-Z0-9_-])')
+
+
+def _is_bot_mentioned(text: str) -> bool:
+    """Check for exact @mention of the bot (word-boundary match, not substring)."""
+    return bool(_BOT_MENTION_RE.search(text))
 
 
 def _get_secrets() -> Dict[str, str]:
@@ -81,7 +93,7 @@ def _build_slack_message(event_type: str, payload: Dict[str, Any]) -> Optional[D
         sender = payload.get("sender", {})
         body = comment.get("body", "")
 
-        if f"@{BOT_MENTION}" not in body:
+        if not _is_bot_mentioned(body):
             return None
 
         issue_type = "PR" if issue.get("pull_request") else "Issue"
@@ -181,6 +193,33 @@ def _build_slack_message(event_type: str, payload: Dict[str, Any]) -> Optional[D
     return None
 
 
+def _check_payload_freshness(payload: Dict[str, Any]) -> bool:
+    """Check if the webhook payload's event timestamp is within tolerance."""
+    # Check comment.created_at or issue.created_at/updated_at
+    timestamp_str = None
+    if "comment" in payload:
+        timestamp_str = payload["comment"].get("created_at")
+    elif "issue" in payload:
+        timestamp_str = payload["issue"].get("updated_at") or payload["issue"].get("created_at")
+
+    if not timestamp_str:
+        return True
+
+    try:
+        event_time = datetime.fromisoformat(timestamp_str.replace("Z", "+00:00"))
+        age = (datetime.now(timezone.utc) - event_time).total_seconds()
+        if age > WEBHOOK_TIMESTAMP_TOLERANCE:
+            logger.warning(
+                "WEBHOOK_REPLAY_REJECTED: payload age %.0fs exceeds %ds tolerance (timestamp=%s)",
+                age, WEBHOOK_TIMESTAMP_TOLERANCE, timestamp_str,
+            )
+            return False
+    except (ValueError, TypeError) as e:
+        logger.warning("Could not parse webhook timestamp '%s': %s", timestamp_str, e)
+
+    return True
+
+
 def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     """Main Lambda handler for GitHub webhook events."""
     headers = event.get("headers") or {}
@@ -200,6 +239,9 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         payload = json.loads(body_str)
     except json.JSONDecodeError:
         return {"statusCode": 400, "body": "Invalid JSON"}
+
+    if not _check_payload_freshness(payload):
+        return {"statusCode": 400, "body": "Webhook payload too old (possible replay)"}
 
     logger.info(
         "GitHub webhook: event=%s action=%s repo=%s",

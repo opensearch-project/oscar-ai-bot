@@ -18,39 +18,6 @@ def get_action_groups(lambda_arn: str) -> List[bedrock.CfnAgent.AgentActionGroup
     executor = bedrock.CfnAgent.ActionGroupExecutorProperty(lambda_=lambda_arn)
 
     return [
-        # ---- Transitional: disable old action groups so CloudFormation can remove them.
-        # TODO: Remove these blocks after one successful deployment.
-        bedrock.CfnAgent.AgentActionGroupProperty(
-            action_group_name="githubSearchOperations",
-            description="Deprecated",
-            action_group_state="DISABLED",
-            action_group_executor=executor,
-            function_schema=bedrock.CfnAgent.FunctionSchemaProperty(
-                functions=[
-                    bedrock.CfnAgent.FunctionProperty(
-                        name="noop",
-                        description="Placeholder",
-                        parameters={},
-                    ),
-                ]
-            ),
-        ),
-        bedrock.CfnAgent.AgentActionGroupProperty(
-            action_group_name="githubCISecurityOperations",
-            description="Deprecated",
-            action_group_state="DISABLED",
-            action_group_executor=executor,
-            function_schema=bedrock.CfnAgent.FunctionSchemaProperty(
-                functions=[
-                    bedrock.CfnAgent.FunctionProperty(
-                        name="noop",
-                        description="Placeholder",
-                        parameters={},
-                    ),
-                ]
-            ),
-        ),
-
         # -------------------------------------------------------- Group 1: Read Operations
         bedrock.CfnAgent.AgentActionGroupProperty(
             action_group_name="githubReadOperations",
@@ -182,6 +149,18 @@ def get_action_groups(lambda_arn: str) -> List[bedrock.CfnAgent.AgentActionGroup
                                 "string",
                                 "Target repository name to transfer the issue to",
                                 True,
+                            ),
+                            "requester_user_id": _param(
+                                "string",
+                                "Slack user ID (U...) of the user who originally requested "
+                                "the transfer. Extract from [USER_ID: ...] prefix. "
+                                "MUST be different from approver_user_id (two-person review).",
+                            ),
+                            "approver_user_id": _param(
+                                "string",
+                                "Slack user ID (U...) of the user who confirmed/approved "
+                                "the transfer. Extract from [USER_ID: ...] prefix of "
+                                "the confirmation turn. MUST be different from requester_user_id.",
                             ),
                         },
                     ),
