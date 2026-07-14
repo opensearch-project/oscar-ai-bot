@@ -42,7 +42,7 @@ def build_tickets_query(
     - If cve_id provided: adds {"term": {"cveId": cve_id}}
     - If project_name provided: adds {"term": {"projectName": project_name}}
     - If branch provided: resolves via resolve_version_tag, then adds {"term": {"branches": resolved_branch}}
-    - If none provided: uses match_all query with mandatory status filter
+    - If none provided: uses bool/filter with only the mandatory status filter
 
     Args:
         cve_id: Optional CVE identifier to filter tickets (e.g., "CVE-2026-27903").
@@ -66,33 +66,16 @@ def build_tickets_query(
 
     sort = [{'timestamp.created': {'order': 'desc'}}]
 
-    # When no optional filters are provided, use match_all with the
-    # mandatory status filter. Otherwise, use bool/filter with all clauses.
-    has_optional_filters = any([cve_id, project_name, branch])
-
-    if has_optional_filters:
-        query = {
-            'size': _DEFAULT_QUERY_SIZE,
-            '_source': ['ticketId'],
-            'sort': sort,
-            'query': {
-                'bool': {
-                    'filter': filters,
-                },
+    query = {
+        'size': _DEFAULT_QUERY_SIZE,
+        '_source': ['ticketId'],
+        'sort': sort,
+        'query': {
+            'bool': {
+                'filter': filters,
             },
-        }
-    else:
-        query = {
-            'size': _DEFAULT_QUERY_SIZE,
-            '_source': ['ticketId'],
-            'sort': sort,
-            'query': {
-                'bool': {
-                    'must': {'match_all': {}},
-                    'filter': filters,
-                },
-            },
-        }
+        },
+    }
 
     logger.info(f'TICKETS_QUERY: Built query with {len(filters)} filter(s)')
     return query

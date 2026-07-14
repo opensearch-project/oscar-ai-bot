@@ -172,20 +172,12 @@ class TestQueryStructureInvariant:
         branch=st.one_of(st.none(), st.text()),
     )
     @settings(max_examples=100)
-    def test_match_all_when_no_optional_filters(self, cve_id, project_name, branch):
-        """match_all is used when no optional filters are provided.
+    def test_no_must_clause_present(self, cve_id, project_name, branch):
+        """The query never contains a must clause — bool/filter is sufficient.
 
         **Validates: Requirements 4.5**
         """
         query = build_tickets_query(cve_id=cve_id, project_name=project_name, branch=branch)
-        has_optional = any([cve_id, project_name, branch])
-
-        if not has_optional:
-            assert query['query']['bool'].get('must') == {'match_all': {}}, (
-                'match_all should be present when no optional filters are provided'
-            )
-        else:
-            # When optional filters are provided, match_all should NOT be present
-            assert 'must' not in query['query']['bool'], (
-                'match_all should NOT be present when optional filters are provided'
-            )
+        assert 'must' not in query['query']['bool'], (
+            'must clause should not be present; bool/filter alone handles all cases'
+        )

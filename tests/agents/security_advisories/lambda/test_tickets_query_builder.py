@@ -5,7 +5,7 @@
 
 These tests verify DSL query construction for the tickets index,
 including filtering by CVE ID, project name, branch, and the
-match_all fallback when no parameters are provided.
+no-parameters case where only the mandatory status filter applies.
 
 Validates: Requirements 4.1, 4.2, 4.3, 4.4, 4.5, 4.6, 4.7
 """
@@ -150,14 +150,14 @@ class TestBuildTicketsQueryAllParams:
 
 
 # ---------------------------------------------------------------------------
-# Test: build_tickets_query with no parameters (match_all fallback)
+# Test: build_tickets_query with no parameters
 # ---------------------------------------------------------------------------
 
 
 class TestBuildTicketsQueryNoParams:
-    """Test build_tickets_query with no parameters uses match_all."""
+    """Test build_tickets_query with no parameters applies only the status filter."""
 
-    def test_no_params_uses_match_all_with_status_filter(self):
+    def test_no_params_produces_only_status_filter(self):
         """Validates: Requirements 4.1, 4.5"""
         mod = _load_tickets_query_builder()
 
@@ -167,11 +167,10 @@ class TestBuildTicketsQueryNoParams:
         assert result['_source'] == ['ticketId']
         assert result['sort'] == [{'timestamp.created': {'order': 'desc'}}]
 
-        query = result['query']['bool']
-        assert query['must'] == {'match_all': {}}
-        filters = query['filter']
+        filters = result['query']['bool']['filter']
         assert {'term': {'status': 'Assigned'}} in filters
         assert len(filters) == 1
+        assert 'must' not in result['query']['bool']
 
 
 # ---------------------------------------------------------------------------
