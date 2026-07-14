@@ -16,6 +16,8 @@ Functions:
 import logging
 from typing import Any, Dict, Optional
 
+from query_utils import resolve_version_tag
+
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
@@ -39,7 +41,7 @@ def build_tickets_query(
     Conditional filters added when parameters are provided:
     - If cve_id provided: adds {"term": {"cveId": cve_id}}
     - If project_name provided: adds {"term": {"projectName": project_name}}
-    - If branch provided: adds {"term": {"branches": branch}}
+    - If branch provided: resolves via resolve_version_tag, then adds {"term": {"branches": resolved_branch}}
     - If none provided: uses match_all query with mandatory status filter
 
     Args:
@@ -59,6 +61,7 @@ def build_tickets_query(
         filters.append({'term': {'projectName': project_name}})
 
     if branch:
+        branch = resolve_version_tag(branch)
         filters.append({'term': {'branches': branch}})
 
     sort = [{'timestamp.created': {'order': 'desc'}}]

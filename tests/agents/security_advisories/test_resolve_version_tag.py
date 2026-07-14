@@ -1,11 +1,11 @@
 # Copyright OpenSearch Contributors
 # SPDX-License-Identifier: Apache-2.0
 
-"""Tests for resolve_version_tag in dsl_query_builder.
+"""Tests for resolve_version_tag in query_utils.
 
 Covers:
 - resolve_version_tag: maps user-provided versions to the canonical
-  origin/{major}.{minor} tag format used in the scans index.
+  origin/{major}.{minor} tag format used in the scans and tickets indices.
 """
 
 import importlib
@@ -19,7 +19,7 @@ _LAMBDA_PATH = os.path.join(
 
 
 def _load_dsl_query_builder():
-    """Import dsl_query_builder with mocked aws_utils."""
+    """Import query_utils with mocked aws_utils."""
     if _LAMBDA_PATH not in sys.path:
         sys.path.insert(0, _LAMBDA_PATH)
 
@@ -35,7 +35,7 @@ def _load_dsl_query_builder():
         'config': mock_config_module,
     }):
         spec = importlib.util.spec_from_file_location(
-            'sa_dsl_query_builder_resolve', os.path.join(_LAMBDA_PATH, 'dsl_query_builder.py'),
+            'sa_query_utils_resolve', os.path.join(_LAMBDA_PATH, 'query_utils.py'),
         )
         mod = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(mod)
