@@ -16,7 +16,7 @@ from typing import Optional
 from aws_cdk import App, Environment
 from dotenv import load_dotenv
 
-load_dotenv()
+load_dotenv(override=True)
 
 from agents.github import GitHubAgent
 from agents.jenkins import JenkinsAgent

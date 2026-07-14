@@ -157,7 +157,10 @@ class TokenManager:
         if (
             self._token
             and time.time() < (self._token_expires_at - TOKEN_EXPIRY_BUFFER)
-            and (requested_set is None or (self._token_repos is not None and requested_set.issubset(self._token_repos)))
+            and (
+                (requested_set is None and self._token_repos is None)
+                or (requested_set is not None and self._token_repos is not None and requested_set.issubset(self._token_repos))
+            )
         ):
             return self._token, self._token_expires_at
 
