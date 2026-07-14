@@ -77,13 +77,15 @@ def handle_query_tickets(params: Dict[str, str], request_id: str) -> Dict[str, A
         }
 
     hits = result.get('hits', {}).get('hits', [])
-    results = [
-        {
-            "ticketId": hit["_source"]["ticketId"],
-            "ticket_url": f'{_TICKET_URL_PREFIX}{hit["_source"]["ticketId"]}',
-        }
-        for hit in hits
-    ]
+    results = []
+    for hit in hits:
+        ticket_id = hit.get("_source", {}).get("ticketId")
+        if not ticket_id:
+            continue
+        results.append({
+            "ticketId": ticket_id,
+            "ticket_url": f'{_TICKET_URL_PREFIX}{ticket_id}',
+        })
 
     logger.info(f"[{request_id}] QUERY_TICKETS: Found {len(results)} ticket(s)")
 
@@ -130,7 +132,11 @@ def handle_list_ticket_projects(request_id: str) -> Dict[str, Any]:
         }
 
     hits = result.get('hits', {}).get('hits', [])
-    projects = [hit["_source"]["projectName"] for hit in hits]
+    projects = [
+        hit.get("_source", {}).get("projectName")
+        for hit in hits
+        if hit.get("_source", {}).get("projectName")
+    ]
 
     logger.info(f"[{request_id}] LIST_TICKET_PROJECTS: Found {len(projects)} project(s)")
 
