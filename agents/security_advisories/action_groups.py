@@ -94,6 +94,42 @@ def _privileged_action_group(
                     ),
                     parameters={},
                 ),
+                bedrock.CfnAgent.FunctionProperty(
+                    name="query_tickets",
+                    description=(
+                        "Query SIM tickets by CVE ID, project name, or branch."
+                    ),
+                    parameters={
+                        "cve_id": bedrock.CfnAgent.ParameterDetailProperty(
+                            type="string",
+                            description=(
+                                "CVE identifier to filter tickets (e.g., 'CVE-2026-27903')."
+                            ),
+                            required=False,
+                        ),
+                        "project_name": bedrock.CfnAgent.ParameterDetailProperty(
+                            type="string",
+                            description=(
+                                "Project or component name to filter tickets."
+                            ),
+                            required=False,
+                        ),
+                        "branch": bedrock.CfnAgent.ParameterDetailProperty(
+                            type="string",
+                            description=(
+                                "Branch name to filter tickets (e.g., 'origin/main' or 'origin/3.7')."
+                            ),
+                            required=False,
+                        ),
+                    },
+                ),
+                bedrock.CfnAgent.FunctionProperty(
+                    name="list_ticket_projects",
+                    description=(
+                        "List projects that currently have assigned SIM tickets."
+                    ),
+                    parameters={},
+                ),
             ]
         ),
     )

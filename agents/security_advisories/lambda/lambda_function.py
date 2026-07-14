@@ -9,6 +9,8 @@ appropriate handler based on the function name in the event:
 
 - ``query_vulnerabilities`` → vulnerabilities_handler
 - ``list_projects`` → projects_handler
+- ``query_tickets`` → tickets_handler
+- ``list_ticket_projects`` → tickets_handler
 
 All results are wrapped in the Bedrock response envelope via
 ``create_response()``.
@@ -26,12 +28,13 @@ from typing import Any, Dict, List
 from config import config
 from projects_handler import handle_list_projects
 from response_builder import create_response
+from tickets_handler import handle_list_ticket_projects, handle_query_tickets
 from vulnerabilities_handler import handle_query_vulnerabilities
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
-AVAILABLE_FUNCTIONS = ['query_vulnerabilities', 'list_projects']
+AVAILABLE_FUNCTIONS = ['query_vulnerabilities', 'list_projects', 'query_tickets', 'list_ticket_projects']
 
 
 def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
@@ -66,6 +69,10 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             result = handle_query_vulnerabilities(params, request_id)
         elif function_name == 'list_projects':
             result = handle_list_projects(request_id)
+        elif function_name == 'query_tickets':
+            result = handle_query_tickets(params, request_id)
+        elif function_name == 'list_ticket_projects':
+            result = handle_list_ticket_projects(request_id)
         else:
             result = {
                 'status': 'error',

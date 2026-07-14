@@ -57,6 +57,7 @@ def _load_lambda_function(
     mock_config=None,
     mock_vuln_handler=None,
     mock_proj_handler=None,
+    mock_tickets_handler=None,
     mock_response_builder=None,
 ):
     """Import lambda_function with mocked dependencies."""
@@ -72,6 +73,14 @@ def _load_lambda_function(
         mock_proj_handler.handle_list_projects = MagicMock(
             return_value={'status': 'success', 'projects': []},
         )
+    if mock_tickets_handler is None:
+        mock_tickets_handler = MagicMock()
+        mock_tickets_handler.handle_query_tickets = MagicMock(
+            return_value={'status': 'success', 'result_count': 0, 'results': []},
+        )
+        mock_tickets_handler.handle_list_ticket_projects = MagicMock(
+            return_value={'status': 'success', 'projects': []},
+        )
     if mock_response_builder is None:
         mock_response_builder = _make_mock_response_builder()
 
@@ -79,6 +88,7 @@ def _load_lambda_function(
         'config': mock_config,
         'vulnerabilities_handler': mock_vuln_handler,
         'projects_handler': mock_proj_handler,
+        'tickets_handler': mock_tickets_handler,
         'response_builder': mock_response_builder,
     }):
         spec = importlib.util.spec_from_file_location(
@@ -87,7 +97,7 @@ def _load_lambda_function(
         )
         mod = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(mod)
-        return mod, mock_vuln_handler, mock_proj_handler, mock_response_builder
+        return mod, mock_vuln_handler, mock_proj_handler, mock_tickets_handler, mock_response_builder
 
 
 # ---------------------------------------------------------------------------
@@ -103,7 +113,7 @@ class TestRoutingToQueryVulnerabilities:
         mock_vuln.handle_query_vulnerabilities = MagicMock(
             return_value={'status': 'success', 'results': []},
         )
-        mod, _, _, _ = _load_lambda_function(mock_vuln_handler=mock_vuln)
+        mod, _, _, _, _ = _load_lambda_function(mock_vuln_handler=mock_vuln)
 
         event = {
             'function': 'query_vulnerabilities',
@@ -122,7 +132,7 @@ class TestRoutingToQueryVulnerabilities:
         mock_vuln.handle_query_vulnerabilities = MagicMock(
             return_value={'status': 'success', 'results': []},
         )
-        mod, _, _, _ = _load_lambda_function(mock_vuln_handler=mock_vuln)
+        mod, _, _, _, _ = _load_lambda_function(mock_vuln_handler=mock_vuln)
 
         event = {
             'function': 'query_vulnerabilities',
@@ -151,7 +161,7 @@ class TestRoutingToListProjects:
         mock_proj.handle_list_projects = MagicMock(
             return_value={'status': 'success', 'projects': []},
         )
-        mod, _, _, _ = _load_lambda_function(mock_proj_handler=mock_proj)
+        mod, _, _, _, _ = _load_lambda_function(mock_proj_handler=mock_proj)
 
         event = {
             'function': 'list_projects',
@@ -168,7 +178,7 @@ class TestRoutingToListProjects:
         mock_proj.handle_list_projects = MagicMock(
             return_value={'status': 'success', 'projects': []},
         )
-        mod, _, _, _ = _load_lambda_function(mock_proj_handler=mock_proj)
+        mod, _, _, _, _ = _load_lambda_function(mock_proj_handler=mock_proj)
 
         event = {
             'function': 'list_projects',
@@ -193,7 +203,7 @@ class TestUnknownFunctionHandling:
     """Test unknown function name returns error with available_functions."""
 
     def test_unknown_function_returns_error(self):
-        mod, _, _, _ = _load_lambda_function()
+        mod, _, _, _, _ = _load_lambda_function()
 
         event = {
             'function': 'nonexistent_function',
@@ -210,7 +220,7 @@ class TestUnknownFunctionHandling:
         assert 'nonexistent_function' in body['message']
 
     def test_unknown_function_includes_available_functions(self):
-        mod, _, _, _ = _load_lambda_function()
+        mod, _, _, _, _ = _load_lambda_function()
 
         event = {
             'function': 'nonexistent_function',
@@ -228,7 +238,7 @@ class TestUnknownFunctionHandling:
         assert 'list_projects' in body['available_functions']
 
     def test_empty_function_name_returns_error(self):
-        mod, _, _, _ = _load_lambda_function()
+        mod, _, _, _, _ = _load_lambda_function()
 
         event = {
             'function': '',
@@ -254,7 +264,7 @@ class TestParameterParsing:
     """Test parameter parsing from Bedrock event format."""
 
     def test_parse_parameters_from_list(self):
-        mod, _, _, _ = _load_lambda_function()
+        mod, _, _, _, _ = _load_lambda_function()
 
         params = mod._parse_parameters([
             {'name': 'query', 'value': 'Show CVEs'},
@@ -264,14 +274,14 @@ class TestParameterParsing:
         assert params == {'query': 'Show CVEs', 'version': '2.19.6'}
 
     def test_parse_empty_parameters(self):
-        mod, _, _, _ = _load_lambda_function()
+        mod, _, _, _, _ = _load_lambda_function()
 
         params = mod._parse_parameters([])
 
         assert params == {}
 
     def test_parse_ignores_malformed_entries(self):
-        mod, _, _, _ = _load_lambda_function()
+        mod, _, _, _, _ = _load_lambda_function()
 
         params = mod._parse_parameters([
             {'name': 'query', 'value': 'Show CVEs'},
@@ -287,7 +297,7 @@ class TestParameterParsing:
         mock_vuln.handle_query_vulnerabilities = MagicMock(
             return_value={'status': 'success', 'results': []},
         )
-        mod, _, _, _ = _load_lambda_function(mock_vuln_handler=mock_vuln)
+        mod, _, _, _, _ = _load_lambda_function(mock_vuln_handler=mock_vuln)
 
         event = {
             'function': 'query_vulnerabilities',
@@ -311,7 +321,7 @@ class TestResponseEnvelope:
     """Test Bedrock response envelope structure."""
 
     def test_response_has_message_version(self):
-        mod, _, _, _ = _load_lambda_function()
+        mod, _, _, _, _ = _load_lambda_function()
 
         event = {
             'function': 'list_projects',
@@ -324,7 +334,7 @@ class TestResponseEnvelope:
         assert response['messageVersion'] == '1.0'
 
     def test_response_has_action_group(self):
-        mod, _, _, _ = _load_lambda_function()
+        mod, _, _, _, _ = _load_lambda_function()
 
         event = {
             'function': 'list_projects',
@@ -336,7 +346,7 @@ class TestResponseEnvelope:
         assert response['response']['actionGroup'] == 'securityAdvisoriesActions'
 
     def test_response_has_function_name(self):
-        mod, _, _, _ = _load_lambda_function()
+        mod, _, _, _, _ = _load_lambda_function()
 
         event = {
             'function': 'list_projects',
@@ -348,7 +358,7 @@ class TestResponseEnvelope:
         assert response['response']['function'] == 'list_projects'
 
     def test_response_body_is_json_string(self):
-        mod, _, _, _ = _load_lambda_function()
+        mod, _, _, _, _ = _load_lambda_function()
 
         event = {
             'function': 'list_projects',
@@ -363,7 +373,7 @@ class TestResponseEnvelope:
 
     def test_create_response_called_with_event_and_result(self):
         mock_rb = _make_mock_response_builder()
-        mod, _, _, _ = _load_lambda_function(mock_response_builder=mock_rb)
+        mod, _, _, _, _ = _load_lambda_function(mock_response_builder=mock_rb)
 
         event = {
             'function': 'list_projects',
@@ -387,7 +397,7 @@ class TestLambdaContextHandling:
 
     def test_sets_request_id_from_context(self):
         mock_config = _make_mock_config()
-        mod, _, _, _ = _load_lambda_function(mock_config=mock_config)
+        mod, _, _, _, _ = _load_lambda_function(mock_config=mock_config)
 
         mock_context = MagicMock()
         mock_context.aws_request_id = 'lambda-req-123'
@@ -402,7 +412,7 @@ class TestLambdaContextHandling:
         mock_config.config.set_request_id.assert_called_once_with('lambda-req-123')
 
     def test_handles_none_context(self):
-        mod, _, _, _ = _load_lambda_function()
+        mod, _, _, _, _ = _load_lambda_function()
 
         event = {
             'function': 'list_projects',
@@ -413,3 +423,140 @@ class TestLambdaContextHandling:
         response = mod.lambda_handler(event, None)
 
         assert 'messageVersion' in response
+
+
+# ---------------------------------------------------------------------------
+# Routing tests for ticket functions
+# ---------------------------------------------------------------------------
+
+
+class TestRoutingToQueryTickets:
+    """Test routing to query_tickets handler.
+
+    **Validates: Requirements 3.5**
+    """
+
+    def test_routes_to_tickets_handler(self):
+        mock_tickets = MagicMock()
+        mock_tickets.handle_query_tickets = MagicMock(
+            return_value={'status': 'success', 'result_count': 0, 'results': []},
+        )
+        mock_tickets.handle_list_ticket_projects = MagicMock()
+        mod, _, _, _, _ = _load_lambda_function(mock_tickets_handler=mock_tickets)
+
+        event = {
+            'function': 'query_tickets',
+            'actionGroup': 'securityAdvisoriesActions',
+            'parameters': [
+                {'name': 'cve_id', 'value': 'CVE-2026-27903'},
+            ],
+        }
+        mod.lambda_handler(event, None)
+
+        mock_tickets.handle_query_tickets.assert_called_once()
+
+    def test_passes_parsed_params_to_handler(self):
+        mock_tickets = MagicMock()
+        mock_tickets.handle_query_tickets = MagicMock(
+            return_value={'status': 'success', 'result_count': 0, 'results': []},
+        )
+        mock_tickets.handle_list_ticket_projects = MagicMock()
+        mod, _, _, _, _ = _load_lambda_function(mock_tickets_handler=mock_tickets)
+
+        event = {
+            'function': 'query_tickets',
+            'actionGroup': 'securityAdvisoriesActions',
+            'parameters': [
+                {'name': 'cve_id', 'value': 'CVE-2026-27903'},
+                {'name': 'project_name', 'value': 'OpenSearch'},
+                {'name': 'branch', 'value': 'origin/main'},
+            ],
+        }
+        mod.lambda_handler(event, None)
+
+        call_args = mock_tickets.handle_query_tickets.call_args
+        params = call_args[0][0]
+        assert params['cve_id'] == 'CVE-2026-27903'
+        assert params['project_name'] == 'OpenSearch'
+        assert params['branch'] == 'origin/main'
+
+
+class TestRoutingToListTicketProjects:
+    """Test routing to list_ticket_projects handler.
+
+    **Validates: Requirements 7.2**
+    """
+
+    def test_routes_to_tickets_handler(self):
+        mock_tickets = MagicMock()
+        mock_tickets.handle_query_tickets = MagicMock()
+        mock_tickets.handle_list_ticket_projects = MagicMock(
+            return_value={'status': 'success', 'projects': []},
+        )
+        mod, _, _, _, _ = _load_lambda_function(mock_tickets_handler=mock_tickets)
+
+        event = {
+            'function': 'list_ticket_projects',
+            'actionGroup': 'securityAdvisoriesActions',
+            'parameters': [],
+        }
+        mod.lambda_handler(event, None)
+
+        mock_tickets.handle_list_ticket_projects.assert_called_once()
+
+    def test_receives_request_id(self):
+        mock_tickets = MagicMock()
+        mock_tickets.handle_query_tickets = MagicMock()
+        mock_tickets.handle_list_ticket_projects = MagicMock(
+            return_value={'status': 'success', 'projects': []},
+        )
+        mod, _, _, _, _ = _load_lambda_function(mock_tickets_handler=mock_tickets)
+
+        event = {
+            'function': 'list_ticket_projects',
+            'actionGroup': 'securityAdvisoriesActions',
+            'parameters': [],
+        }
+        mod.lambda_handler(event, None)
+
+        call_args = mock_tickets.handle_list_ticket_projects.call_args
+        request_id = call_args[0][0]
+        assert isinstance(request_id, str)
+        assert len(request_id) > 0
+
+
+class TestTicketFunctionsInAvailableFunctions:
+    """Test new functions appear in available_functions error response.
+
+    **Validates: Requirements 3.5, 7.2**
+    """
+
+    def test_query_tickets_in_available_functions(self):
+        mod, _, _, _, _ = _load_lambda_function()
+
+        event = {
+            'function': 'nonexistent_function',
+            'actionGroup': 'securityAdvisoriesActions',
+            'parameters': [],
+        }
+        response = mod.lambda_handler(event, None)
+
+        body = json.loads(
+            response['response']['functionResponse']['responseBody']['TEXT']['body'],
+        )
+        assert 'query_tickets' in body['available_functions']
+
+    def test_list_ticket_projects_in_available_functions(self):
+        mod, _, _, _, _ = _load_lambda_function()
+
+        event = {
+            'function': 'nonexistent_function',
+            'actionGroup': 'securityAdvisoriesActions',
+            'parameters': [],
+        }
+        response = mod.lambda_handler(event, None)
+
+        body = json.loads(
+            response['response']['functionResponse']['responseBody']['TEXT']['body'],
+        )
+        assert 'list_ticket_projects' in body['available_functions']
