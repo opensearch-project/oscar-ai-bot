@@ -147,7 +147,7 @@ def query_vulnerabilities(
             f'SECURITY_ADVISORIES_DSL_QUERY_FAILED: '
             f'Could not resolve scans index: {e}',
         )
-        return error_response('index_resolution_error', str(e))
+        return error_response('index_resolution_error', 'Failed to resolve scans index.')
 
     # Resolve version tag:
     # - version provided → resolve to canonical tag format

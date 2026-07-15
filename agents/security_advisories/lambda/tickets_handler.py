@@ -80,9 +80,8 @@ def handle_query_tickets(params: Dict[str, str], request_id: str) -> Dict[str, A
     try:
         result = opensearch_request('GET', f'/{TICKETS_INDEX}/_search', body=query_body)
     except RuntimeError as e:
-        error_message = str(e)
-        logger.error(f"[{request_id}] QUERY_TICKETS_FAILED: {error_message}")
-        return error_response('opensearch_error', error_message)
+        logger.error(f"[{request_id}] QUERY_TICKETS_FAILED: {e}")
+        return error_response('opensearch_error', 'OpenSearch query failed.')
     except Exception as e:
         logger.error(
             f"[{request_id}] QUERY_TICKETS_FAILED: {type(e).__name__}: {e}",
