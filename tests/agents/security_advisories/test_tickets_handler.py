@@ -52,9 +52,18 @@ def _load_tickets_handler(mock_opensearch_request=None):
     mock_tickets_query_builder.build_tickets_query = MagicMock(return_value={})
     mock_tickets_query_builder.build_list_projects_query = MagicMock(return_value={})
 
+    # Load the real query_utils module so error_response/connection_error work
+    query_utils_spec = importlib.util.spec_from_file_location(
+        'query_utils',
+        os.path.join(_LAMBDA_PATH, 'query_utils.py'),
+    )
+    query_utils_mod = importlib.util.module_from_spec(query_utils_spec)
+    query_utils_spec.loader.exec_module(query_utils_mod)
+
     with patch.dict('sys.modules', {
         'aws_utils': mock_aws_utils,
         'config': mock_config,
+        'query_utils': query_utils_mod,
         'tickets_query_builder': mock_tickets_query_builder,
     }):
         spec = importlib.util.spec_from_file_location(
@@ -311,9 +320,9 @@ class TestQueryTicketsConnectionError:
     """
 
     def test_connection_error_response(self):
-        """ConnectionError produces a connection_error typed response."""
+        """ConnectionError produces a sanitized connection_error typed response."""
         mock_opensearch_request = MagicMock(
-            side_effect=ConnectionError('Failed to connect'),
+            side_effect=ConnectionError('socket timeout on 10.0.1.42:9200'),
         )
         mod, _, _ = _load_tickets_handler(mock_opensearch_request=mock_opensearch_request)
 
@@ -321,8 +330,13 @@ class TestQueryTicketsConnectionError:
 
         assert result['status'] == 'error'
         assert result['type'] == 'connection_error'
+        assert result['retryable'] is False
         assert 'message' in result
-        assert 'Failed to connect' in result['message']
+        # Sanitized message should NOT contain raw internal details
+        assert '10.0.1.42' not in result['message']
+        assert 'socket timeout' not in result['message']
+        # Should contain the generic sanitized message
+        assert 'OpenSearch cluster' in result['message']
 
 
 class TestQueryTicketsOpenSearchError:
@@ -332,9 +346,9 @@ class TestQueryTicketsOpenSearchError:
     """
 
     def test_opensearch_error_response(self):
-        """OpenSearch request failure produces an opensearch_error typed response."""
+        """RuntimeError from opensearch_request produces an opensearch_error typed response."""
         mock_opensearch_request = MagicMock(
-            side_effect=Exception('OpenSearch request failed: 400 - Bad Request'),
+            side_effect=RuntimeError('OpenSearch request failed: 400 - Bad Request'),
         )
         mod, _, _ = _load_tickets_handler(mock_opensearch_request=mock_opensearch_request)
 
@@ -342,6 +356,7 @@ class TestQueryTicketsOpenSearchError:
 
         assert result['status'] == 'error'
         assert result['type'] == 'opensearch_error'
+        assert result['retryable'] is False
         assert 'message' in result
         assert 'OpenSearch request failed' in result['message']
 
@@ -372,9 +387,9 @@ class TestListTicketProjectsConnectionError:
     """
 
     def test_connection_error_response(self):
-        """ConnectionError produces a connection_error typed response."""
+        """ConnectionError produces a sanitized connection_error typed response."""
         mock_opensearch_request = MagicMock(
-            side_effect=ConnectionError('Failed to connect'),
+            side_effect=ConnectionError('socket timeout on 10.0.1.42:9200'),
         )
         mod, _, _ = _load_tickets_handler(mock_opensearch_request=mock_opensearch_request)
 
@@ -382,7 +397,13 @@ class TestListTicketProjectsConnectionError:
 
         assert result['status'] == 'error'
         assert result['type'] == 'connection_error'
+        assert result['retryable'] is False
         assert 'message' in result
+        # Sanitized message should NOT contain raw internal details
+        assert '10.0.1.42' not in result['message']
+        assert 'socket timeout' not in result['message']
+        # Should contain the generic sanitized message
+        assert 'OpenSearch cluster' in result['message']
 
 
 class TestListTicketProjectsOpenSearchError:
@@ -392,9 +413,9 @@ class TestListTicketProjectsOpenSearchError:
     """
 
     def test_opensearch_error_response(self):
-        """OpenSearch request failure produces an opensearch_error typed response."""
+        """RuntimeError from opensearch_request produces an opensearch_error typed response."""
         mock_opensearch_request = MagicMock(
-            side_effect=Exception('OpenSearch request failed: 500 - Internal Server Error'),
+            side_effect=RuntimeError('OpenSearch request failed: 500 - Internal Server Error'),
         )
         mod, _, _ = _load_tickets_handler(mock_opensearch_request=mock_opensearch_request)
 
@@ -402,6 +423,7 @@ class TestListTicketProjectsOpenSearchError:
 
         assert result['status'] == 'error'
         assert result['type'] == 'opensearch_error'
+        assert result['retryable'] is False
         assert 'message' in result
         assert 'OpenSearch request failed' in result['message']
 

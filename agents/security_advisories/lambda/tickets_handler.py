@@ -18,6 +18,7 @@ import logging
 from typing import Any, Dict
 
 from aws_utils import opensearch_request
+from query_utils import connection_error, error_response
 from tickets_query_builder import (build_list_projects_query,
                                    build_tickets_query)
 
@@ -54,6 +55,23 @@ def handle_query_tickets(params: Dict[str, str], request_id: str) -> Dict[str, A
         f"project_name={project_name}, branch={branch}",
     )
 
+    if not cve_id and not project_name and not branch:
+        logger.info(f"[{request_id}] QUERY_TICKETS: No filters provided, requesting user input")
+        return {
+            'status': 'success',
+            'result_count': 0,
+            'results': [],
+            'message': (
+                "Please provide at least one filter to query tickets. "
+                "You can filter by:\n"
+                "- **cve_id**: A specific CVE identifier (e.g. CVE-2024-12345)\n"
+                "- **project_name**: A project name (e.g. OpenSearch)\n"
+                "- **branch**: A branch or version (e.g. 2.19 or main)\n\n"
+                "You can also use `list_ticket_projects` to see which projects "
+                "have assigned tickets."
+            ),
+        }
+
     query_body_dict = build_tickets_query(
         cve_id=cve_id, project_name=project_name, branch=branch,
     )
@@ -61,20 +79,15 @@ def handle_query_tickets(params: Dict[str, str], request_id: str) -> Dict[str, A
 
     try:
         result = opensearch_request('GET', f'/{TICKETS_INDEX}/_search', body=query_body)
-    except Exception as e:
+    except RuntimeError as e:
         error_message = str(e)
         logger.error(f"[{request_id}] QUERY_TICKETS_FAILED: {error_message}")
-        if "OpenSearch request failed:" in error_message:
-            return {
-                'status': 'error',
-                'type': 'opensearch_error',
-                'message': error_message,
-            }
-        return {
-            'status': 'error',
-            'type': 'connection_error',
-            'message': error_message,
-        }
+        return error_response('opensearch_error', error_message)
+    except Exception as e:
+        logger.error(
+            f"[{request_id}] QUERY_TICKETS_FAILED: {type(e).__name__}: {e}",
+        )
+        return connection_error(e)
 
     hits = result.get('hits', {}).get('hits', [])
     results = []
@@ -116,20 +129,15 @@ def handle_list_ticket_projects(request_id: str) -> Dict[str, Any]:
 
     try:
         result = opensearch_request('GET', f'/{TICKETS_INDEX}/_search', body=query_body)
-    except Exception as e:
+    except RuntimeError as e:
         error_message = str(e)
         logger.error(f"[{request_id}] LIST_TICKET_PROJECTS_FAILED: {error_message}")
-        if "OpenSearch request failed:" in error_message:
-            return {
-                'status': 'error',
-                'type': 'opensearch_error',
-                'message': error_message,
-            }
-        return {
-            'status': 'error',
-            'type': 'connection_error',
-            'message': error_message,
-        }
+        return error_response('opensearch_error', error_message)
+    except Exception as e:
+        logger.error(
+            f"[{request_id}] LIST_TICKET_PROJECTS_FAILED: {type(e).__name__}: {e}",
+        )
+        return connection_error(e)
 
     hits = result.get('hits', {}).get('hits', [])
     projects = [
