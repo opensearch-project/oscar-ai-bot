@@ -358,7 +358,7 @@ class TestQueryTicketsOpenSearchError:
         assert result['type'] == 'opensearch_error'
         assert result['retryable'] is False
         assert 'message' in result
-        assert 'OpenSearch request failed' in result['message']
+        assert result['message'] == 'OpenSearch query failed.'
 
 
 class TestListTicketProjectsEmptyState:
@@ -425,7 +425,7 @@ class TestListTicketProjectsOpenSearchError:
         assert result['type'] == 'opensearch_error'
         assert result['retryable'] is False
         assert 'message' in result
-        assert 'OpenSearch request failed' in result['message']
+        assert result['message'] == 'OpenSearch query failed.'
 
 
 class TestQueryTicketsWithResults:
