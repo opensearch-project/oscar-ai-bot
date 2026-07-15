@@ -67,8 +67,7 @@ def handle_query_tickets(params: Dict[str, str], request_id: str) -> Dict[str, A
                 "- **cve_id**: A specific CVE identifier (e.g. CVE-2024-12345)\n"
                 "- **project_name**: A project name (e.g. OpenSearch)\n"
                 "- **branch**: A branch or version (e.g. 2.19 or main)\n\n"
-                "You can also use `list_ticket_projects` to see which projects "
-                "have assigned tickets."
+                "I can also list which projects currently have assigned tickets."
             ),
         }
 
@@ -129,9 +128,8 @@ def handle_list_ticket_projects(request_id: str) -> Dict[str, Any]:
     try:
         result = opensearch_request('GET', f'/{TICKETS_INDEX}/_search', body=query_body)
     except RuntimeError as e:
-        error_message = str(e)
-        logger.error(f"[{request_id}] LIST_TICKET_PROJECTS_FAILED: {error_message}")
-        return error_response('opensearch_error', error_message)
+        logger.error(f"[{request_id}] LIST_TICKET_PROJECTS_FAILED: {e}")
+        return error_response('opensearch_error', 'OpenSearch query failed.')
     except Exception as e:
         logger.error(
             f"[{request_id}] LIST_TICKET_PROJECTS_FAILED: {type(e).__name__}: {e}",

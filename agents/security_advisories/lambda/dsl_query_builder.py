@@ -190,7 +190,7 @@ def query_vulnerabilities(
             )
             return error_response(
                 'opensearch_error',
-                f'OpenSearch query failed: {error_msg}',
+                'OpenSearch query failed.',
                 status_code=status_code,
             )
 
