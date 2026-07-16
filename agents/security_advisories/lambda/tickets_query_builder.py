@@ -39,7 +39,8 @@ def build_tickets_query(
     - size: 1000
 
     Conditional filters added when parameters are provided:
-    - If cve_id provided: adds {"term": {"cveId": cve_id}}
+    - If cve_id provided: adds bool/should matching either {"term": {"cveId": cve_id}}
+      or {"term": {"cveIds.keyword": cve_id}}, and limits size to 1 (most recent ticket).
     - If project_name provided: adds {"term": {"projectName": project_name}}
     - If branch provided: resolves via resolve_version_tag, then adds {"term": {"branches": resolved_branch}}
     - If none provided: uses bool/filter with only the mandatory status filter
@@ -55,7 +56,15 @@ def build_tickets_query(
     filters = [{'term': {'status': 'Assigned'}}]
 
     if cve_id:
-        filters.append({'term': {'cveId': cve_id}})
+        filters.append({
+            'bool': {
+                'should': [
+                    {'term': {'cveId': cve_id}},
+                    {'term': {'cveIds.keyword': cve_id}},
+                ],
+                'minimum_should_match': 1,
+            },
+        })
 
     if project_name:
         filters.append({'term': {'projectName': project_name}})
@@ -65,9 +74,10 @@ def build_tickets_query(
         filters.append({'term': {'branches': branch}})
 
     sort = [{'timestamp.created': {'order': 'desc'}}]
+    size = 1 if cve_id else _DEFAULT_QUERY_SIZE
 
     query = {
-        'size': _DEFAULT_QUERY_SIZE,
+        'size': size,
         '_source': ['ticketId'],
         'sort': sort,
         'query': {

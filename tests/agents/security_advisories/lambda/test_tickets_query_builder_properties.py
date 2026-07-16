@@ -126,13 +126,14 @@ class TestQueryStructureInvariant:
         branch=st.one_of(st.none(), st.text()),
     )
     @settings(max_examples=100)
-    def test_size_always_1000(self, cve_id, project_name, branch):
-        """The size is always 1000.
+    def test_size_correct(self, cve_id, project_name, branch):
+        """Size is 1 when cve_id is truthy (most recent ticket), 1000 otherwise.
 
         **Validates: Requirements 4.1**
         """
         query = build_tickets_query(cve_id=cve_id, project_name=project_name, branch=branch)
-        assert query['size'] == 1000, (
+        expected_size = 1 if cve_id else 1000
+        assert query['size'] == expected_size, (
             f'Size incorrect for inputs cve_id={cve_id!r}, '
             f'project_name={project_name!r}, branch={branch!r}'
         )
@@ -152,8 +153,18 @@ class TestQueryStructureInvariant:
         filters = query['query']['bool']['filter']
 
         if cve_id:
-            assert {'term': {'cveId': cve_id}} in filters, (
-                f'cveId filter missing when cve_id={cve_id!r}'
+            # cve_id uses a bool/should to match either cveId or cveIds.keyword
+            expected_cve_filter = {
+                'bool': {
+                    'should': [
+                        {'term': {'cveId': cve_id}},
+                        {'term': {'cveIds.keyword': cve_id}},
+                    ],
+                    'minimum_should_match': 1,
+                },
+            }
+            assert expected_cve_filter in filters, (
+                f'cveId bool/should filter missing when cve_id={cve_id!r}'
             )
 
         if project_name:

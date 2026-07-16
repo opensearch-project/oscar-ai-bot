@@ -75,6 +75,7 @@ def handle_query_tickets(params: Dict[str, str], request_id: str) -> Dict[str, A
         cve_id=cve_id, project_name=project_name, branch=branch,
     )
     query_body = json.dumps(query_body_dict)
+    logger.info(f"[{request_id}] QUERY_TICKETS_DSL: {query_body}")
 
     try:
         result = opensearch_request('GET', f'/{TICKETS_INDEX}/_search', body=query_body)

@@ -61,13 +61,23 @@ class TestBuildTicketsQueryCveIdOnly:
 
         result = mod.build_tickets_query(cve_id='CVE-2026-27903')
 
-        assert result['size'] == 1000
+        assert result['size'] == 1
         assert result['_source'] == ['ticketId']
         assert result['sort'] == [{'timestamp.created': {'order': 'desc'}}]
 
         filters = result['query']['bool']['filter']
         assert {'term': {'status': 'Assigned'}} in filters
-        assert {'term': {'cveId': 'CVE-2026-27903'}} in filters
+
+        expected_cve_filter = {
+            'bool': {
+                'should': [
+                    {'term': {'cveId': 'CVE-2026-27903'}},
+                    {'term': {'cveIds.keyword': 'CVE-2026-27903'}},
+                ],
+                'minimum_should_match': 1,
+            },
+        }
+        assert expected_cve_filter in filters
         assert len(filters) == 2
 
 
@@ -137,13 +147,23 @@ class TestBuildTicketsQueryAllParams:
             branch='origin/3.7',
         )
 
-        assert result['size'] == 1000
+        assert result['size'] == 1
         assert result['_source'] == ['ticketId']
         assert result['sort'] == [{'timestamp.created': {'order': 'desc'}}]
 
         filters = result['query']['bool']['filter']
         assert {'term': {'status': 'Assigned'}} in filters
-        assert {'term': {'cveId': 'CVE-2026-27903'}} in filters
+
+        expected_cve_filter = {
+            'bool': {
+                'should': [
+                    {'term': {'cveId': 'CVE-2026-27903'}},
+                    {'term': {'cveIds.keyword': 'CVE-2026-27903'}},
+                ],
+                'minimum_should_match': 1,
+            },
+        }
+        assert expected_cve_filter in filters
         assert {'term': {'projectName': 'OpenSearch'}} in filters
         assert {'term': {'branches': 'origin/3.7'}} in filters
         assert len(filters) == 4
