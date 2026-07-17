@@ -92,7 +92,7 @@ class TestIndexResolutionError:
         assert result['status'] == 'error'
         assert result['type'] == 'index_resolution_error'
         assert result['retryable'] is False
-        assert 'No scans indices found' in result['message']
+        assert result['message'] == 'Failed to resolve scans index.'
 
     def test_runtime_error_with_custom_message(self):
         """Validates: Requirement 1.7"""
@@ -107,7 +107,7 @@ class TestIndexResolutionError:
         assert result['status'] == 'error'
         assert result['type'] == 'index_resolution_error'
         assert result['retryable'] is False
-        assert 'timeout' in result['message']
+        assert result['message'] == 'Failed to resolve scans index.'
 
 
 # ---------------------------------------------------------------------------
