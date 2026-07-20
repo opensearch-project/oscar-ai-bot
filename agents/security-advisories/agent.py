@@ -7,6 +7,7 @@ import os
 
 from agents.base_agent import (LambdaConfig, MonitoringConfig,  # noqa: F401
                                OscarAgent, SecretConfig)
+
 from .action_groups import get_action_groups
 from .iam_policies import get_policies
 from .instructions import AGENT_INSTRUCTION, COLLABORATOR_INSTRUCTION
