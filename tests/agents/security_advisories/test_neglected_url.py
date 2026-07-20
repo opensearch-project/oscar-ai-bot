@@ -23,7 +23,7 @@ import pytest
 
 # Add the lambda source path
 _LAMBDA_PATH = os.path.join(
-    os.path.dirname(__file__), '..', '..', '..', 'agents', 'security_advisories', 'lambda',
+    os.path.dirname(__file__), '..', '..', '..', 'agents', 'security-advisories', 'lambda',
 )
 if _LAMBDA_PATH not in sys.path:
     sys.path.insert(0, _LAMBDA_PATH)

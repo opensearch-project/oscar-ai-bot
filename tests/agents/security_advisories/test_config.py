@@ -17,7 +17,7 @@ from moto import mock_aws
 
 # Path to the real config module
 _CONFIG_PATH = os.path.join(
-    os.path.dirname(__file__), '..', '..', '..', 'agents', 'security_advisories', 'lambda',
+    os.path.dirname(__file__), '..', '..', '..', 'agents', 'security-advisories', 'lambda',
 )
 
 

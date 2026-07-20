@@ -9,6 +9,7 @@ including permissions, secrets, storage, VPC, API Gateway, Knowledge Base, Lambd
 and Bedrock agents.
 """
 
+import importlib
 import logging
 import os
 from typing import Optional
@@ -18,7 +19,6 @@ from dotenv import load_dotenv
 
 from agents.jenkins import JenkinsAgent
 from agents.metrics import MetricsAgent
-from agents.security_advisories import SecurityAdvisoriesAgent
 from stacks.api_gateway_stack import OscarApiGatewayStack
 from stacks.bedrock_agents_stack import OscarAgentsStack
 from stacks.knowledge_base_stack import OscarKnowledgeBaseStack
@@ -28,6 +28,8 @@ from stacks.secrets_stack import OscarSecretsStack
 from stacks.security_monitoring_stack import OscarSecurityMonitoringStack
 from stacks.storage_stack import OscarStorageStack
 from stacks.vpc_stack import OscarVpcStack
+
+SecurityAdvisoriesAgent = importlib.import_module("agents.security-advisories").SecurityAdvisoriesAgent
 
 load_dotenv()
 

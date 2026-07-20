@@ -7,10 +7,9 @@ import os
 
 from agents.base_agent import (LambdaConfig, MonitoringConfig,  # noqa: F401
                                OscarAgent, SecretConfig)
-from agents.security_advisories.action_groups import get_action_groups
-from agents.security_advisories.iam_policies import get_policies
-from agents.security_advisories.instructions import (AGENT_INSTRUCTION,
-                                                     COLLABORATOR_INSTRUCTION)
+from .action_groups import get_action_groups
+from .iam_policies import get_policies
+from .instructions import AGENT_INSTRUCTION, COLLABORATOR_INSTRUCTION
 
 _ENV_KEYS = [
     "OPENSEARCH_REGION",
@@ -33,7 +32,7 @@ class SecurityAdvisoriesAgent(OscarAgent):
 
     def get_lambda_config(self):
         return LambdaConfig(
-            entry="agents/security_advisories/lambda",
+            entry="agents/security-advisories/lambda",
             timeout_seconds=180,
             memory_size=1024,
             reserved_concurrency=10,

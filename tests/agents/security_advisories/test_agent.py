@@ -3,10 +3,13 @@
 
 """CDK-level tests for SecurityAdvisoriesAgent."""
 
+import importlib
+
 import pytest
 
 from agents.base_agent import LambdaConfig, MonitoringConfig, OscarAgent
-from agents.security_advisories import SecurityAdvisoriesAgent
+
+SecurityAdvisoriesAgent = importlib.import_module("agents.security-advisories").SecurityAdvisoriesAgent
 
 
 @pytest.fixture

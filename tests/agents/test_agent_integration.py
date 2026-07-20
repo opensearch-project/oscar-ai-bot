@@ -5,6 +5,7 @@ and are wired correctly into CDK stacks."""
 
 import ast
 import glob
+import importlib
 import os
 
 import pytest
@@ -14,13 +15,14 @@ from aws_cdk.assertions import Match, Template
 from agents.base_agent import LambdaConfig, OscarAgent
 from agents.jenkins import JenkinsAgent
 from agents.metrics import MetricsAgent
-from agents.security_advisories import SecurityAdvisoriesAgent
 from stacks.bedrock_agents_stack import OscarAgentsStack
 from stacks.lambda_stack import OscarLambdaStack
 from stacks.permissions_stack import OscarPermissionsStack
 from stacks.secrets_stack import OscarSecretsStack
 from stacks.storage_stack import OscarStorageStack
 from stacks.vpc_stack import OscarVpcStack
+
+SecurityAdvisoriesAgent = importlib.import_module("agents.security-advisories").SecurityAdvisoriesAgent
 
 ALL_AGENTS = [JenkinsAgent(), MetricsAgent(), SecurityAdvisoriesAgent()]
 AGENT_IDS = [a.name for a in ALL_AGENTS]
