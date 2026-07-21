@@ -148,10 +148,11 @@ class SlashCommandHandlers:
 
     def handle_link_github(self, ack, command, say, respond) -> None:
         """Handle /oscar-link-github — initiate OAuth flow."""
+        ack()
         workspace_id = command.get("team_id", "")
         table = _get_identity_table(workspace_id)
         if not table:
-            ack(text="❌ Identity linking is not configured for this workspace.")
+            respond(text="❌ Identity linking is not configured for this workspace.", response_type="ephemeral")
             return
 
         user_id = command.get("user_id")
@@ -166,7 +167,7 @@ class SlashCommandHandlers:
         active = next((i for i in items if i.get("status") == "active"), None)
         if active:
             handle = active.get("github_handle", "unknown")
-            ack(text=f"✅ Already linked to *@{handle}*. Use `/oscar-unlink-github` to unlink.")
+            respond(text=f"✅ Already linked to *@{handle}*. Use `/oscar-unlink-github` to unlink.", response_type="ephemeral")
             return
 
         # Build OAuth URL with HMAC-signed state
@@ -182,14 +183,15 @@ class SlashCommandHandlers:
             f"&state={state}"
         )
 
-        ack(text=f"<{oauth_url}|Click here to link your GitHub account>")
+        respond(text=f"<{oauth_url}|Click here to link your GitHub account>", response_type="ephemeral", unfurl_links=False)
 
     def handle_unlink_github(self, ack, command, say, respond) -> None:
         """Handle /oscar-unlink-github — revoke mapping."""
+        ack()
         workspace_id = command.get("team_id", "")
         table = _get_identity_table(workspace_id)
         if not table:
-            ack(text="❌ Identity linking is not configured for this workspace.")
+            respond(text="❌ Identity linking is not configured for this workspace.", response_type="ephemeral")
             return
 
         user_id = command.get("user_id")
@@ -203,7 +205,7 @@ class SlashCommandHandlers:
         items = resp.get("Items", [])
         active = next((i for i in items if i.get("status") == "active"), None)
         if not active:
-            ack(text="No GitHub account linked.")
+            respond(text="No GitHub account linked.", response_type="ephemeral")
             return
 
         from datetime import datetime, timezone
@@ -218,14 +220,15 @@ class SlashCommandHandlers:
         )
 
         logger.info(f"IDENTITY_UNLINKED: slack_user={user_id} workspace={workspace_id} github={handle} github_id={active.get('github_id')}")
-        ack(text=f"✅ GitHub account *@{handle}* unlinked.")
+        respond(text=f"✅ GitHub account *@{handle}* unlinked.", response_type="ephemeral")
 
     def handle_identity_status(self, ack, command, say, respond) -> None:
         """Handle /oscar-identity-status — show current mapping."""
+        ack()
         workspace_id = command.get("team_id", "")
         table = _get_identity_table(workspace_id)
         if not table:
-            ack(text="❌ Identity linking is not configured for this workspace.")
+            respond(text="❌ Identity linking is not configured for this workspace.", response_type="ephemeral")
             return
 
         user_id = command.get("user_id")
@@ -238,7 +241,7 @@ class SlashCommandHandlers:
         )
         items = resp.get("Items", [])
         if not items:
-            ack(text="No GitHub account linked. Run `/oscar-link-github` to connect.")
+            respond(text="No GitHub account linked. Run `/oscar-link-github` to connect.", response_type="ephemeral")
             return
 
         item = items[0]
@@ -249,4 +252,4 @@ class SlashCommandHandlers:
             f"*Affiliation:* {item.get('affiliation', 'unknown')}",
             f"*Last validated:* {item.get('last_validated', 'unknown')}",
         ]
-        ack(text="\n".join(lines))
+        respond(text="\n".join(lines), response_type="ephemeral")

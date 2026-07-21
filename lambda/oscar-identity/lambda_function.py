@@ -116,7 +116,14 @@ def lambda_handler(event, context):
 
     headers = {"Authorization": f"Bearer {access_token}", "Accept": "application/vnd.github+json"}
 
-    user = requests.get("https://api.github.com/user", headers=headers, timeout=10).json()
+    try:
+        user_resp = requests.get("https://api.github.com/user", headers=headers, timeout=10)
+        user_resp.raise_for_status()
+        user = user_resp.json()
+    except requests.RequestException as e:
+        logger.warning(f"IDENTITY_AUTH_FAILED: slack_user={slack_user_id} workspace={workspace_id} reason=user_fetch_error error={e}")
+        return _html(400, "Could not retrieve GitHub profile. Please try again.")
+
     github_handle = user.get("login")
     github_id = user.get("id")
 

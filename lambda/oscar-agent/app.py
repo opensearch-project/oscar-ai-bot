@@ -104,15 +104,8 @@ def lambda_handler(event: Dict[str, Any], context: Optional[object]) -> Dict[str
         logger.info("Processing async Slack event with OSCAR agent")
         return process_slack_event(event['detail'], context)
 
-    # Identity slash commands are lightweight (DynamoDB only) and must be handled
-    # synchronously so ack() and respond() work within Slack's 3-second deadline.
-    raw_body = event.get('body', '') or ''
-    _SYNC_COMMANDS = ('oscar-link-github', 'oscar-unlink-github', 'oscar-identity-status')
-    if any(cmd in raw_body for cmd in _SYNC_COMMANDS):
-        logger.info("Routing identity slash command synchronously")
-        return process_slack_event(event, context)
-
     # Extract event body for processing
+    raw_body = event.get('body', '') or ''
     body = None
     if raw_body.strip():
         try:

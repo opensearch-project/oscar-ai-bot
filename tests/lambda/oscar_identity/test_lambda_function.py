@@ -227,6 +227,38 @@ class TestOAuthFlow:
         assert result["statusCode"] == 400
         assert "authorization failed" in result["body"]
 
+    @patch("requests.post")
+    @patch("requests.get")
+    def test_user_fetch_failure_returns_400(self, mock_get, mock_post):
+        mock_post_resp = MagicMock()
+        mock_post_resp.json.return_value = {"access_token": "gho_test"}
+        mock_post_resp.raise_for_status.return_value = None
+        mock_post.return_value = mock_post_resp
+
+        import requests as req
+        mock_get.side_effect = req.RequestException("Connection timed out")
+
+        state = _make_signed_state("U123", "T01INTERNAL")
+
+        with patch("boto3.resource") as mock_resource, \
+             patch("boto3.client") as mock_client:
+
+            mock_resource.return_value.Table.return_value = MagicMock()
+            mock_secrets = MagicMock()
+            mock_secrets.get_secret_value.return_value = {
+                "SecretString": json.dumps(TEST_SECRETS)
+            }
+            mock_client.return_value = mock_secrets
+
+            lambda_function = _load_identity_lambda()
+            lambda_function._oauth_creds = None
+            result = lambda_function.lambda_handler(
+                {"queryStringParameters": {"code": "valid", "state": state}}, None
+            )
+
+        assert result["statusCode"] == 400
+        assert "Could not retrieve GitHub profile" in result["body"]
+
 
 class TestWeeklyValidation:
 
