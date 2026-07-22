@@ -21,7 +21,7 @@ class TestSecurityAdvisoriesAgentInterface:
         assert isinstance(agent, OscarAgent)
 
     def test_name(self, agent):
-        assert agent.name == "security-advisories"
+        assert agent.name == "security_advisories"
 
     def test_get_lambda_config_returns_lambda_config(self, agent):
         config = agent.get_lambda_config()

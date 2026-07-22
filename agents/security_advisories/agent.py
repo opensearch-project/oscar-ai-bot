@@ -29,7 +29,7 @@ class SecurityAdvisoriesAgent(OscarAgent):
 
     @property
     def name(self):
-        return "security-advisories"
+        return "security_advisories"
 
     def get_lambda_config(self):
         return LambdaConfig(
