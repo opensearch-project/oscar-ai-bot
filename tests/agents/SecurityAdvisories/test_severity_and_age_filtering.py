@@ -25,7 +25,7 @@ import pytest
 
 # Path to the real vulnerabilities_handler module
 _LAMBDA_PATH = os.path.join(
-    os.path.dirname(__file__), '..', '..', '..', 'agents', 'security_advisories', 'lambda',
+    os.path.dirname(__file__), '..', '..', '..', 'agents', 'SecurityAdvisories', 'lambda',
 )
 
 
@@ -451,7 +451,7 @@ class TestActionGroupNewParameters:
 
     @pytest.fixture
     def agent(self):
-        from agents.security_advisories import SecurityAdvisoriesAgent
+        from agents.SecurityAdvisories import SecurityAdvisoriesAgent
         return SecurityAdvisoriesAgent()
 
     def _get_query_vulns_func(self, agent):
@@ -496,7 +496,7 @@ class TestInstructionDocumentation:
 
     @pytest.fixture
     def agent(self):
-        from agents.security_advisories import SecurityAdvisoriesAgent
+        from agents.SecurityAdvisories import SecurityAdvisoriesAgent
         return SecurityAdvisoriesAgent()
 
     def test_instruction_mentions_severity_param(self, agent):

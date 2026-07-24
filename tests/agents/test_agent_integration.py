@@ -14,7 +14,7 @@ from aws_cdk.assertions import Match, Template
 from agents.base_agent import LambdaConfig, OscarAgent
 from agents.jenkins import JenkinsAgent
 from agents.metrics import MetricsAgent
-from agents.security_advisories import SecurityAdvisoriesAgent
+from agents.SecurityAdvisories import SecurityAdvisoriesAgent
 from stacks.bedrock_agents_stack import OscarAgentsStack
 from stacks.lambda_stack import OscarLambdaStack
 from stacks.permissions_stack import OscarPermissionsStack

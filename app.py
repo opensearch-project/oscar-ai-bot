@@ -18,7 +18,7 @@ from dotenv import load_dotenv
 
 from agents.jenkins import JenkinsAgent
 from agents.metrics import MetricsAgent
-from agents.security_advisories import SecurityAdvisoriesAgent
+from agents.SecurityAdvisories import SecurityAdvisoriesAgent
 from stacks.api_gateway_stack import OscarApiGatewayStack
 from stacks.bedrock_agents_stack import OscarAgentsStack
 from stacks.knowledge_base_stack import OscarKnowledgeBaseStack
