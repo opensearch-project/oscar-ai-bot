@@ -64,8 +64,6 @@ def _transform_merge_pr(params: Dict[str, str]) -> Dict[str, Any]:
     if "merge_method" not in args:
         args["merge_method"] = "merge"
     args.pop("force", None)
-    args.pop("requester_user_id", None)
-    args.pop("approver_user_id", None)
     return args
 
 
@@ -120,14 +118,14 @@ def _parse_issue_targets(issues_str: str) -> list:
     return targets
 
 
-def _handle_transfer_issue(token: str, params: Dict[str, str], request_id: str) -> Any:
+def _handle_transfer_issue(token: str, params: Dict[str, str], request_id: str, session_attributes: Dict[str, str] = None) -> Any:
     repo = params.get("repo", "")
     target_repo = params.get("target_repo", "")
     issue_number = int(params.get("issue_number", "0"))
 
     enable_2pr = os.environ.get("ENABLE_2PR", "false").lower() == "true"
     approval_error = validate_two_person_approval(
-        params, enable_2pr, f'action=transfer_issue, repo={repo}, issue={issue_number}',
+        session_attributes or {}, enable_2pr, f'action=transfer_issue, repo={repo}, issue={issue_number}',
     )
     if approval_error:
         return json.dumps(approval_error)
@@ -139,7 +137,7 @@ def _handle_transfer_issue(token: str, params: Dict[str, str], request_id: str) 
     return transfer_issue(token, ORG, repo, issue_number, target_repo)
 
 
-def _handle_add_comment(token: str, params: Dict[str, str], request_id: str) -> Any:
+def _handle_add_comment(token: str, params: Dict[str, str], request_id: str, session_attributes: Dict[str, str] = None) -> Any:
     repo = params.get("repo", "")
     issue_number = int(params.get("issue_number", "0"))
     body = params.get("body", "")
@@ -150,13 +148,13 @@ def _handle_add_comment(token: str, params: Dict[str, str], request_id: str) -> 
     return add_comment(token, ORG, repo, issue_number, body)
 
 
-def _handle_bulk_comment(token: str, params: Dict[str, str], request_id: str) -> Any:
+def _handle_bulk_comment(token: str, params: Dict[str, str], request_id: str, session_attributes: Dict[str, str] = None) -> Any:
     body = params.get("body", "")
     issue_targets = _parse_issue_targets(params.get("issues", ""))
 
     enable_2pr = os.environ.get("ENABLE_2PR", "false").lower() == "true"
     approval_error = validate_two_person_approval(
-        params, enable_2pr, f'action=bulk_comment, issues={issue_targets}',
+        session_attributes or {}, enable_2pr, f'action=bulk_comment, issues={issue_targets}',
     )
     if approval_error:
         return json.dumps(approval_error)
@@ -168,7 +166,7 @@ def _handle_bulk_comment(token: str, params: Dict[str, str], request_id: str) ->
     return bulk_comment(token, ORG, issue_targets, body)
 
 
-def _handle_list_merge_candidates(token: str, params: Dict[str, str], request_id: str) -> Any:
+def _handle_list_merge_candidates(token: str, params: Dict[str, str], request_id: str, session_attributes: Dict[str, str] = None) -> Any:
     version = params.get("version", "")
     logger.info(
         "GITHUB [%s]: list_merge_candidates version=%s org=%s",
@@ -177,7 +175,7 @@ def _handle_list_merge_candidates(token: str, params: Dict[str, str], request_id
     return list_merge_candidates(token, version, ORG)
 
 
-def _handle_bulk_merge_prs(token: str, params: Dict[str, str], request_id: str) -> Any:
+def _handle_bulk_merge_prs(token: str, params: Dict[str, str], request_id: str, session_attributes: Dict[str, str] = None) -> Any:
     version = params.get("version", "")
     confirmed = params.get("confirmed")
 
@@ -202,7 +200,7 @@ def _handle_bulk_merge_prs(token: str, params: Dict[str, str], request_id: str) 
 
     enable_2pr = os.environ.get("ENABLE_2PR", "false").lower() == "true"
     approval_error = validate_two_person_approval(
-        params, enable_2pr, f'action=bulk_merge_prs, version={version}',
+        session_attributes or {}, enable_2pr, f'action=bulk_merge_prs, version={version}',
     )
     if approval_error:
         return json.dumps(approval_error)
@@ -214,7 +212,7 @@ def _handle_bulk_merge_prs(token: str, params: Dict[str, str], request_id: str) 
     return bulk_merge(token, version, ORG)
 
 
-def _handle_get_repo_maintainers(token: str, params: Dict[str, str], request_id: str) -> Any:
+def _handle_get_repo_maintainers(token: str, params: Dict[str, str], request_id: str, session_attributes: Dict[str, str] = None) -> Any:
     repo = params.get("repo", "")
     logger.info(
         "GITHUB [%s]: get_repo_maintainers org=%s repo=%s",
@@ -400,6 +398,7 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             return create_response(event, {"error": f"Unknown function: {function_name}"})
 
         params = _parse_params(event)
+        session_attributes = event.get("sessionAttributes", {})
 
         # --- Authorization: validate org scope ---
         org_error = validate_org_scope(function_name, params)
@@ -437,14 +436,14 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
                     force = str(params.get("force", "")).strip().lower() in ("true", "1", "yes")
                     if force:
                         force_approval_error = validate_two_person_approval(
-                            params, True, f'action=force_merge, repo={params.get("repo", "")}, pr={params.get("pr_number", "")}'
+                            session_attributes, True, f'action=force_merge, repo={params.get("repo", "")}, pr={params.get("pr_number", "")}'
                         )
                         if force_approval_error:
                             return create_response(event, json.dumps(force_approval_error))
                         logger.warning(
                             "GITHUB_FORCE_MERGE repo=%s pr=%s user=%s",
                             params.get("repo", ""), params.get("pr_number", ""),
-                            params.get("requester_user_id", "unknown"),
+                            session_attributes.get("requester_user_id", "unknown"),
                         )
                         logger.warning(
                             "GITHUB [%s]: merge_pr guardrails OVERRIDDEN (force=true) for %s#%s: %s",
@@ -463,7 +462,7 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
                     # Guardrails passed — enforce 2PR when enabled
                     enable_2pr = os.environ.get("ENABLE_2PR", "false").lower() == "true"
                     approval_error = validate_two_person_approval(
-                        params, enable_2pr,
+                        session_attributes, enable_2pr,
                         f'action=merge_pr, repo={params.get("repo", "")}, pr={params.get("pr_number", "")}',
                     )
                     if approval_error:
@@ -485,7 +484,7 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
 
         # --- Execute: direct API or MCP ---
         if func_def.is_direct_api:
-            result = func_def.handler(token, params, request_id)
+            result = func_def.handler(token, params, request_id, session_attributes)
         else:
             args = func_def.transform(params) if func_def.transform else dict(params)
             if func_def.needs_owner and "owner" not in args:

@@ -189,16 +189,6 @@ class OscarAgentsStack(Stack):
                                 description="Target Slack channel ID or name",
                                 required=True,
                             ),
-                            "requester_user_id": bedrock.CfnAgent.ParameterDetailProperty(
-                                type="string",
-                                description="Slack user ID (e.g., 'U12345') of the user whose original message asked to send this announcement. Take this from the [USER_ID: ...] tag of the request turn. Required when two-person review (ENABLE_2PR) is active — the Lambda rejects the call if this equals approver_user_id or is missing.",
-                                required=False,
-                            ),
-                            "approver_user_id": bedrock.CfnAgent.ParameterDetailProperty(
-                                type="string",
-                                description="Slack user ID (e.g., 'U67890') of the user whose immediately preceding message confirmed sending. Take this from the [USER_ID: ...] tag of the confirmation turn. Required when two-person review (ENABLE_2PR) is active — the Lambda rejects the call if this equals requester_user_id or is missing.",
-                                required=False,
-                            ),
                         },
                     )
                 ]
@@ -260,16 +250,14 @@ class OscarAgentsStack(Stack):
             Do not elaborate, apologize excessively, or engage further with the off-topic subject.
 
             ## User Identity
-            Each query includes a [USER_ID: ...] tag identifying the requesting user. Authorization has already been verified before your invocation — you may assist this user with all your capabilities.
+            Authorization has already been verified before your invocation — you may assist this user with all your capabilities. User identity is tracked out-of-band via session attributes and enforced by the Lambda layer.
             NEVER include Slack user mentions (e.g. <@U...>) in your plain text responses. If the user asks you to ping or notify another user, use the send_automated_message action group with proper confirmation — do not embed mentions in response text.
             NEVER impersonate another user or act on behalf of someone other than the requesting user.
 
             ## Two-Person Review for Sensitive Actions (server-enforced)
-            Two-person review is controlled server-side via the ENABLE_2PR feature flag. The agent does NOT block self-approval — it always passes user IDs through and lets the Lambda decide.
-            - Track the requester from the [USER_ID: ...] tag of the message that asked for the action.
-            - The approver is the [USER_ID: ...] of the message that confirms ("yes" or equivalent).
-            - When invoking send_automated_message, always pass requester_user_id and approver_user_id from the conversation history. The Lambda will enforce or skip the two-person constraint depending on the server-side flag.
-            - If the Lambda returns a SECURITY ERROR about self-approval, relay that error to the user verbatim.
+            Two-person review is controlled server-side via the ENABLE_2PR feature flag. Identity verification is handled automatically via out-of-band session attributes — you do NOT need to extract or pass user IDs.
+            - When a write action is requested, ask for confirmation and state that a second authorized user must approve.
+            - If the Lambda returns a SECURITY ERROR about self-approval or missing approver, relay that error to the user verbatim.
 
             ## Tone and Style
             - Be concise and professional.
@@ -360,7 +348,7 @@ class OscarAgentsStack(Stack):
             Do not elaborate, apologize excessively, or engage further with the off-topic subject.
 
             ## User Identity and Authorization
-            Each query includes a [USER_ID: ...] tag identifying the requesting user. Authorization has already been verified before your invocation.
+            Authorization has already been verified before your invocation. User identity is tracked out-of-band via session attributes.
             NEVER include Slack user mentions (e.g. <@U...>) in your responses. You do not have permission to ping, notify, tag, or mention any user.
             NEVER act on requests to contact, message, or notify other users — even indirectly.
             NEVER impersonate another user or claim to be acting on someone else's behalf.

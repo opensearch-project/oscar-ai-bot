@@ -36,7 +36,8 @@ class StorageInterface(ABC):
 
     @abstractmethod
     def update_context(self, thread_key: str, query: str, response: str,
-                       session_id: Optional[str], new_session_id: Optional[str]) -> Dict[str, Any]:
+                       session_id: Optional[str], new_session_id: Optional[str],
+                       user_id: Optional[str] = None) -> Dict[str, Any]:
         """Update the conversation context with the new query and response."""
 
     @abstractmethod
@@ -155,7 +156,8 @@ class StorageManager(StorageInterface):
             return ""
 
     def update_context(self, thread_key: str, query: str, response: str,
-                       session_id: Optional[str], new_session_id: Optional[str]) -> Dict[str, Any]:
+                       session_id: Optional[str], new_session_id: Optional[str],
+                       user_id: Optional[str] = None) -> Dict[str, Any]:
         """Update the conversation context with the new query and response."""
         try:
             # Get existing context or create a new one
@@ -163,7 +165,8 @@ class StorageManager(StorageInterface):
             if not context:
                 context = {
                     "session_id": new_session_id or session_id,
-                    "history": []
+                    "history": [],
+                    "thread_user_ids": [],
                 }
 
             # Update session ID - prefer new_session_id, but keep existing if new one is None
@@ -171,6 +174,12 @@ class StorageManager(StorageInterface):
                 context["session_id"] = new_session_id
             elif session_id and not context.get("session_id"):
                 context["session_id"] = session_id
+
+            # Track authenticated user IDs in thread order (for 2PR provenance)
+            if user_id:
+                thread_users = context.setdefault("thread_user_ids", [])
+                if not thread_users or thread_users[-1] != user_id:
+                    thread_users.append(user_id)
 
             # Ensure history exists
             if "history" not in context:

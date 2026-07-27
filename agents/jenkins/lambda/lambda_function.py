@@ -46,6 +46,7 @@ def lambda_handler(event: Dict[str, Any], context) -> Dict[str, Any]:
         # Extract function and parameters from event
         function_name = event.get('function', '')
         parameters = event.get('parameters', [])
+        session_attributes = event.get('sessionAttributes', {})
 
         # Convert parameters list to dictionary
         params = {}
@@ -60,7 +61,7 @@ def lambda_handler(event: Dict[str, Any], context) -> Dict[str, Any]:
         # Route to appropriate handler
         match function_name:
             case 'trigger_job':
-                result = handle_trigger_job(jenkins_client, params)
+                result = handle_trigger_job(jenkins_client, params, session_attributes)
             case 'test_connection':
                 result = handle_test_connection(jenkins_client)
             case 'get_job_info':
@@ -134,13 +135,14 @@ def format_parameters_as_bullets(parameter_definitions: Dict[str, Dict[str, Any]
     return "\n".join(lines)
 
 
-def handle_trigger_job(jenkins_client: JenkinsClient, params: Dict[str, Any]) -> Dict[str, Any]:
+def handle_trigger_job(jenkins_client: JenkinsClient, params: Dict[str, Any], session_attributes: Dict[str, str] = None) -> Dict[str, Any]:
     """
     Handle generic job triggering with mandatory confirmation check.
 
     Args:
         jenkins_client: Jenkins client instance
         params: Parameters including job_name, confirmed, and individual job parameters
+        session_attributes: Out-of-band session attributes with identity provenance
 
     Returns:
         Job trigger result
@@ -187,7 +189,7 @@ def handle_trigger_job(jenkins_client: JenkinsClient, params: Dict[str, Any]) ->
         }
 
     # Two-person review (only when ENABLE_2PR is on)
-    approval_error = validate_two_person_approval(params, config.enable_2pr, f'job={job_name}')
+    approval_error = validate_two_person_approval(session_attributes or {}, config.enable_2pr, f'job={job_name}')
     if approval_error:
         approval_error['job_name'] = job_name
         return approval_error

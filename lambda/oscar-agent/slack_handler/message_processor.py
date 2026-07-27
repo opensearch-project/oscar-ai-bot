@@ -50,9 +50,31 @@ class MessageProcessor:
         query = re.sub(config.patterns['mention'], '', text).strip()
         return query
 
-    def add_user_context_to_query(self, query: str, user_id: str) -> str:
-        """Add user context to query for sensitive operations."""
-        return f"[USER_ID: {user_id}] {query}"
+    def _build_identity_attributes(self, thread_key: str, current_user_id: str) -> dict:
+        """Build out-of-band session attributes for identity provenance.
+
+        Derives requester and approver from stored conversation context rather
+        than embedding them in the prompt text (which the model could fabricate).
+
+        The current_user_id is the authenticated Slack user from the signed event.
+        The requester is the first distinct user who spoke in the thread.
+        """
+        attrs = {'current_user_id': current_user_id}
+
+        stored_context = self.storage.get_context(thread_key)
+        if stored_context:
+            thread_users = stored_context.get('thread_user_ids', [])
+            if thread_users:
+                # Requester = first user in the thread
+                attrs['requester_user_id'] = thread_users[0]
+                # Approver = current user (if different from requester)
+                if current_user_id != thread_users[0]:
+                    attrs['approver_user_id'] = current_user_id
+        else:
+            # First message in thread — this user is the requester
+            attrs['requester_user_id'] = current_user_id
+
+        return attrs
 
     def _handle_confirmation_detection(self, response: str, channel: str, thread_ts: str) -> str:
         """Handle confirmation detection and warning reaction management.
@@ -254,9 +276,9 @@ class MessageProcessor:
                 say(text=e.user_message, thread_ts=thread_ts)
                 return
 
-            # ALWAYS add user context to query for agent to use as needed
-            query = self.add_user_context_to_query(query, user_id)
-            logger.info(f"Added user context to query: {query}")
+            # Build out-of-band identity attributes from authenticated Slack event
+            identity_attrs = self._build_identity_attributes(thread_key, user_id)
+            logger.info(f"Identity attributes: {identity_attrs}")
 
             # Get context from storage and format for query
             stored_context = self.storage.get_context(thread_key)
@@ -276,7 +298,7 @@ class MessageProcessor:
             privilege = self.is_fully_authorized_user(user_id)
             response, new_session_id = self.timeout_handler.query_agent_with_timeout(
                 self.oscar_agent, query, privilege, session_id, formatted_context, channel, reaction_ts,
-                start_time, say, thread_ts, user_id
+                start_time, say, thread_ts, user_id, session_attributes=identity_attrs
             )
 
             # If timeout occurred, response will be None
@@ -299,7 +321,7 @@ class MessageProcessor:
 
             # Update context with new query and response (skip for slash commands to avoid duplication)
             if not skip_context_storage:
-                self.storage.update_context(thread_key, query, response, session_id, new_session_id)
+                self.storage.update_context(thread_key, query, response, session_id, new_session_id, user_id=user_id)
 
             # Format response for Slack before sending
             from .message_formatter import MessageFormatter

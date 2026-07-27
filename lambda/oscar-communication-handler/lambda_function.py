@@ -40,6 +40,7 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         api_path = event.get('apiPath', '')
         function_name = event.get('function', '')
         parameters = event.get('parameters', [])
+        session_attributes = event.get('sessionAttributes', {})
 
         # Convert parameters list to dictionary
         params = {}
@@ -55,7 +56,7 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         # Handle the functions
         if function_name == 'send_automated_message':
             logger.info(f"Calling handle_send_message with params: {params}")
-            return message_handler.handle_send_message(params, action_group, function_name)
+            return message_handler.handle_send_message(params, action_group, function_name, session_attributes)
         else:
             logger.error(f"Unknown function: {function_name}")
             return response_builder.create_error_response(action_group, function_name,

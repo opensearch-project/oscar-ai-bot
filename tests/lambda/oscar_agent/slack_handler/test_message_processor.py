@@ -42,12 +42,34 @@ class TestExtractQuery:
         assert mp.extract_query('  <@U1>  hello  ') == 'hello'
 
 
-class TestAddUserContextToQuery:
+class TestBuildIdentityAttributes:
 
-    def test_prefixes_user_id(self):
-        mp = _make_processor()
-        result = mp.add_user_context_to_query('original query', 'U123')
-        assert result == '[USER_ID: U123] original query'
+    def test_first_message_sets_requester(self):
+        storage = Mock()
+        storage.get_context.return_value = None
+        mp = _make_processor(storage=storage)
+        result = mp._build_identity_attributes('C123_ts1', 'U_FIRST')
+        assert result['current_user_id'] == 'U_FIRST'
+        assert result['requester_user_id'] == 'U_FIRST'
+        assert 'approver_user_id' not in result
+
+    def test_second_user_sets_approver(self):
+        storage = Mock()
+        storage.get_context.return_value = {'thread_user_ids': ['U_REQ']}
+        mp = _make_processor(storage=storage)
+        result = mp._build_identity_attributes('C123_ts1', 'U_APP')
+        assert result['current_user_id'] == 'U_APP'
+        assert result['requester_user_id'] == 'U_REQ'
+        assert result['approver_user_id'] == 'U_APP'
+
+    def test_same_user_no_approver(self):
+        storage = Mock()
+        storage.get_context.return_value = {'thread_user_ids': ['U_SAME']}
+        mp = _make_processor(storage=storage)
+        result = mp._build_identity_attributes('C123_ts1', 'U_SAME')
+        assert result['current_user_id'] == 'U_SAME'
+        assert result['requester_user_id'] == 'U_SAME'
+        assert 'approver_user_id' not in result
 
 
 class TestIsFullyAuthorizedUser:

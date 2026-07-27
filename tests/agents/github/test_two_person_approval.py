@@ -80,7 +80,7 @@ def _load_lambda_handler():
         sys.path.remove(_SHARED_LAYER_DIR)
 
 
-def _bulk_merge_event(**extra_params):
+def _bulk_merge_event(session_attrs=None, **extra_params):
     """Build a bulk_merge_prs event with optional extra params."""
     params = [
         {'name': 'version', 'value': '3.6.0'},
@@ -88,11 +88,18 @@ def _bulk_merge_event(**extra_params):
     ]
     for name, value in extra_params.items():
         params.append({'name': name, 'value': value})
-    return {'function': 'bulk_merge_prs', 'parameters': params}
+    event = {'function': 'bulk_merge_prs', 'parameters': params}
+    if session_attrs is not None:
+        event['sessionAttributes'] = session_attrs
+    return event
 
 
 class TestTwoPersonApprovalBulkMerge(unittest.TestCase):
-    """Test 2PR enforcement in bulk_merge_prs."""
+    """Test 2PR enforcement in bulk_merge_prs.
+
+    Identity is now passed via sessionAttributes (out-of-band from Slack event
+    metadata), NOT via model-populated action-group parameters.
+    """
 
     @patch.dict(os.environ, {'ENABLE_2PR': 'true', 'GITHUB_SECRET_NAME': 'test-secret'})
     @patch('boto3.client')
@@ -106,12 +113,12 @@ class TestTwoPersonApprovalBulkMerge(unittest.TestCase):
         }
         mod, mock_guardrails = _load_lambda_handler()
 
-        result = mod.lambda_handler(_bulk_merge_event(), None)
+        # No sessionAttributes — should be rejected
+        result = mod.lambda_handler(_bulk_merge_event(session_attrs={}), None)
         body = result['response']['functionResponse']['responseBody']['TEXT']['body']
         parsed = json.loads(body)
         self.assertEqual(parsed['status'], 'error')
         self.assertIn('SECURITY ERROR', parsed['message'])
-        self.assertIn('requester_user_id', parsed['message'])
         mock_guardrails.bulk_merge.assert_not_called()
 
     @patch.dict(os.environ, {'ENABLE_2PR': 'true', 'GITHUB_SECRET_NAME': 'test-secret'})
@@ -126,7 +133,9 @@ class TestTwoPersonApprovalBulkMerge(unittest.TestCase):
         }
         mod, mock_guardrails = _load_lambda_handler()
 
-        event = _bulk_merge_event(requester_user_id='U_SAME', approver_user_id='U_SAME')
+        event = _bulk_merge_event(session_attrs={
+            'requester_user_id': 'U_SAME', 'approver_user_id': 'U_SAME',
+        })
         result = mod.lambda_handler(event, None)
         body = result['response']['functionResponse']['responseBody']['TEXT']['body']
         parsed = json.loads(body)
@@ -147,7 +156,9 @@ class TestTwoPersonApprovalBulkMerge(unittest.TestCase):
         }
         mod, mock_guardrails = _load_lambda_handler()
 
-        event = _bulk_merge_event(requester_user_id='U_REQ', approver_user_id='U_APP')
+        event = _bulk_merge_event(session_attrs={
+            'requester_user_id': 'U_REQ', 'approver_user_id': 'U_APP',
+        })
         result = mod.lambda_handler(event, None)
         body = result['response']['functionResponse']['responseBody']['TEXT']['body']
         parsed = json.loads(body)
@@ -167,7 +178,7 @@ class TestTwoPersonApprovalBulkMerge(unittest.TestCase):
         }
         mod, mock_guardrails = _load_lambda_handler()
 
-        # No requester/approver IDs at all — should succeed
+        # No sessionAttributes — should succeed because 2PR is off
         result = mod.lambda_handler(_bulk_merge_event(), None)
         body = result['response']['functionResponse']['responseBody']['TEXT']['body']
         parsed = json.loads(body)
@@ -187,7 +198,9 @@ class TestTwoPersonApprovalBulkMerge(unittest.TestCase):
         }
         mod, mock_guardrails = _load_lambda_handler()
 
-        event = _bulk_merge_event(requester_user_id='U_SAME ', approver_user_id=' U_SAME')
+        event = _bulk_merge_event(session_attrs={
+            'requester_user_id': 'U_SAME ', 'approver_user_id': ' U_SAME',
+        })
         result = mod.lambda_handler(event, None)
         body = result['response']['functionResponse']['responseBody']['TEXT']['body']
         parsed = json.loads(body)
@@ -196,7 +209,7 @@ class TestTwoPersonApprovalBulkMerge(unittest.TestCase):
         mock_guardrails.bulk_merge.assert_not_called()
 
 
-def _merge_pr_event(**extra_params):
+def _merge_pr_event(session_attrs=None, **extra_params):
     """Build a merge_pr event with optional extra params."""
     params = [
         {'name': 'repo', 'value': 'OpenSearch'},
@@ -204,11 +217,14 @@ def _merge_pr_event(**extra_params):
     ]
     for name, value in extra_params.items():
         params.append({'name': name, 'value': value})
-    return {'function': 'merge_pr', 'parameters': params}
+    event = {'function': 'merge_pr', 'parameters': params}
+    if session_attrs is not None:
+        event['sessionAttributes'] = session_attrs
+    return event
 
 
 class TestTwoPersonApprovalMergePr(unittest.TestCase):
-    """Test 2PR enforcement in merge_pr."""
+    """Test 2PR enforcement in merge_pr (identity via sessionAttributes)."""
 
     @patch.dict(os.environ, {'ENABLE_2PR': 'true', 'GITHUB_SECRET_NAME': 'test-secret'})
     @patch('boto3.client')
@@ -221,13 +237,15 @@ class TestTwoPersonApprovalMergePr(unittest.TestCase):
             })
         }
         mod, mock_guardrails = _load_lambda_handler()
+        mock_guardrails.validate_single_pr.return_value = {
+            'is_auto_pr': False, 'all_passed': True,
+        }
 
-        result = mod.lambda_handler(_merge_pr_event(), None)
+        result = mod.lambda_handler(_merge_pr_event(session_attrs={}), None)
         body = result['response']['functionResponse']['responseBody']['TEXT']['body']
         parsed = json.loads(body)
         self.assertEqual(parsed['status'], 'error')
         self.assertIn('SECURITY ERROR', parsed['message'])
-        self.assertIn('requester_user_id', parsed['message'])
 
     @patch.dict(os.environ, {'ENABLE_2PR': 'true', 'GITHUB_SECRET_NAME': 'test-secret'})
     @patch('boto3.client')
@@ -240,8 +258,13 @@ class TestTwoPersonApprovalMergePr(unittest.TestCase):
             })
         }
         mod, mock_guardrails = _load_lambda_handler()
+        mock_guardrails.validate_single_pr.return_value = {
+            'is_auto_pr': False, 'all_passed': True,
+        }
 
-        event = _merge_pr_event(requester_user_id='U_SAME', approver_user_id='U_SAME')
+        event = _merge_pr_event(session_attrs={
+            'requester_user_id': 'U_SAME', 'approver_user_id': 'U_SAME',
+        })
         result = mod.lambda_handler(event, None)
         body = result['response']['functionResponse']['responseBody']['TEXT']['body']
         parsed = json.loads(body)
@@ -268,7 +291,9 @@ class TestTwoPersonApprovalMergePr(unittest.TestCase):
             'status': 'success', 'merged': True,
         })
 
-        event = _merge_pr_event(requester_user_id='U_REQ', approver_user_id='U_APP')
+        event = _merge_pr_event(session_attrs={
+            'requester_user_id': 'U_REQ', 'approver_user_id': 'U_APP',
+        })
         result = mod.lambda_handler(event, None)
         body = result['response']['functionResponse']['responseBody']['TEXT']['body']
         parsed = json.loads(body)
@@ -300,20 +325,22 @@ class TestTwoPersonApprovalMergePr(unittest.TestCase):
         self.assertEqual(parsed['status'], 'success')
 
 
-def _bulk_comment_event(**extra_params):
+def _bulk_comment_event(session_attrs=None, **extra_params):
     """Build a bulk_comment event with optional extra params."""
     params = [
-        {'name': 'repo', 'value': 'OpenSearch'},
-        {'name': 'issue_numbers', 'value': '1,2,3'},
+        {'name': 'issues', 'value': 'OpenSearch#1,OpenSearch#2,OpenSearch#3'},
         {'name': 'body', 'value': 'Release 3.6.0 is out!'},
     ]
     for name, value in extra_params.items():
         params.append({'name': name, 'value': value})
-    return {'function': 'bulk_comment', 'parameters': params}
+    event = {'function': 'bulk_comment', 'parameters': params}
+    if session_attrs is not None:
+        event['sessionAttributes'] = session_attrs
+    return event
 
 
 class TestTwoPersonApprovalBulkComment(unittest.TestCase):
-    """Test 2PR enforcement in bulk_comment."""
+    """Test 2PR enforcement in bulk_comment (identity via sessionAttributes)."""
 
     @patch.dict(os.environ, {'ENABLE_2PR': 'true', 'GITHUB_SECRET_NAME': 'test-secret'})
     @patch('boto3.client')
@@ -328,7 +355,7 @@ class TestTwoPersonApprovalBulkComment(unittest.TestCase):
         mod, _ = _load_lambda_handler()
         mock_bulk_comment = sys.modules['github_api'].bulk_comment
 
-        result = mod.lambda_handler(_bulk_comment_event(), None)
+        result = mod.lambda_handler(_bulk_comment_event(session_attrs={}), None)
         body = result['response']['functionResponse']['responseBody']['TEXT']['body']
         parsed = json.loads(body)
         self.assertEqual(parsed['status'], 'error')
@@ -348,7 +375,9 @@ class TestTwoPersonApprovalBulkComment(unittest.TestCase):
         mod, _ = _load_lambda_handler()
         mock_bulk_comment = sys.modules['github_api'].bulk_comment
 
-        event = _bulk_comment_event(requester_user_id='U_SAME', approver_user_id='U_SAME')
+        event = _bulk_comment_event(session_attrs={
+            'requester_user_id': 'U_SAME', 'approver_user_id': 'U_SAME',
+        })
         result = mod.lambda_handler(event, None)
         body = result['response']['functionResponse']['responseBody']['TEXT']['body']
         parsed = json.loads(body)
@@ -370,7 +399,9 @@ class TestTwoPersonApprovalBulkComment(unittest.TestCase):
         mock_bulk_comment = sys.modules['github_api'].bulk_comment
         mock_bulk_comment.return_value = json.dumps({'status': 'success', 'commented': 3})
 
-        event = _bulk_comment_event(requester_user_id='U_REQ', approver_user_id='U_APP')
+        event = _bulk_comment_event(session_attrs={
+            'requester_user_id': 'U_REQ', 'approver_user_id': 'U_APP',
+        })
         result = mod.lambda_handler(event, None)
         body = result['response']['functionResponse']['responseBody']['TEXT']['body']
         parsed = json.loads(body)
