@@ -31,13 +31,14 @@ class StorageInterface(ABC):
         """Get conversation context for a thread."""
 
     @abstractmethod
-    def get_context_for_query(self, thread_key: str) -> str:
+    def get_context_for_query(self, thread_key: str, privileged: bool = True) -> str:
         """Get conversation context formatted for prepending to a query."""
 
     @abstractmethod
     def update_context(self, thread_key: str, query: str, response: str,
                        session_id: Optional[str], new_session_id: Optional[str],
-                       user_id: Optional[str] = None) -> Dict[str, Any]:
+                       user_id: Optional[str] = None,
+                       privileged: bool = False) -> Dict[str, Any]:
         """Update the conversation context with the new query and response."""
 
     @abstractmethod
@@ -132,8 +133,14 @@ class StorageManager(StorageInterface):
             logger.error(f"Error retrieving context for {thread_key}: {e}")
             return None
 
-    def get_context_for_query(self, thread_key: str) -> str:
-        """Get conversation context formatted for prepending to a query."""
+    def get_context_for_query(self, thread_key: str, privileged: bool = True) -> str:
+        """Get conversation context formatted for prepending to a query.
+
+        Args:
+            thread_key: Thread identifier.
+            privileged: If False, exclude turns from privileged users to prevent
+                context leakage of sensitive data (e.g. CVE details) to limited users.
+        """
         try:
             context = self.get_context(thread_key)
             if not context:
@@ -145,6 +152,8 @@ class StorageManager(StorageInterface):
 
             context_lines = [""]
             for entry in history:
+                if not privileged and entry.get("privileged"):
+                    continue
                 query = entry.get("query", "")
                 response = entry.get("response", "")
                 context_lines.extend([f"User: {query}", f"Assistant: {response}", ""])
@@ -157,7 +166,8 @@ class StorageManager(StorageInterface):
 
     def update_context(self, thread_key: str, query: str, response: str,
                        session_id: Optional[str], new_session_id: Optional[str],
-                       user_id: Optional[str] = None) -> Dict[str, Any]:
+                       user_id: Optional[str] = None,
+                       privileged: bool = False) -> Dict[str, Any]:
         """Update the conversation context with the new query and response."""
         try:
             # Get existing context or create a new one
@@ -185,11 +195,12 @@ class StorageManager(StorageInterface):
             if "history" not in context:
                 context["history"] = []
 
-            # Append to history
+            # Append to history with privilege marker for context isolation
             new_entry = {
                 "query": query,
                 "response": response,
-                "timestamp": int(time.time())
+                "timestamp": int(time.time()),
+                "privileged": privileged,
             }
             context["history"].append(new_entry)
 

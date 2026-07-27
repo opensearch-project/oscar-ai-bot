@@ -284,8 +284,12 @@ class MessageProcessor:
             stored_context = self.storage.get_context(thread_key)
             session_id = stored_context.get("session_id") if stored_context else None
 
-            # Get formatted context for the query
-            formatted_context = self.storage.get_context_for_query(thread_key)
+            # Determine privilege before fetching context — non-privileged users
+            # must not see privileged turns (context isolation, SSC-8).
+            privilege = self.is_fully_authorized_user(user_id)
+
+            # Get formatted context for the query (filtered by privilege tier)
+            formatted_context = self.storage.get_context_for_query(thread_key, privileged=privilege)
 
             # For threaded replies, fetch the parent message so Oscar knows
             # what the thread is about (e.g. a GitHub webhook notification).
@@ -295,7 +299,6 @@ class MessageProcessor:
                     formatted_context = parent_context + "\n" + formatted_context if formatted_context else parent_context
 
             # Query OSCAR agent with timeout monitoring (using formatted context)
-            privilege = self.is_fully_authorized_user(user_id)
             response, new_session_id = self.timeout_handler.query_agent_with_timeout(
                 self.oscar_agent, query, privilege, session_id, formatted_context, channel, reaction_ts,
                 start_time, say, thread_ts, user_id, session_attributes=identity_attrs
@@ -321,7 +324,8 @@ class MessageProcessor:
 
             # Update context with new query and response (skip for slash commands to avoid duplication)
             if not skip_context_storage:
-                self.storage.update_context(thread_key, query, response, session_id, new_session_id, user_id=user_id)
+                self.storage.update_context(thread_key, query, response, session_id, new_session_id,
+                                            user_id=user_id, privileged=privilege)
 
             # Format response for Slack before sending
             from .message_formatter import MessageFormatter
