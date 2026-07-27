@@ -14,9 +14,11 @@ from http_client import API_BASE, GitHubAPIError, get, put
 
 logger = logging.getLogger(__name__)
 
-# TODO: Add author verification — version increment PRs must be by opensearch-trigger-bot[bot],
-# release notes PRs by opensearch-ci-bot.
 BULK_MERGE_MAX_PRS = 25
+
+_ALLOWED_BOT_AUTHORS = frozenset({
+    "opensearch-ci-bot",
+})
 
 PR_TYPES = {
     "version_increment": {
@@ -24,12 +26,14 @@ PR_TYPES = {
             r"^\[AUTO\] Increment version to (\d+\.\d+\.\d+).*$"
         ),
         "requires_version_label": True,
+        "allowed_authors": _ALLOWED_BOT_AUTHORS,
     },
     "release_notes": {
         "title_pattern": re.compile(
             r"^(?:\[Backport [^\]]+\] )?\[AUTO\] Add release notes for (\d+\.\d+\.\d+)$"
         ),
         "requires_version_label": False,
+        "allowed_authors": _ALLOWED_BOT_AUTHORS,
     },
 }
 
@@ -91,6 +95,14 @@ def _validate_pr(
     """Run all guardrail checks on a single PR."""
     cfg = PR_TYPES[pr_type]
     checks: Dict[str, Dict[str, Any]] = {}
+
+    # Author verification — automated PRs must come from known bot accounts
+    author = pr_detail.get("user", {}).get("login", "")
+    allowed_authors = cfg.get("allowed_authors", _ALLOWED_BOT_AUTHORS)
+    checks["author"] = {
+        "passed": author in allowed_authors,
+        "detail": f"Author '{author}', allowed: {sorted(allowed_authors)}",
+    }
 
     title = pr_detail["title"]
     match = cfg["title_pattern"].match(title)
