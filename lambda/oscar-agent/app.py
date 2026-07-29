@@ -17,9 +17,12 @@ Functions:
     get_event_id: Generate unique event identifiers
 """
 
+import hashlib
+import hmac
 import json
 import logging
 import os
+import time
 from typing import Any, Dict, Optional
 
 import boto3
@@ -99,10 +102,39 @@ def lambda_handler(event: Dict[str, Any], context: Optional[object]) -> Dict[str
     if context and hasattr(context, 'aws_request_id'):
         config.set_request_id(context.aws_request_id)
 
-    # Check if this is an async processing event
+    # Check if this is an async processing event (internal self-invocation, already verified)
     if event.get('detail_type') == 'process_slack_event':
         logger.info("Processing async Slack event with OSCAR agent")
         return process_slack_event(event['detail'], context)
+
+    # Verify Slack signature before any processing to reject unauthenticated
+    # requests early and avoid Lambda amplification (cost/DoS).
+    headers = event.get('headers') or {}
+    slack_signature = headers.get('X-Slack-Signature') or headers.get('x-slack-signature')
+    slack_timestamp = headers.get('X-Slack-Request-Timestamp') or headers.get('x-slack-request-timestamp')
+    raw_body = event.get('body', '')
+
+    if not slack_signature or not slack_timestamp:
+        logger.warning("Missing Slack signature headers — rejecting request")
+        return {'statusCode': 401, 'body': json.dumps({'error': 'missing signature'})}
+
+    try:
+        if abs(time.time() - int(slack_timestamp)) > 300:
+            logger.warning("Slack request timestamp too old — rejecting")
+            return {'statusCode': 401, 'body': json.dumps({'error': 'request too old'})}
+    except (ValueError, TypeError):
+        return {'statusCode': 401, 'body': json.dumps({'error': 'invalid timestamp'})}
+
+    sig_basestring = f"v0:{slack_timestamp}:{raw_body}"
+    computed = 'v0=' + hmac.new(
+        config.slack_signing_secret.encode(),
+        sig_basestring.encode(),
+        hashlib.sha256,
+    ).hexdigest()
+
+    if not hmac.compare_digest(computed, slack_signature):
+        logger.warning("Slack signature verification failed — rejecting request")
+        return {'statusCode': 401, 'body': json.dumps({'error': 'invalid signature'})}
 
     # Extract event body for processing
     body = None
@@ -124,14 +156,11 @@ def lambda_handler(event: Dict[str, Any], context: Optional[object]) -> Dict[str
             'body': json.dumps({'challenge': challenge})
         }
 
-    # Handle Slack retries - acknowledge but don't process --> implemented as such to avoid potential duplicate response issues
-    if event.get('headers') and event.get('headers').get('X-Slack-Retry-Num'):
-        retry_count = int(event.get('headers').get('X-Slack-Retry-Num', '0'))
-        retry_reason = event.get('headers').get('X-Slack-Retry-Reason', 'unknown')
+    # Handle Slack retries - acknowledge but don't process
+    if headers.get('X-Slack-Retry-Num'):
+        retry_count = int(headers.get('X-Slack-Retry-Num', '0'))
+        retry_reason = headers.get('X-Slack-Retry-Reason', 'unknown')
         logger.warning(f"Received retry request from Slack. Count: {retry_count}, Reason: {retry_reason}")
-
-        # Always acknowledge retries without processing
-        logger.warning("Acknowledging retry request without processing")
         return {
             'statusCode': 200,
             'body': json.dumps({'message': 'Retry acknowledged without processing'})
