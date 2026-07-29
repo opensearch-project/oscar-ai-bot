@@ -101,7 +101,7 @@ class OscarApiGatewayStack(Stack):
             cloud_watch_role=True,
             # Keep minimal configuration
             deploy_options=apigateway.StageOptions(
-                stage_name="prod",
+                stage_name=self.env_name,
                 access_log_destination=apigateway.LogGroupLogDestination(self.log_group),
                 access_log_format=apigateway.AccessLogFormat.clf()
             ),
@@ -206,7 +206,7 @@ class OscarApiGatewayStack(Stack):
                                     byte_match_statement=wafv2.CfnWebACL.ByteMatchStatementProperty(
                                         field_to_match=wafv2.CfnWebACL.FieldToMatchProperty(uri_path={}),
                                         positional_constraint="STARTS_WITH",
-                                        search_string="/prod/github/",
+                                        search_string=f"/{self.env_name}/github/",
                                         text_transformations=[
                                             wafv2.CfnWebACL.TextTransformationProperty(priority=0, type="NONE")
                                         ],
@@ -233,7 +233,7 @@ class OscarApiGatewayStack(Stack):
                                     byte_match_statement=wafv2.CfnWebACL.ByteMatchStatementProperty(
                                         field_to_match=wafv2.CfnWebACL.FieldToMatchProperty(uri_path={}),
                                         positional_constraint="STARTS_WITH",
-                                        search_string="/prod/github/",
+                                        search_string=f"/{self.env_name}/github/",
                                         text_transformations=[
                                             wafv2.CfnWebACL.TextTransformationProperty(priority=0, type="NONE")
                                         ],
@@ -262,7 +262,7 @@ class OscarApiGatewayStack(Stack):
                                                 uri_path={}
                                             ),
                                             positional_constraint="STARTS_WITH",
-                                            search_string="/prod/github/",
+                                            search_string=f"/{self.env_name}/github/",
                                             text_transformations=[
                                                 wafv2.CfnWebACL.TextTransformationProperty(priority=0, type="NONE")
                                             ],
