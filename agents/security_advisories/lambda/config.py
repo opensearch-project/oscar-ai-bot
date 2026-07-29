@@ -62,11 +62,6 @@ class SecurityAdvisoriesConfig:
             'BEDROCK_RESPONSE_MESSAGE_VERSION', '1.0',
         )
 
-        # Agentic search pipeline configuration
-        self.agentic_pipeline = os.environ.get(
-            'AGENTIC_PIPELINE', 'oscar-agentic-pipeline',
-        )
-
         logger.info(f'Initialized SecurityAdvisoriesConfig - Region: {self.region}')
 
     def _load_secrets(self) -> Dict[str, str]:

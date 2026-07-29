@@ -82,14 +82,6 @@ class TestDefaultValues:
             cfg = mod.SecurityAdvisoriesConfig(validate_required=False)
             assert cfg.bedrock_message_version == '1.0'
 
-    def test_agentic_pipeline_default(self):
-        with pytest.MonkeyPatch.context() as mp:
-            mp.delenv('AGENTIC_PIPELINE', raising=False)
-            mp.delenv('SECURITY_ADVISORIES_SECRET_NAME', raising=False)
-            mod = _load_config_module()
-            cfg = mod.SecurityAdvisoriesConfig(validate_required=False)
-            assert cfg.agentic_pipeline == 'oscar-agentic-pipeline'
-
     def test_cross_account_role_arn_default_empty(self):
         with pytest.MonkeyPatch.context() as mp:
             mp.delenv('SECURITY_ADVISORIES_CROSS_ACCOUNT_ROLE_ARN', raising=False)
@@ -128,15 +120,6 @@ class TestEnvVarOverrides:
             mod = _load_config_module()
             cfg = mod.SecurityAdvisoriesConfig(validate_required=False)
             assert cfg.request_timeout == 120
-
-    def test_agentic_pipeline_override(self):
-        env = {**BASE_ENV, 'AGENTIC_PIPELINE': 'my-custom-pipeline'}
-        with pytest.MonkeyPatch.context() as mp:
-            for k, v in env.items():
-                mp.setenv(k, v)
-            mod = _load_config_module()
-            cfg = mod.SecurityAdvisoriesConfig(validate_required=False)
-            assert cfg.agentic_pipeline == 'my-custom-pipeline'
 
     def test_cross_account_role_arn_override(self):
         env = {

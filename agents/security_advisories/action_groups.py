@@ -28,10 +28,10 @@ def _privileged_action_group(
                 bedrock.CfnAgent.FunctionProperty(
                     name="query_vulnerabilities",
                     description=(
-                        "Query CVEs and vulnerabilities using natural language. "
-                        "The query is routed through an agentic flow pipeline that "
-                        "automatically translates it into OpenSearch DSL. Optionally "
-                        "scope by version or project name."
+                        "Query CVEs and vulnerabilities for OpenSearch project "
+                        "components. Scope by version or project name. Call "
+                        "list_projects() first to resolve the exact canonical "
+                        "project name."
                     ),
                     parameters={
                         "query": bedrock.CfnAgent.ParameterDetailProperty(
@@ -46,9 +46,12 @@ def _privileged_action_group(
                         "version": bedrock.CfnAgent.ParameterDetailProperty(
                             type="string",
                             description=(
-                                "OpenSearch version or branch to scope the query "
-                                "(e.g., '2.19.6', '3.0.0', 'origin/2.19'). "
-                                "Defaults to 'origin/main' if the user does not specify a version."
+                                "OpenSearch version or branch to scope the query. "
+                                "Valid values: a three-part version (e.g., '2.19.6', '3.0.0') "
+                                "which resolves to its branch (origin/major.minor), "
+                                "a two-part branch version (e.g., '3.7', '2.19'), "
+                                "'main', "
+                                "or an origin-prefixed tag (e.g., 'origin/2.19'). "
                             ),
                             required=False,
                         ),
@@ -72,9 +75,10 @@ def _privileged_action_group(
                         "age_days": bedrock.CfnAgent.ParameterDetailProperty(
                             type="integer",
                             description=(
-                                "Maximum age in days for scan results. Only return "
-                                "vulnerabilities from scans within this many days "
-                                "(e.g., 30 for the past month, 7 for the past week)"
+                                "Minimum age in days of CVE advisories to include. "
+                                "Only return CVEs published at least this many days ago "
+                                "(e.g., 60 for advisories older than 60 days, 14 for 2 weeks). "
+                                "Default to 60 for release preparation queries."
                             ),
                             required=False,
                         ),
@@ -87,6 +91,42 @@ def _privileged_action_group(
                         "Use to discover what components and release versions are available. "
                         "Each project includes a 'tags' array with all available versions and "
                         "branches sorted in descending semver order."
+                    ),
+                    parameters={},
+                ),
+                bedrock.CfnAgent.FunctionProperty(
+                    name="query_tickets",
+                    description=(
+                        "Query SIM tickets by CVE ID, project name, or branch."
+                    ),
+                    parameters={
+                        "cve_id": bedrock.CfnAgent.ParameterDetailProperty(
+                            type="string",
+                            description=(
+                                "CVE identifier to filter tickets (e.g., 'CVE-2026-27903')."
+                            ),
+                            required=False,
+                        ),
+                        "project_name": bedrock.CfnAgent.ParameterDetailProperty(
+                            type="string",
+                            description=(
+                                "Project or component name to filter tickets."
+                            ),
+                            required=False,
+                        ),
+                        "branch": bedrock.CfnAgent.ParameterDetailProperty(
+                            type="string",
+                            description=(
+                                "Branch name to filter tickets (e.g., 'origin/main' or 'origin/3.7')."
+                            ),
+                            required=False,
+                        ),
+                    },
+                ),
+                bedrock.CfnAgent.FunctionProperty(
+                    name="list_ticket_projects",
+                    description=(
+                        "List projects that currently have assigned SIM tickets."
                     ),
                     parameters={},
                 ),

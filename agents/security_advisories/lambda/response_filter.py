@@ -6,7 +6,7 @@
 Post-query filtering for vulnerability results.
 
 Handles array-level filtering that can't be efficiently done in OpenSearch:
-severity, exclusion status, and specific CVE lookups.
+exclusion removal, allowlist-based filtering, and advisory URL enrichment.
 """
 
 import logging
@@ -31,15 +31,20 @@ def _build_advisory_url(vuln_id: str) -> str:
 
 def filter_vulnerabilities(
     vulnerabilities: List[Dict[str, Any]],
-    severity: Optional[Set[str]] = None,
+    allowed_cve_ids: Optional[Set[str]] = None,
     include_excluded: bool = False,
 ) -> List[Dict[str, Any]]:
-    """Filter a vulnerabilities array from a scan document.
+    """Remove excluded CVEs, apply an optional allowlist, and enrich with advisory URLs.
+
+    This function handles post-query filtering that cannot be done at the
+    OpenSearch level: exclusion removal and allowlist-based filtering (when
+    severity/age filtering has been resolved into a set of CVE IDs by
+    ``query_advisories``).
 
     Args:
         vulnerabilities: Raw vulnerabilities array from the scan document.
-        severity: Set of severity levels to include (e.g., {"HIGH", "CRITICAL"}).
-                  If None, all severities are included.
+        allowed_cve_ids: If provided, only retain vulnerabilities whose ID is
+            in this set. When ``None``, no allowlist filtering is applied.
         include_excluded: If False (default), only return open (non-excluded) CVEs.
 
     Returns:
@@ -53,8 +58,8 @@ def filter_vulnerabilities(
         if not include_excluded and vuln.get("excluded"):
             continue
 
-        # Severity filter
-        if severity and vuln.get("severity") not in severity:
+        # Allowlist filter
+        if allowed_cve_ids is not None and vuln.get("id") not in allowed_cve_ids:
             continue
 
         # Enrich with advisory link
