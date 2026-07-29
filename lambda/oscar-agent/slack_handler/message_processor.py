@@ -53,25 +53,27 @@ class MessageProcessor:
     def _build_identity_attributes(self, thread_key: str, current_user_id: str) -> dict:
         """Build out-of-band session attributes for identity provenance.
 
-        Derives requester and approver from stored conversation context rather
-        than embedding them in the prompt text (which the model could fabricate).
+        Derives requester and approver from the confirmation-prompt flow:
+        - Requester = user whose message triggered a [CONFIRMATION_REQUIRED] response
+        - Approver = a *different* user who speaks after that prompt
+
+        This prevents stale thread participants from being treated as implicit
+        requesters for actions they never initiated.
 
         The current_user_id is the authenticated Slack user from the signed event.
-        The requester is the first distinct user who spoke in the thread.
         """
         attrs = {'current_user_id': current_user_id}
 
         stored_context = self.storage.get_context(thread_key)
         if stored_context:
-            thread_users = stored_context.get('thread_user_ids', [])
-            if thread_users:
-                # Requester = first user in the thread
-                attrs['requester_user_id'] = thread_users[0]
-                # Approver = current user (if different from requester)
-                if current_user_id != thread_users[0]:
+            pending_requester = stored_context.get('pending_approval_requester')
+            if pending_requester:
+                attrs['requester_user_id'] = pending_requester
+                if current_user_id != pending_requester:
                     attrs['approver_user_id'] = current_user_id
+            else:
+                attrs['requester_user_id'] = current_user_id
         else:
-            # First message in thread — this user is the requester
             attrs['requester_user_id'] = current_user_id
 
         return attrs
@@ -309,7 +311,16 @@ class MessageProcessor:
                 return
 
             # Handle confirmation detection and warning reaction
+            confirmation_required = response and '[CONFIRMATION_REQUIRED]' in response
             response = self._handle_confirmation_detection(response, channel, thread_ts)
+
+            # Track who triggered the confirmation for 2PR identity provenance.
+            # Set when a confirmation prompt is emitted; clear after the next turn
+            # (the approval or any non-confirmation response).
+            if confirmation_required:
+                self.storage.set_pending_approval_requester(thread_key, user_id)
+            else:
+                self.storage.clear_pending_approval_requester(thread_key)
 
             # Validate response - handle None, empty, or whitespace-only responses
             if response is None:

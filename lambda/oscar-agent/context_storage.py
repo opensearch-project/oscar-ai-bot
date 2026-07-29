@@ -42,6 +42,14 @@ class StorageInterface(ABC):
         """Update the conversation context with the new query and response."""
 
     @abstractmethod
+    def set_pending_approval_requester(self, thread_key: str, user_id: str) -> None:
+        """Record which user triggered a confirmation prompt (the 2PR requester)."""
+
+    @abstractmethod
+    def clear_pending_approval_requester(self, thread_key: str) -> None:
+        """Clear the pending approval state after an action completes."""
+
+    @abstractmethod
     def store_bot_message_context(self, channel: str, thread_ts: str, bot_message: str,
                                   session_id: Optional[str] = None, user_query: str = None) -> None:
         """Store context for bot-initiated messages to enable follow-up conversations."""
@@ -215,6 +223,30 @@ class StorageManager(StorageInterface):
                 "session_id": new_session_id or session_id,
                 "history": [{"query": query, "response": response, "timestamp": int(time.time())}]
             }
+
+    def set_pending_approval_requester(self, thread_key: str, user_id: str) -> None:
+        """Record which user triggered a confirmation prompt (the 2PR requester)."""
+        try:
+            context = self.get_context(thread_key)
+            if context is None:
+                context = {"session_id": None, "history": [], "thread_user_ids": []}
+            context['pending_approval_requester'] = user_id
+            self.store_context(thread_key, context)
+            logger.info(f"Set pending_approval_requester={user_id} for thread {thread_key}")
+        except Exception as e:
+            logger.error(f"Error setting pending_approval_requester for {thread_key}: {e}")
+
+    def clear_pending_approval_requester(self, thread_key: str) -> None:
+        """Clear the pending approval state after an action completes (no-op if unset)."""
+        try:
+            context = self.get_context(thread_key)
+            if not context or 'pending_approval_requester' not in context:
+                return
+            del context['pending_approval_requester']
+            self.store_context(thread_key, context)
+            logger.info(f"Cleared pending_approval_requester for thread {thread_key}")
+        except Exception as e:
+            logger.error(f"Error clearing pending_approval_requester for {thread_key}: {e}")
 
     def store_bot_message_context(self, channel: str, thread_ts: str, bot_message: str,
                                   session_id: Optional[str] = None, user_query: str = None) -> None:

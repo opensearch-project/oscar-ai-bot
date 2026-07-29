@@ -53,22 +53,47 @@ class TestBuildIdentityAttributes:
         assert result['requester_user_id'] == 'U_FIRST'
         assert 'approver_user_id' not in result
 
-    def test_second_user_sets_approver(self):
+    def test_pending_approval_different_user_sets_approver(self):
+        """A different user replying after a confirmation prompt becomes approver."""
         storage = Mock()
-        storage.get_context.return_value = {'thread_user_ids': ['U_REQ']}
+        storage.get_context.return_value = {'pending_approval_requester': 'U_REQ'}
         mp = _make_processor(storage=storage)
         result = mp._build_identity_attributes('C123_ts1', 'U_APP')
         assert result['current_user_id'] == 'U_APP'
         assert result['requester_user_id'] == 'U_REQ'
         assert result['approver_user_id'] == 'U_APP'
 
-    def test_same_user_no_approver(self):
+    def test_pending_approval_same_user_no_approver(self):
+        """The same user replying after their own confirmation prompt gets no approver."""
         storage = Mock()
-        storage.get_context.return_value = {'thread_user_ids': ['U_SAME']}
+        storage.get_context.return_value = {'pending_approval_requester': 'U_SAME'}
         mp = _make_processor(storage=storage)
         result = mp._build_identity_attributes('C123_ts1', 'U_SAME')
         assert result['current_user_id'] == 'U_SAME'
         assert result['requester_user_id'] == 'U_SAME'
+        assert 'approver_user_id' not in result
+
+    def test_no_pending_approval_current_user_is_requester(self):
+        """Without a pending approval, the current user is the requester (no approver)."""
+        storage = Mock()
+        storage.get_context.return_value = {'thread_user_ids': ['U_OTHER', 'U_CURRENT']}
+        mp = _make_processor(storage=storage)
+        result = mp._build_identity_attributes('C123_ts1', 'U_CURRENT')
+        assert result['current_user_id'] == 'U_CURRENT'
+        assert result['requester_user_id'] == 'U_CURRENT'
+        assert 'approver_user_id' not in result
+
+    def test_stale_thread_participant_not_used_as_requester(self):
+        """A stale thread participant should NOT become the requester for an action
+        they never initiated — this was the SSC-1 bypass."""
+        storage = Mock()
+        storage.get_context.return_value = {
+            'thread_user_ids': ['U_BOB', 'U_ALICE'],
+            # No pending_approval_requester — no confirmation prompt has been shown
+        }
+        mp = _make_processor(storage=storage)
+        result = mp._build_identity_attributes('C123_ts1', 'U_ALICE')
+        assert result['requester_user_id'] == 'U_ALICE'
         assert 'approver_user_id' not in result
 
 
