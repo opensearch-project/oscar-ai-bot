@@ -9,10 +9,15 @@ import sys
 from unittest.mock import MagicMock, patch
 
 import pytest
+from oscar_shared.oauth_state import generate_state
 
-# Add Lambda source path so oauth_state can be found
+# Add Lambda source path so lambda_function can be found
 _IDENTITY_LAMBDA_DIR = os.path.join(os.path.dirname(__file__), '..', '..', '..', 'lambda', 'oscar-identity')
 sys.path.insert(0, _IDENTITY_LAMBDA_DIR)
+
+# Add shared layer path so oscar_shared imports work
+_SHARED_LAYER_DIR = os.path.join(os.path.dirname(__file__), '..', '..', '..', 'lambda', 'shared-layer', 'python')
+sys.path.insert(0, _SHARED_LAYER_DIR)
 
 # Set required env vars before import
 os.environ.setdefault("IDENTITY_TABLE_PREFIX", "oscar-identity")
@@ -32,7 +37,6 @@ TEST_SECRETS = {
 
 def _make_signed_state(user_id="U123", workspace_id="T01INTERNAL"):
     """Generate a valid signed state token for tests."""
-    from oauth_state import generate_state
     return generate_state(user_id, workspace_id, TEST_SIGNING_SECRET)
 
 

@@ -7,12 +7,12 @@ import sys
 import time
 
 import pytest
-from oauth_state import STATE_TTL_SECONDS, generate_state, verify_state
+from oscar_shared.oauth_state import (STATE_TTL_SECONDS, generate_state,
+                                      verify_state)
 
-# Add Lambda source path so oauth_state can be found
-_IDENTITY_LAMBDA_DIR = os.path.join(os.path.dirname(__file__), '..', '..', '..', 'lambda', 'oscar-identity')
-sys.path.insert(0, _IDENTITY_LAMBDA_DIR)
-
+# Add shared layer path so oscar_shared can be found
+_SHARED_LAYER_DIR = os.path.join(os.path.dirname(__file__), '..', '..', '..', 'lambda', 'shared-layer', 'python')
+sys.path.insert(0, _SHARED_LAYER_DIR)
 
 SIGNING_KEY = "test-secret-key"
 

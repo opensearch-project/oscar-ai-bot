@@ -12,7 +12,7 @@ This module defines the DynamoDB tables used by the OSCAR Slack Bot.
 """
 
 import os
-from typing import Dict, List, Optional, cast
+from typing import Dict, List, Optional
 
 from aws_cdk import Duration, RemovalPolicy, Stack
 from aws_cdk import aws_cloudwatch as cloudwatch
@@ -67,19 +67,10 @@ class OscarStorageStack(Stack):
             context_ttl
         )
 
-        # Import existing identity tables by default; only create new ones when CREATE_IDENTITY_TABLES=true is explicitly set.
-        create_tables = os.environ.get("CREATE_IDENTITY_TABLES", "false").lower() == "true"
+        # Identity tables for Slack-GitHub mappings (one per workspace)
         self.identity_tables: Dict[str, dynamodb.Table] = {}
         for workspace_id in (workspace_ids or []):
-            table_name = f"{self.IDENTITY_TABLE_PREFIX}-{workspace_id}-{self.env_name}"
-            if create_tables:
-                table = self._create_identity_table(workspace_id, removal_policy)
-            else:
-                table = cast(dynamodb.Table, dynamodb.Table.from_table_attributes(
-                    self, f"IdentityTable{workspace_id}",
-                    table_name=table_name,
-                    grant_index_permissions=True,
-                ))
+            table = self._create_identity_table(workspace_id, removal_policy)
             self.identity_tables[workspace_id] = table
 
         # Create monitoring and alerting for context table only

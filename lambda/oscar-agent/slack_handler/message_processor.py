@@ -15,6 +15,10 @@ from typing import Callable
 import boto3
 from config import config
 from input_validator import InputValidationError, validate_and_sanitize
+from oscar_shared.oauth_state import generate_state
+from slack_sdk import WebClient
+
+from .message_formatter import MessageFormatter
 
 logger = logging.getLogger(__name__)
 
@@ -128,7 +132,6 @@ class MessageProcessor:
 
     def _handle_link_github_via_dm(self, user_id: str, channel: str, thread_ts: str, reaction_ts: str, say: Callable) -> None:
         """Handle link-github request by sending OAuth link via DM."""
-        from slack_sdk import WebClient
 
         tables = self._get_identity_tables()
         if not tables:
@@ -151,8 +154,6 @@ class MessageProcessor:
                 return
 
         # Build OAuth URL with HMAC-signed state
-        from oauth_state import generate_state
-
         client_id = config.github_oauth_client_id
         callback_url = config.oauth_callback_url
         state = generate_state(user_id, self._workspace_id, config.oauth_state_secret)
@@ -270,7 +271,6 @@ class MessageProcessor:
                 self.storage.update_context(thread_key, query, response, session_id, new_session_id)
 
             # Format response for Slack before sending
-            from .message_formatter import MessageFormatter
             formatter = MessageFormatter()
             formatted_response = formatter.format_markdown_to_slack_mrkdwn(response)
             formatted_response = formatter.convert_at_symbols_to_slack_pings(formatted_response)
@@ -321,7 +321,6 @@ class MessageProcessor:
                     error_message = "An unexpected error occurred. Please try again."
 
                 # Format error message for Slack before sending
-                from .message_formatter import MessageFormatter
                 formatter = MessageFormatter()
                 formatted_error = formatter.format_markdown_to_slack_mrkdwn(error_message)
                 formatted_error = formatter.convert_at_symbols_to_slack_pings(formatted_error)

@@ -165,6 +165,7 @@ class OscarLambdaStack(Stack):
             index="lambda_function.py",
             timeout=Duration.seconds(300),
             memory_size=256,
+            layers=[self.shared_layer],
             environment={
                 "ENVIRONMENT": self.env_name,
                 "CENTRAL_SECRET_NAME": self.secrets_stack.central_env_secret.secret_name,

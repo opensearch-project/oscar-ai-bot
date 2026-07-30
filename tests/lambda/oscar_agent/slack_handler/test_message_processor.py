@@ -242,22 +242,21 @@ class TestHandleLinkGithubViaDm:
 
     @patch.dict(os.environ, {"ENVIRONMENT": "dev", "SLACK_WORKSPACE_IDS": "W1"})
     @patch("slack_handler.message_processor.boto3")
-    @patch("slack_handler.message_processor.WebClient" if False else "slack_sdk.WebClient")
+    @patch("slack_handler.message_processor.WebClient")
     def test_sends_oauth_link_via_dm(self, mock_webclient_cls, mock_boto3):
         table = Mock()
         table.query.return_value = {"Items": []}
         mock_boto3.resource.return_value.Table.return_value = table
 
-        # Patch WebClient inside the method's import
         mock_client = Mock()
-        with patch("slack_sdk.WebClient", return_value=mock_client):
-            mp = _make_processor(reaction_manager=Mock())
-            mock_config.github_oauth_client_id = "test-client-id"
-            mock_config.oauth_callback_url = "https://example.com/callback"
-            mock_config.oauth_state_secret = "test-signing-secret"
-            mock_config.slack_bot_token = "xoxb-test"
-            say = Mock()
-            mp._handle_link_github_via_dm("U1", "C1", "ts1", "rts1", say)
+        mock_webclient_cls.return_value = mock_client
+        mp = _make_processor(reaction_manager=Mock())
+        mock_config.github_oauth_client_id = "test-client-id"
+        mock_config.oauth_callback_url = "https://example.com/callback"
+        mock_config.oauth_state_secret = "test-signing-secret"
+        mock_config.slack_bot_token = "xoxb-test"
+        say = Mock()
+        mp._handle_link_github_via_dm("U1", "C1", "ts1", "rts1", say)
 
         assert "DMs" in say.call_args[1]["text"] or "Check" in say.call_args[1]["text"]
 

@@ -9,9 +9,11 @@ Slash command handlers for Slack Handler.
 import logging
 import os
 import time
+from datetime import datetime, timezone
 
 import boto3
 from config import config
+from oscar_shared.oauth_state import generate_state
 
 logger = logging.getLogger(__name__)
 
@@ -171,8 +173,6 @@ class SlashCommandHandlers:
             return
 
         # Build OAuth URL with HMAC-signed state
-        from oauth_state import generate_state
-
         client_id = config.github_oauth_client_id
         callback_url = config.oauth_callback_url
         state = generate_state(user_id, workspace_id, config.oauth_state_secret)
@@ -208,7 +208,6 @@ class SlashCommandHandlers:
             respond(text="No GitHub account linked.", response_type="ephemeral")
             return
 
-        from datetime import datetime, timezone
         now = datetime.now(timezone.utc).isoformat()
         handle = active.get("github_handle", "unknown")
 

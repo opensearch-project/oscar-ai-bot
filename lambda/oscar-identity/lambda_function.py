@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """OAuth callback Lambda for Slack-GitHub identity linking."""
 
+import json
 import logging
 import os
 from dataclasses import dataclass
@@ -10,6 +11,7 @@ from typing import Optional
 
 import boto3
 import requests
+from oscar_shared.oauth_state import verify_state
 
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
@@ -53,7 +55,6 @@ def _get_oauth_creds():
     global _oauth_creds
     if _oauth_creds is None:
         raw = secrets_client.get_secret_value(SecretId=CENTRAL_SECRET_NAME)
-        import json
         _oauth_creds = json.loads(raw["SecretString"])
     return _oauth_creds
 
@@ -79,8 +80,6 @@ def lambda_handler(event, context):
 
     if not code or not state:
         return _html(400, "Missing code or state parameter.")
-
-    from oauth_state import verify_state
 
     creds = _get_oauth_creds()
     try:

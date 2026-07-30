@@ -105,13 +105,13 @@ def lambda_handler(event: Dict[str, Any], context: Optional[object]) -> Dict[str
         return process_slack_event(event['detail'], context)
 
     # Extract event body for processing
-    raw_body = event.get('body', '') or ''
     body = None
-    if raw_body.strip():
+    if event.get('body') and event['body'].strip():  # Check if body exists and is not empty/whitespace
         try:
-            body = json.loads(raw_body) if isinstance(raw_body, str) else raw_body
+            body = json.loads(event['body']) if isinstance(event['body'], str) else event['body']
         except (json.JSONDecodeError, TypeError) as e:
-            logger.warning(f"Failed to parse event body as JSON: {e}. Body: {raw_body[:100]}...")
+            logger.warning(f"Failed to parse event body as JSON: {e}. Body: {event.get('body')[:100]}...")
+            # For slash commands and other non-JSON payloads, continue without body parsing
             body = None
 
     # Handle Slack URL verification challenge immediately
