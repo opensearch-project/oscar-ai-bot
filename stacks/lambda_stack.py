@@ -290,6 +290,7 @@ class OscarLambdaStack(Stack):
         if self.storage_stack.identity_tables:
             env["ENVIRONMENT"] = self.env_name
             env["SLACK_WORKSPACE_IDS"] = ",".join(self.storage_stack.identity_tables.keys())
+            env["IDENTITY_TABLE_NAME"] = list(self.storage_stack.identity_tables.values())[0].table_name
         return env
 
     def _get_communication_handler_environment_variables(self) -> Dict[str, str]:

@@ -6,6 +6,7 @@ import os
 import sys
 from unittest.mock import Mock, patch
 
+import pytest
 from slack_handler.message_processor import MessageProcessor
 
 # Get the mock config from conftest
@@ -179,12 +180,13 @@ class TestProcessMessage:
 
 class TestHasIdentityMapping:
 
-    @patch.dict(os.environ, {"ENVIRONMENT": ""})
-    def test_returns_true_when_no_workspace_tables(self):
+    @patch.dict(os.environ, {"IDENTITY_TABLE_NAME": ""})
+    def test_raises_when_no_table_configured(self):
         mp = _make_processor()
-        assert mp._has_identity_mapping("U123") is True
+        with pytest.raises(ValueError, match="IDENTITY_TABLE cannot be fetched"):
+            mp._has_identity_mapping("U123")
 
-    @patch.dict(os.environ, {"ENVIRONMENT": "dev", "SLACK_WORKSPACE_IDS": "W1"})
+    @patch.dict(os.environ, {"IDENTITY_TABLE_NAME": "oscar-identity-W1-dev"})
     @patch("slack_handler.message_processor.boto3")
     def test_returns_true_when_active_mapping_exists(self, mock_boto3):
         table = Mock()
@@ -194,7 +196,7 @@ class TestHasIdentityMapping:
         mp = _make_processor()
         assert mp._has_identity_mapping("U123") is True
 
-    @patch.dict(os.environ, {"ENVIRONMENT": "dev", "SLACK_WORKSPACE_IDS": "W1"})
+    @patch.dict(os.environ, {"IDENTITY_TABLE_NAME": "oscar-identity-W1-dev"})
     @patch("slack_handler.message_processor.boto3")
     def test_returns_false_when_no_active_mapping(self, mock_boto3):
         table = Mock()
@@ -204,7 +206,7 @@ class TestHasIdentityMapping:
         mp = _make_processor()
         assert mp._has_identity_mapping("U123") is False
 
-    @patch.dict(os.environ, {"ENVIRONMENT": "dev", "SLACK_WORKSPACE_IDS": "W1"})
+    @patch.dict(os.environ, {"IDENTITY_TABLE_NAME": "oscar-identity-W1-dev"})
     @patch("slack_handler.message_processor.boto3")
     def test_returns_false_when_no_items(self, mock_boto3):
         table = Mock()
@@ -217,15 +219,14 @@ class TestHasIdentityMapping:
 
 class TestHandleLinkGithubViaDm:
 
-    @patch.dict(os.environ, {"ENVIRONMENT": ""})
-    def test_not_configured(self):
+    @patch.dict(os.environ, {"IDENTITY_TABLE_NAME": ""})
+    def test_not_configured_raises(self):
         mp = _make_processor(reaction_manager=Mock())
         say = Mock()
-        mp._handle_link_github_via_dm("U1", "C1", "ts1", "rts1", say)
-        say.assert_called_once()
-        assert "not configured" in say.call_args[1]["text"]
+        with pytest.raises(ValueError, match="IDENTITY_TABLE cannot be fetched"):
+            mp._handle_link_github_via_dm("U1", "C1", "ts1", "rts1", say)
 
-    @patch.dict(os.environ, {"ENVIRONMENT": "dev", "SLACK_WORKSPACE_IDS": "W1"})
+    @patch.dict(os.environ, {"IDENTITY_TABLE_NAME": "oscar-identity-W1-dev", "SLACK_WORKSPACE_IDS": "W1"})
     @patch("slack_handler.message_processor.boto3")
     def test_already_linked(self, mock_boto3):
         table = Mock()
@@ -240,7 +241,7 @@ class TestHandleLinkGithubViaDm:
             "C1", "rts1", add_reaction="white_check_mark", remove_reaction="thinking_face"
         )
 
-    @patch.dict(os.environ, {"ENVIRONMENT": "dev", "SLACK_WORKSPACE_IDS": "W1"})
+    @patch.dict(os.environ, {"IDENTITY_TABLE_NAME": "oscar-identity-W1-dev", "SLACK_WORKSPACE_IDS": "W1"})
     @patch("slack_handler.message_processor.boto3")
     @patch("slack_handler.message_processor.WebClient")
     def test_sends_oauth_link_via_dm(self, mock_webclient_cls, mock_boto3):
@@ -260,22 +261,22 @@ class TestHandleLinkGithubViaDm:
 
         assert "DMs" in say.call_args[1]["text"] or "Check" in say.call_args[1]["text"]
 
-    @patch.dict(os.environ, {"ENVIRONMENT": "dev", "SLACK_WORKSPACE_IDS": "W1"})
+    @patch.dict(os.environ, {"IDENTITY_TABLE_NAME": "oscar-identity-W1-dev", "SLACK_WORKSPACE_IDS": "W1"})
     @patch("slack_handler.message_processor.boto3")
-    def test_dm_failure_fallback(self, mock_boto3):
+    @patch("slack_handler.message_processor.WebClient")
+    def test_dm_failure_fallback(self, mock_webclient_cls, mock_boto3):
         table = Mock()
         table.query.return_value = {"Items": []}
         mock_boto3.resource.return_value.Table.return_value = table
 
-        with patch("slack_sdk.WebClient") as mock_wc:
-            mock_wc.return_value.chat_postMessage.side_effect = Exception("DM failed")
-            mp = _make_processor(reaction_manager=Mock())
-            mock_config.github_oauth_client_id = "cid"
-            mock_config.oauth_callback_url = "https://cb.com"
-            mock_config.oauth_state_secret = "test-signing-secret"
-            mock_config.slack_bot_token = "xoxb-test"
-            say = Mock()
-            mp._handle_link_github_via_dm("U1", "C1", "ts1", "rts1", say)
+        mock_webclient_cls.return_value.chat_postMessage.side_effect = Exception("DM failed")
+        mp = _make_processor(reaction_manager=Mock())
+        mock_config.github_oauth_client_id = "cid"
+        mock_config.oauth_callback_url = "https://cb.com"
+        mock_config.oauth_state_secret = "test-signing-secret"
+        mock_config.slack_bot_token = "xoxb-test"
+        say = Mock()
+        mp._handle_link_github_via_dm("U1", "C1", "ts1", "rts1", say)
 
         assert "Failed" in say.call_args[1]["text"] or "oscar-link-github" in say.call_args[1]["text"]
         mp.reaction_manager.manage_reactions.assert_called_with(
