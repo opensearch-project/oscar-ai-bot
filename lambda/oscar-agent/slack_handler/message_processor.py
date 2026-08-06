@@ -316,9 +316,12 @@ class MessageProcessor:
 
             # Track who triggered the confirmation for 2PR identity provenance.
             # Set when a confirmation prompt is emitted; clear after the next turn
-            # (the approval or any non-confirmation response).
+            # (the approval or any non-confirmation response) — UNLESS the response
+            # is a self-approval rejection, which means the prompt is still pending.
             if confirmation_required:
                 self.storage.set_pending_approval_requester(thread_key, user_id)
+            elif response and 'SECURITY ERROR' in response and 'Self-approval' in response:
+                pass
             else:
                 self.storage.clear_pending_approval_requester(thread_key)
 
