@@ -69,6 +69,7 @@ def audit_log(
     result: str,
     success: bool,
     request_id: str,
+    session_attributes: Optional[Dict[str, str]] = None,
 ) -> None:
     """Log an audit entry for a GitHub agent operation."""
     repo = params.get("repo", "N/A")
@@ -83,13 +84,13 @@ def audit_log(
         "success": success,
     }
 
-    # Include authenticated actor IDs when available (from 2PR params)
-    requester = params.get("requester_user_id")
-    approver = params.get("approver_user_id")
-    if requester:
-        log_entry["requester_user_id"] = requester
-    if approver:
-        log_entry["approver_user_id"] = approver
+    if session_attributes:
+        requester = session_attributes.get("requester_user_id")
+        approver = session_attributes.get("approver_user_id")
+        if requester:
+            log_entry["requester_user_id"] = requester
+        if approver:
+            log_entry["approver_user_id"] = approver
 
     if is_write:
         if "pr_number" in params:

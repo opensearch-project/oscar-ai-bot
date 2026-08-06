@@ -404,7 +404,7 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         org_error = validate_org_scope(function_name, params)
         if org_error:
             logger.warning("GITHUB [%s]: Org validation failed: %s", request_id, org_error)
-            audit_log(function_name, params, org_error, False, request_id)
+            audit_log(function_name, params, org_error, False, request_id, session_attributes)
             return create_response(event, {"error": org_error})
 
         # --- Audit log write operations (redacting sensitive fields) ---
@@ -450,13 +450,13 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
                             request_id, params.get("repo", ""), params.get("pr_number", ""),
                             guardrail_result.get("message", ""),
                         )
-                        audit_log(function_name, params, f"FORCE MERGE — guardrails overridden: {guardrail_result.get('message', '')}", True, request_id)
+                        audit_log(function_name, params, f"FORCE MERGE — guardrails overridden: {guardrail_result.get('message', '')}", True, request_id, session_attributes)
                     else:
                         logger.warning(
                             "GITHUB [%s]: merge_pr blocked by guardrails for %s#%s",
                             request_id, params.get("repo", ""), params.get("pr_number", ""),
                         )
-                        audit_log(function_name, params, guardrail_result["message"], False, request_id)
+                        audit_log(function_name, params, guardrail_result["message"], False, request_id, session_attributes)
                         return create_response(event, guardrail_result)
                 else:
                     # Guardrails passed — enforce 2PR when enabled
@@ -479,7 +479,7 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
                     "GITHUB [%s]: %s blocked by guardrails",
                     request_id, function_name,
                 )
-                audit_log(function_name, params, guardrail_result["message"], False, request_id)
+                audit_log(function_name, params, guardrail_result["message"], False, request_id, session_attributes)
                 return create_response(event, guardrail_result)
 
         # --- Execute: direct API or MCP ---
@@ -495,17 +495,17 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             )
             result = client.call_tool(func_def.mcp_tool, args)
 
-        audit_log(function_name, params, "success", True, request_id)
+        audit_log(function_name, params, "success", True, request_id, session_attributes)
         return create_response(event, result)
 
     except GitHubAPIError as e:
         logger.error("GITHUB [%s]: API error: %s", request_id, e)
-        audit_log(function_name, params, str(e), False, request_id)
+        audit_log(function_name, params, str(e), False, request_id, session_attributes)
         return create_response(event, {
             "error": str(e),
             "status_code": e.status_code,
         })
     except Exception as e:
         logger.error("GITHUB [%s]: %s\n%s", request_id, e, traceback.format_exc())
-        audit_log(function_name, params, str(e), False, request_id)
+        audit_log(function_name, params, str(e), False, request_id, session_attributes)
         return create_response(event, {"error": str(e)})
