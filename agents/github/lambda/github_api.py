@@ -200,5 +200,3 @@ def get_repo_maintainers(token: str, owner: str, repo: str) -> str:
     except Exception as e:
         logger.warning("Failed to fetch maintainers for %s/%s: %s", owner, repo, e)
         return json.dumps({"status": "error", "message": str(e)})
-
-

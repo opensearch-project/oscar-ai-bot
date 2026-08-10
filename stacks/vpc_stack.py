@@ -152,4 +152,3 @@ class OscarVpcStack(Stack):
             security_groups=[self.lambda_security_group],
             private_dns_enabled=True,
         )
-
