@@ -15,7 +15,7 @@ import pytest
 
 # Path to the action_groups module
 _AGENTS_PATH = os.path.join(
-    os.path.dirname(__file__), '..', '..', '..', 'agents', 'security_advisories',
+    os.path.dirname(__file__), '..', '..', '..', 'agents', 'SecurityAdvisories',
 )
 
 

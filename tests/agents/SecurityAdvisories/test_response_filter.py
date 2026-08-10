@@ -12,7 +12,7 @@ import sys
 import unittest
 
 sys.path.insert(0, os.path.join(
-    os.path.dirname(__file__), '..', '..', '..', 'agents', 'security_advisories', 'lambda'
+    os.path.dirname(__file__), '..', '..', '..', 'agents', 'SecurityAdvisories', 'lambda'
 ))
 
 from response_filter import build_summary, filter_vulnerabilities  # noqa: E402
