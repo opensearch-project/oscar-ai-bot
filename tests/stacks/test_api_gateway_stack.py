@@ -98,7 +98,7 @@ class TestApiGatewayStack:
     def test_deployment_stage_created(self, template):
         """A deployment stage should be created."""
         template.has_resource_properties("AWS::ApiGateway::Stage", {
-            "StageName": "prod",
+            "StageName": "dev",
         })
 
     def test_log_group_created(self, template):

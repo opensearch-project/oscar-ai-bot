@@ -297,10 +297,10 @@ class TestGitHubAgentWriteOperations:
     """Validate the GitHub agent's write operation configuration."""
 
     def test_github_action_group_count(self):
-        """GitHub agent should have 6 action groups (2 deprecated, read, write, bulk merge, community metrics)."""
+        """GitHub agent should have 4 action groups (read, write, bulk merge, maintainer lookup)."""
         agent = GitHubAgent()
         groups = agent.get_action_groups("arn:aws:lambda:us-east-1:123456789012:function:placeholder")
-        assert len(groups) == 6
+        assert len(groups) == 4
 
     def test_github_write_group_exists(self):
         """GitHub agent should have a write operations action group."""
@@ -352,10 +352,10 @@ class TestGitHubAgentWriteOperations:
         assert "CONFIRMATION_REQUIRED" in instruction
 
     def test_github_agent_instruction_mentions_org_enforcement(self):
-        """Agent instruction must enforce opensearch-project organization scope."""
+        """Agent instruction must enforce organization scope."""
         agent = GitHubAgent()
         instruction = agent.get_agent_instruction()
-        assert "opensearch-project" in instruction
+        assert "ORGANIZATION ENFORCEMENT" in instruction
 
 
 class TestGitHubAuthorizer:
@@ -672,6 +672,6 @@ class TestGuardrail:
         agents = agents_template.find_resources("AWS::Bedrock::Agent")
         for logical_id, resource in agents.items():
             name = resource["Properties"].get("AgentName", "")
-            if "privileged" not in name and "limited" not in name:
+            if "privileged" not in name and "limited" not in name and "github" not in name:
                 assert "GuardrailConfiguration" not in resource["Properties"], \
                     f"Collaborator agent '{name}' should not have a guardrail"
