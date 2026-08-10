@@ -11,18 +11,17 @@ import uuid
 from typing import Any, Dict
 
 import boto3
-from http_client import ORG, GitHubAPIError
-from mcp_client import MCPClient
-from oscar_shared.approval_guard import validate_two_person_approval
-from registry import FunctionDef
-from response_builder import create_response
-
 from authorizer import audit_log, validate_org_scope
 from github_api import (add_comment, bulk_comment, get_repo_maintainers,
                         transfer_issue)
 from guardrails import (bulk_merge, list_merge_candidates,
                         validate_bulk_comment, validate_comment,
                         validate_single_pr, validate_transfer_issue)
+from http_client import ORG, GitHubAPIError
+from mcp_client import MCPClient
+from oscar_shared.approval_guard import validate_two_person_approval
+from registry import FunctionDef
+from response_builder import create_response
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)

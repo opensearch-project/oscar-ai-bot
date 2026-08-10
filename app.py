@@ -32,8 +32,6 @@ from stacks.security_monitoring_stack import OscarSecurityMonitoringStack
 from stacks.storage_stack import OscarStorageStack
 from stacks.vpc_stack import OscarVpcStack
 
-
-
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,
