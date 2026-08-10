@@ -3,6 +3,7 @@
 
 """Base agent definition for OSCAR modules."""
 
+import re
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import Dict, List
@@ -53,10 +54,23 @@ class OscarAgent(ABC):
     IAM policies, Lambda config, action groups, and agent instructions.
     """
 
+    _NAME_PATTERN = re.compile(r'^[a-z]+$|^[A-Z][a-zA-Z]+$')
+
+    def __init_subclass__(cls, **kwargs):
+        super().__init_subclass__(**kwargs)
+        if getattr(cls.name, '__isabstractmethod__', False):
+            return
+        name = cls.name.fget(None) if isinstance(cls.name, property) else cls.name
+        if not OscarAgent._NAME_PATTERN.match(name):
+            raise ValueError(
+                f"Agent name '{name}' must be a single lowercase word "
+                f"(e.g. 'jenkins') or CamelCase (e.g. 'SecurityAdvisories')."
+            )
+
     @property
     @abstractmethod
     def name(self) -> str:
-        """Unique module name, e.g. 'jenkins', 'metrics'."""
+        """Unique module name, e.g. 'jenkins', 'SecurityAdvisories'."""
         ...
 
     @abstractmethod

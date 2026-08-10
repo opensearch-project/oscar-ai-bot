@@ -14,7 +14,7 @@ from aws_cdk.assertions import Match, Template
 from agents.base_agent import LambdaConfig, OscarAgent
 from agents.jenkins import JenkinsAgent
 from agents.metrics import MetricsAgent
-from agents.security_advisories import SecurityAdvisoriesAgent
+from agents.SecurityAdvisories import SecurityAdvisoriesAgent
 from stacks.bedrock_agents_stack import OscarAgentsStack
 from stacks.lambda_stack import OscarLambdaStack
 from stacks.permissions_stack import OscarPermissionsStack
@@ -108,6 +108,112 @@ class TestAgentRegistration:
 
     def test_security_advisories_access_level(self):
         assert SecurityAdvisoriesAgent().get_access_level() == "privileged"
+
+
+# ---------------------------------------------------------------------------
+# Agent name validation tests
+# ---------------------------------------------------------------------------
+
+class TestAgentNameValidation:
+    """OscarAgent rejects names that are not single lowercase or CamelCase."""
+
+    def test_snake_case_rejected(self):
+        with pytest.raises(ValueError, match="must be a single lowercase word"):
+            class BadSnake(OscarAgent):
+                @property
+                def name(self):
+                    return "security_advisories"
+
+                def get_lambda_config(self):
+                    pass
+
+                def get_iam_policies(self, a, r, e):
+                    pass
+
+                def get_action_groups(self, lam):
+                    pass
+
+                def get_agent_instruction(self):
+                    pass
+
+                def get_collaborator_instruction(self):
+                    pass
+
+                def get_collaborator_name(self):
+                    pass
+
+    def test_kebab_case_rejected(self):
+        with pytest.raises(ValueError, match="must be a single lowercase word"):
+            class BadKebab(OscarAgent):
+                @property
+                def name(self):
+                    return "security-advisories"
+
+                def get_lambda_config(self):
+                    pass
+
+                def get_iam_policies(self, a, r, e):
+                    pass
+
+                def get_action_groups(self, lam):
+                    pass
+
+                def get_agent_instruction(self):
+                    pass
+
+                def get_collaborator_instruction(self):
+                    pass
+
+                def get_collaborator_name(self):
+                    pass
+
+    def test_single_lowercase_accepted(self):
+        class GoodLower(OscarAgent):
+            @property
+            def name(self):
+                return "jenkins"
+
+            def get_lambda_config(self):
+                pass
+
+            def get_iam_policies(self, a, r, e):
+                pass
+
+            def get_action_groups(self, lam):
+                pass
+
+            def get_agent_instruction(self):
+                pass
+
+            def get_collaborator_instruction(self):
+                pass
+
+            def get_collaborator_name(self):
+                pass
+
+    def test_camel_case_accepted(self):
+        class GoodCamel(OscarAgent):
+            @property
+            def name(self):
+                return "SecurityAdvisories"
+
+            def get_lambda_config(self):
+                pass
+
+            def get_iam_policies(self, a, r, e):
+                pass
+
+            def get_action_groups(self, lam):
+                pass
+
+            def get_agent_instruction(self):
+                pass
+
+            def get_collaborator_instruction(self):
+                pass
+
+            def get_collaborator_name(self):
+                pass
 
 
 # ---------------------------------------------------------------------------

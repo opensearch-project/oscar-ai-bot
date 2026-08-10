@@ -14,7 +14,7 @@ import sys
 from unittest.mock import MagicMock, patch
 
 _LAMBDA_PATH = os.path.join(
-    os.path.dirname(__file__), '..', '..', '..', 'agents', 'security_advisories', 'lambda',
+    os.path.dirname(__file__), '..', '..', '..', 'agents', 'SecurityAdvisories', 'lambda',
 )
 
 

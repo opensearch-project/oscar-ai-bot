@@ -17,7 +17,7 @@ import pytest
 
 # Path to the real aws_utils module
 _LAMBDA_PATH = os.path.join(
-    os.path.dirname(__file__), '..', '..', '..', 'agents', 'security_advisories', 'lambda',
+    os.path.dirname(__file__), '..', '..', '..', 'agents', 'SecurityAdvisories', 'lambda',
 )
 
 
