@@ -141,7 +141,7 @@ class MessageProcessor:
             return
 
         # Build OAuth URL with HMAC-signed state
-        workspace_id = os.environ.get("SLACK_WORKSPACE_IDS", "").split(",")[0].strip()
+        workspace_id = os.environ.get("SLACK_WORKSPACE_ID", "")
         client_id = config.github_oauth_client_id
         callback_url = config.oauth_callback_url
         state = generate_state(user_id, workspace_id, config.oauth_state_secret)

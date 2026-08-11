@@ -16,26 +16,26 @@ def set_create_tables(monkeypatch):
 
 
 @pytest.fixture
-def template_with_workspaces():
-    """Synthesise storage stack with two workspaces."""
+def template_with_workspace():
+    """Synthesise storage stack with a workspace."""
     app = App()
     stack = OscarStorageStack(
         app, "TestStorageStack",
         environment="dev",
-        workspace_ids=["T01INTERNAL", "T02OPENSOURCE"],
+        workspace_id="T01INTERNAL",
         env=Environment(account="123456789012", region="us-east-1"),
     )
     return Template.from_stack(stack)
 
 
 @pytest.fixture
-def template_no_workspaces():
-    """Synthesise storage stack with no workspaces."""
+def template_no_workspace():
+    """Synthesise storage stack with no workspace."""
     app = App()
     stack = OscarStorageStack(
         app, "TestStorageStackEmpty",
         environment="dev",
-        workspace_ids=[],
+        workspace_id=None,
         env=Environment(account="123456789012", region="us-east-1"),
     )
     return Template.from_stack(stack)
@@ -43,23 +43,23 @@ def template_no_workspaces():
 
 class TestIdentityTables:
 
-    def test_creates_identity_tables_per_workspace(self, template_with_workspaces):
-        # 1 context table + 2 identity tables = 3
-        template_with_workspaces.resource_count_is("AWS::DynamoDB::Table", 3)
+    def test_creates_identity_table(self, template_with_workspace):
+        # 1 context table + 1 identity table = 2
+        template_with_workspace.resource_count_is("AWS::DynamoDB::Table", 2)
 
-    def test_no_identity_tables_when_no_workspaces(self, template_no_workspaces):
+    def test_no_identity_table_when_no_workspace(self, template_no_workspace):
         # Only the context table
-        template_no_workspaces.resource_count_is("AWS::DynamoDB::Table", 1)
+        template_no_workspace.resource_count_is("AWS::DynamoDB::Table", 1)
 
-    def test_identity_table_has_github_id_as_pk(self, template_with_workspaces):
-        template_with_workspaces.has_resource_properties("AWS::DynamoDB::Table", {
+    def test_identity_table_has_github_id_as_pk(self, template_with_workspace):
+        template_with_workspace.has_resource_properties("AWS::DynamoDB::Table", {
             "KeySchema": [
                 {"AttributeName": "github_id", "KeyType": "HASH"},
             ],
         })
 
-    def test_identity_table_has_gsi_on_slack_user_id(self, template_with_workspaces):
-        template_with_workspaces.has_resource_properties("AWS::DynamoDB::Table", {
+    def test_identity_table_has_gsi_on_slack_user_id(self, template_with_workspace):
+        template_with_workspace.has_resource_properties("AWS::DynamoDB::Table", {
             "GlobalSecondaryIndexes": [{
                 "IndexName": "slack-user-index",
                 "KeySchema": [
@@ -68,7 +68,7 @@ class TestIdentityTables:
             }],
         })
 
-    def test_identity_table_uses_pay_per_request(self, template_with_workspaces):
-        template_with_workspaces.has_resource_properties("AWS::DynamoDB::Table", {
+    def test_identity_table_uses_pay_per_request(self, template_with_workspace):
+        template_with_workspace.has_resource_properties("AWS::DynamoDB::Table", {
             "BillingMode": "PAY_PER_REQUEST",
         })

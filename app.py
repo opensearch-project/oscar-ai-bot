@@ -88,16 +88,15 @@ def main() -> None:
     )
 
     # 3. Storage (DynamoDB tables + identity tables)
-    slack_workspace_env = os.environ.get("SLACK_WORKSPACE_IDS", "").strip()
-    if not slack_workspace_env:
-        raise ValueError("SLACK_WORKSPACE_IDS environment variable is required for deployment")
-    workspace_ids = [w.strip() for w in slack_workspace_env.split(",") if w.strip()]
+    workspace_id = os.environ.get("SLACK_WORKSPACE_ID", "").strip()
+    if not workspace_id:
+        raise ValueError("SLACK_WORKSPACE_ID environment variable is required for deployment")
     storage_stack = OscarStorageStack(
         app, f"OscarStorageStack-{environment}",
         env=env,
         description="OSCAR DynamoDB storage",
         environment=environment,
-        workspace_ids=workspace_ids
+        workspace_id=workspace_id
     )
 
     # 4. VPC

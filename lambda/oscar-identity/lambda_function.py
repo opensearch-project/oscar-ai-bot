@@ -21,7 +21,7 @@ secrets_client = boto3.client("secretsmanager")
 
 _oauth_creds = None
 
-IDENTITY_TABLE_PREFIX = "oscar-identity"
+IDENTITY_TABLE_NAME = os.environ.get("IDENTITY_TABLE_NAME", "")
 ENVIRONMENT = os.environ.get("ENVIRONMENT", "")
 CENTRAL_SECRET_NAME = os.environ.get("CENTRAL_SECRET_NAME", "")
 
@@ -59,11 +59,10 @@ def _get_oauth_creds():
     return _oauth_creds
 
 
-def _get_table(workspace_id) -> Optional[object]:
-    if not IDENTITY_TABLE_PREFIX or not ENVIRONMENT:
+def _get_table() -> Optional[object]:
+    if not IDENTITY_TABLE_NAME:
         return None
-    table_name = f"{IDENTITY_TABLE_PREFIX}-{workspace_id}-{ENVIRONMENT}"
-    return dynamodb.Table(table_name)
+    return dynamodb.Table(IDENTITY_TABLE_NAME)
 
 
 def lambda_handler(event, context):
@@ -88,9 +87,9 @@ def lambda_handler(event, context):
         logger.warning(f"IDENTITY_STATE_INVALID: reason={e}")
         return _html(400, "Invalid or expired link. Please run /oscar-link-github again.")
 
-    table = _get_table(workspace_id)
+    table = _get_table()
     if not table:
-        return _html(400, "Workspace not configured for identity linking.")
+        return _html(400, "Identity table not configured.")
 
     try:
         token_resp = requests.post(
@@ -181,7 +180,6 @@ def _handle_validation():
     creds = _get_oauth_creds()
     bot_token = creds.get("SLACK_BOT_TOKEN", "")
     channel_ids = [c.strip() for c in creds.get("CHANNEL_ALLOW_LIST", "").split(",") if c.strip()]
-    workspace_ids = [w.strip() for w in os.environ.get("SLACK_WORKSPACE_IDS", "").split(",") if w.strip()]
 
     if not bot_token:
         logger.error("SLACK_BOT_TOKEN not found in central secret")
@@ -191,33 +189,28 @@ def _handle_validation():
         logger.error("CHANNEL_ALLOW_LIST not found in central secret")
         return {"expired": 0, "error": "no channels configured"}
 
-    if not workspace_ids:
-        logger.error("SLACK_WORKSPACE_IDS not configured")
-        return {"expired": 0, "error": "no workspace ids"}
+    table = _get_table()
+    if not table:
+        logger.error("IDENTITY_TABLE_NAME not configured")
+        return {"expired": 0, "error": "no identity table"}
 
     # Step 1: Fetch active mappings first — skip Slack API if nothing to validate
-    all_active = {}
-    for workspace_id in workspace_ids:
-        table_name = f"{IDENTITY_TABLE_PREFIX}-{workspace_id}-{ENVIRONMENT}"
-        table = dynamodb.Table(table_name)
+    active = []
+    scan_kwargs = {
+        "FilterExpression": "#s = :active",
+        "ExpressionAttributeNames": {"#s": "status"},
+        "ExpressionAttributeValues": {":active": "active"},
+        "ProjectionExpression": "github_id, slack_user_id",
+    }
+    while True:
+        response = table.scan(**scan_kwargs)
+        active.extend(response.get("Items", []))
+        last_key = response.get("LastEvaluatedKey")
+        if not last_key:
+            break
+        scan_kwargs["ExclusiveStartKey"] = last_key
 
-        active = []
-        scan_kwargs = {
-            "FilterExpression": "#s = :active",
-            "ExpressionAttributeNames": {"#s": "status"},
-            "ExpressionAttributeValues": {":active": "active"},
-            "ProjectionExpression": "github_id, slack_user_id",
-        }
-        while True:
-            response = table.scan(**scan_kwargs)
-            active.extend(response.get("Items", []))
-            last_key = response.get("LastEvaluatedKey")
-            if not last_key:
-                break
-            scan_kwargs["ExclusiveStartKey"] = last_key
-
-        logger.info(f"Workspace {workspace_id}: {len(active)} active mappings")
-        all_active[workspace_id] = active
+    logger.info(f"Active mappings: {len(active)}")
 
     # Step 2: Fetch channel members
     valid_users = set()
@@ -232,29 +225,25 @@ def _handle_validation():
     now = datetime.now(timezone.utc).isoformat()
     total_expired = 0
 
-    for workspace_id, active in all_active.items():
-        table_name = f"{IDENTITY_TABLE_PREFIX}-{workspace_id}-{ENVIRONMENT}"
-        table = dynamodb.Table(table_name)
-
-        for mapping in active:
-            if mapping["slack_user_id"] not in valid_users:
-                try:
-                    table.update_item(
-                        Key={"github_id": mapping["github_id"]},
-                        UpdateExpression="SET #s = :status, expired_at = :ts, expiry_reason = :reason",
-                        ConditionExpression="#s = :active",
-                        ExpressionAttributeNames={"#s": "status"},
-                        ExpressionAttributeValues={
-                            ":status": "expired",
-                            ":ts": now,
-                            ":reason": "member_is_not_in_the_channel",
-                            ":active": "active",
-                        },
-                    )
-                    total_expired += 1
-                    logger.info(f"IDENTITY_EXPIRED: github_id={mapping['github_id']} slack_user={mapping['slack_user_id']} workspace={workspace_id}")
-                except dynamodb.meta.client.exceptions.ConditionalCheckFailedException:
-                    pass
+    for mapping in active:
+        if mapping["slack_user_id"] not in valid_users:
+            try:
+                table.update_item(
+                    Key={"github_id": mapping["github_id"]},
+                    UpdateExpression="SET #s = :status, expired_at = :ts, expiry_reason = :reason",
+                    ConditionExpression="#s = :active",
+                    ExpressionAttributeNames={"#s": "status"},
+                    ExpressionAttributeValues={
+                        ":status": "expired",
+                        ":ts": now,
+                        ":reason": "member_is_not_in_the_channel",
+                        ":active": "active",
+                    },
+                )
+                total_expired += 1
+                logger.info(f"IDENTITY_EXPIRED: github_id={mapping['github_id']} slack_user={mapping['slack_user_id']}")
+            except dynamodb.meta.client.exceptions.ConditionalCheckFailedException:
+                pass
 
     logger.info(f"VALIDATION_COMPLETE: expired={total_expired}")
     return {"expired": total_expired}

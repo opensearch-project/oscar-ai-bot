@@ -12,7 +12,7 @@ This module defines the DynamoDB tables used by the OSCAR Slack Bot.
 """
 
 import os
-from typing import Dict, List, Optional
+from typing import Optional
 
 from aws_cdk import Duration, RemovalPolicy, Stack
 from aws_cdk import aws_cloudwatch as cloudwatch
@@ -37,14 +37,14 @@ class OscarStorageStack(Stack):
     def get_dynamodb_table_name(cls, environment: str) -> str:
         return f"{cls.CONTEXT_TABLE_NAME}-{environment}"
 
-    def __init__(self, scope: Construct, construct_id: str, environment: str, workspace_ids: Optional[List[str]] = None, **kwargs) -> None:
+    def __init__(self, scope: Construct, construct_id: str, environment: str, workspace_id: Optional[str] = None, **kwargs) -> None:
         """
         Initialize storage resources.
         Args:
             scope: The CDK construct scope
             construct_id: The ID of the construct
             environment: Deployment environment name
-            workspace_ids: Slack workspace IDs for identity tables
+            workspace_id: Slack workspace ID for identity table
             **kwargs: Additional keyword arguments
         """
         super().__init__(scope, construct_id, **kwargs)
@@ -67,11 +67,11 @@ class OscarStorageStack(Stack):
             context_ttl
         )
 
-        # Identity tables for Slack-GitHub mappings (one per workspace)
-        self.identity_tables: Dict[str, dynamodb.Table] = {}
-        for workspace_id in (workspace_ids or []):
-            table = self._create_identity_table(workspace_id, removal_policy)
-            self.identity_tables[workspace_id] = table
+        # Identity table for Slack-GitHub mapping
+        self.workspace_id: Optional[str] = workspace_id
+        self.identity_table: Optional[dynamodb.Table] = None
+        if workspace_id:
+            self.identity_table = self._create_identity_table(workspace_id, removal_policy)
 
         # Create monitoring and alerting for context table only
         self._create_context_monitoring(environment)
@@ -154,10 +154,10 @@ class OscarStorageStack(Stack):
         )
 
         # Identity table monitoring
-        for workspace_id, table in self.identity_tables.items():
+        if self.identity_table:
             self._create_table_alarms(
-                table=table,
-                table_type=f"Identity{workspace_id}",
+                table=self.identity_table,
+                table_type="Identity",
                 alert_topic=self.alert_topic,
                 environment=environment
             )

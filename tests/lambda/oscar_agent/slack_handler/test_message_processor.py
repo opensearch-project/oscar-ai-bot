@@ -226,7 +226,7 @@ class TestHandleLinkGithubViaDm:
         with pytest.raises(ValueError, match="IDENTITY_TABLE cannot be fetched"):
             mp._handle_link_github_via_dm("U1", "C1", "ts1", "rts1", say)
 
-    @patch.dict(os.environ, {"IDENTITY_TABLE_NAME": "oscar-identity-W1-dev", "SLACK_WORKSPACE_IDS": "W1"})
+    @patch.dict(os.environ, {"IDENTITY_TABLE_NAME": "oscar-identity-W1-dev", "SLACK_WORKSPACE_ID": "W1"})
     @patch("slack_handler.message_processor.boto3")
     def test_already_linked(self, mock_boto3):
         table = Mock()
@@ -241,7 +241,7 @@ class TestHandleLinkGithubViaDm:
             "C1", "rts1", add_reaction="white_check_mark", remove_reaction="thinking_face"
         )
 
-    @patch.dict(os.environ, {"IDENTITY_TABLE_NAME": "oscar-identity-W1-dev", "SLACK_WORKSPACE_IDS": "W1"})
+    @patch.dict(os.environ, {"IDENTITY_TABLE_NAME": "oscar-identity-W1-dev", "SLACK_WORKSPACE_ID": "W1"})
     @patch("slack_handler.message_processor.boto3")
     @patch("slack_handler.message_processor.WebClient")
     def test_sends_oauth_link_via_dm(self, mock_webclient_cls, mock_boto3):
@@ -261,7 +261,7 @@ class TestHandleLinkGithubViaDm:
 
         assert "DMs" in say.call_args[1]["text"] or "Check" in say.call_args[1]["text"]
 
-    @patch.dict(os.environ, {"IDENTITY_TABLE_NAME": "oscar-identity-W1-dev", "SLACK_WORKSPACE_IDS": "W1"})
+    @patch.dict(os.environ, {"IDENTITY_TABLE_NAME": "oscar-identity-W1-dev", "SLACK_WORKSPACE_ID": "W1"})
     @patch("slack_handler.message_processor.boto3")
     @patch("slack_handler.message_processor.WebClient")
     def test_dm_failure_fallback(self, mock_webclient_cls, mock_boto3):

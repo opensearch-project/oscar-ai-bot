@@ -151,7 +151,7 @@ def template_with_identity():
     )
     storage = OscarStorageStack(
         app, "StorageIdentity", environment="dev",
-        workspace_ids=["T01INTERNAL"],
+        workspace_id="T01INTERNAL",
         env=ENV,
     )
     vpc = OscarVpcStack(app, "VpcIdentity", env=ENV)
@@ -173,7 +173,7 @@ class TestIdentityLambda:
     """Test cases for identity Lambda creation."""
 
     def test_identity_lambda_created(self, template_with_identity):
-        """Identity Lambda should be created when workspace_ids are configured."""
+        """Identity Lambda should be created when workspace_id is configured."""
         template_with_identity.has_resource_properties("AWS::Lambda::Function", {
             "FunctionName": "oscar-identity-dev",
             "Runtime": "python3.12",
@@ -189,7 +189,7 @@ class TestIdentityLambda:
             "Environment": {
                 "Variables": Match.object_like({
                     "ENVIRONMENT": "dev",
-                    "SLACK_WORKSPACE_IDS": "T01INTERNAL",
+                    "IDENTITY_TABLE_NAME": Match.any_value(),
                 }),
             },
         })
@@ -201,9 +201,9 @@ class TestIdentityLambda:
             "Description": "Weekly identity membership validation",
         })
 
-    def test_no_identity_lambda_without_workspaces(self, template):
-        """Identity Lambda should NOT be created when no workspace_ids configured."""
-        # The base template fixture has no workspace_ids
+    def test_no_identity_lambda_without_workspace(self, template):
+        """Identity Lambda should NOT be created when no workspace_id configured."""
+        # The base template fixture has no workspace_id
         functions = template.find_resources("AWS::Lambda::Function")
         identity_fns = [
             k for k, v in functions.items()

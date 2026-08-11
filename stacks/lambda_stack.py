@@ -76,7 +76,7 @@ class OscarLambdaStack(Stack):
         self._create_communication_handler_lambda()
 
         # Identity lambda
-        if storage_stack.identity_tables:
+        if storage_stack.identity_table:
             self._create_identity_lambda()
 
         # Agent lambdas
@@ -89,9 +89,8 @@ class OscarLambdaStack(Stack):
         self.secrets_stack.grant_read_access(execution_role)
 
         # Grant identity table access if configured
-        if self.storage_stack.identity_tables:
-            for t in self.storage_stack.identity_tables.values():
-                t.grant_read_write_data(execution_role)
+        if self.storage_stack.identity_table:
+            self.storage_stack.identity_table.grant_read_write_data(execution_role)
 
         function = PythonFunction(
             self, "MainOscarAgentLambda",
@@ -169,14 +168,13 @@ class OscarLambdaStack(Stack):
             environment={
                 "ENVIRONMENT": self.env_name,
                 "CENTRAL_SECRET_NAME": self.secrets_stack.central_env_secret.secret_name,
-                "SLACK_WORKSPACE_IDS": ",".join(self.storage_stack.identity_tables.keys()),
+                "IDENTITY_TABLE_NAME": self.storage_stack.identity_table.table_name,
             },
             role=role,
             description="Identity linking and weekly membership validation",
             reserved_concurrent_executions=5,
         )
-        for t in self.storage_stack.identity_tables.values():
-            t.grant_read_write_data(role)
+        self.storage_stack.identity_table.grant_read_write_data(role)
         self.secrets_stack.grant_read_access(role)
 
         # Weekly EventBridge schedule for membership validation
@@ -287,10 +285,10 @@ class OscarLambdaStack(Stack):
             "OSCAR_LIMITED_BEDROCK_AGENT_ALIAS_PARAM_PATH": params["limited_supervisor_agent_alias"],
             "AWS_ACCOUNT_ID": os.environ.get("AWS_ACCOUNT_ID") or os.environ.get("CDK_DEFAULT_ACCOUNT", ""),
         })
-        if self.storage_stack.identity_tables:
+        if self.storage_stack.identity_table:
             env["ENVIRONMENT"] = self.env_name
-            env["SLACK_WORKSPACE_IDS"] = ",".join(self.storage_stack.identity_tables.keys())
-            env["IDENTITY_TABLE_NAME"] = list(self.storage_stack.identity_tables.values())[0].table_name
+            env["IDENTITY_TABLE_NAME"] = self.storage_stack.identity_table.table_name
+            env["SLACK_WORKSPACE_ID"] = self.storage_stack.workspace_id
         return env
 
     def _get_communication_handler_environment_variables(self) -> Dict[str, str]:

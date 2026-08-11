@@ -42,11 +42,10 @@ def _make_signed_state(user_id="U123", workspace_id="T01INTERNAL"):
 
 @pytest.fixture(autouse=True)
 def setup_env(monkeypatch):
-    monkeypatch.setenv("IDENTITY_TABLE_PREFIX", "oscar-identity")
+    monkeypatch.setenv("IDENTITY_TABLE_NAME", "oscar-identity-T01INTERNAL-dev")
     monkeypatch.setenv("ENVIRONMENT", "dev")
     monkeypatch.setenv("CENTRAL_SECRET_NAME", "oscar-central-env-dev")
     monkeypatch.setenv("AWS_REGION", "us-east-1")
-    monkeypatch.setenv("SLACK_WORKSPACE_IDS", "T01INTERNAL")
 
 
 @pytest.fixture(autouse=True)
