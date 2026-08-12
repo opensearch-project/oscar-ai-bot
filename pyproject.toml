@@ -1,6 +1,6 @@
 [project]
 name = "oscar-ai-bot"
-version = "4.0.0"
+version = "4.1.0"
 
 [tool.isort]
 skip_glob = ["cdk.out/*", ".venv/*"]
