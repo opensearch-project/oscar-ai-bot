@@ -1,8 +1,8 @@
 {
   "name": "github-mcp-server",
-  "version": "v1.0.4",
+  "version": "v1.9.0",
   "source": "https://github.com/github/github-mcp-server/releases",
   "platform": "Linux_x86_64",
-  "sha256": "6ec1f1c1dbb068519424da48d2e91654a16b0897a951d6b26a919407fe08ef73",
-  "s3_key": "github-mcp-server/v1.0.4/github-mcp-server"
+  "sha256": "a2430aa854d750aa1ee9291ae6c84496080a50537af57783e8bc391c36c5ae84",
+  "url": "https://ci.opensearch.org/ci/dbc/tools/github-map-server/github-mcp-server_1.9.0_Linux_x86_64.tar.gz"
 }

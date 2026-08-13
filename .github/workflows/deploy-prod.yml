@@ -11,7 +11,6 @@ jobs:
       issues: write
     env:
       PYTHON_VERSION: 3.12
-      ARTIFACTS_BUCKET: ${{ secrets.ARTIFACTS_BUCKET }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Repository
@@ -54,12 +53,14 @@ jobs:
           role-to-assume: ${{ secrets.PROD_DEPLOYMENT_ROLE }}
           aws-region: 'us-east-1'
 
-      - name: Download GitHub MCP Server binary from S3
+      - name: Download GitHub MCP Server binary
         run: |
-          S3_KEY=$(python -c "import json; print(json.load(open('agents/github/mcp-server.json'))['s3_key'])")
+          URL=$(python -c "import json; print(json.load(open('agents/github/mcp-server.json'))['url'])")
           EXPECTED_SHA=$(python -c "import json; print(json.load(open('agents/github/mcp-server.json'))['sha256'])")
           mkdir -p agents/github/lambda/bin
-          aws s3 cp "s3://${ARTIFACTS_BUCKET}/${S3_KEY}" agents/github/lambda/bin/github-mcp-server
+          curl -sfL "${URL}" -o /tmp/mcp-server.tar.gz
+          tar xzf /tmp/mcp-server.tar.gz -C agents/github/lambda/bin github-mcp-server
+          rm -f /tmp/mcp-server.tar.gz
           ACTUAL_SHA=$(sha256sum agents/github/lambda/bin/github-mcp-server | awk '{print $1}')
           if [ "${ACTUAL_SHA}" != "${EXPECTED_SHA}" ]; then
             echo "FATAL: SHA256 mismatch! Expected ${EXPECTED_SHA}, got ${ACTUAL_SHA}"
