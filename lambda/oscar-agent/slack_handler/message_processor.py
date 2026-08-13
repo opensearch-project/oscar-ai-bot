@@ -320,7 +320,7 @@ class MessageProcessor:
             # is a self-approval rejection, which means the prompt is still pending.
             if confirmation_required:
                 self.storage.set_pending_approval_requester(thread_key, user_id)
-            elif response and 'SECURITY ERROR' in response and 'Self-approval' in response:
+            elif response and 'SECURITY ERROR' in response:
                 pass
             else:
                 self.storage.clear_pending_approval_requester(thread_key)
