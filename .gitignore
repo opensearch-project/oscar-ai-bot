@@ -30,8 +30,9 @@ venv/
 ENV/
 env/
 
-# Local scripts
-scripts/
+# Local scripts (allow tracked scripts via negation)
+scripts/*
+!scripts/download-mcp-server.sh
 
 # IDE and OS
 .idea/

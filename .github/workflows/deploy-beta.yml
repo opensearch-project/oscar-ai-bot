@@ -54,20 +54,7 @@ jobs:
           aws-region: 'us-east-1'
 
       - name: Download GitHub MCP Server binary
-        run: |
-          URL=$(python -c "import json; print(json.load(open('agents/github/mcp-server.json'))['url'])")
-          EXPECTED_SHA=$(python -c "import json; print(json.load(open('agents/github/mcp-server.json'))['sha256'])")
-          mkdir -p agents/github/lambda/bin
-          curl -sfL "${URL}" -o /tmp/mcp-server.tar.gz
-          tar xzf /tmp/mcp-server.tar.gz -C agents/github/lambda/bin github-mcp-server
-          rm -f /tmp/mcp-server.tar.gz
-          ACTUAL_SHA=$(sha256sum agents/github/lambda/bin/github-mcp-server | awk '{print $1}')
-          if [ "${ACTUAL_SHA}" != "${EXPECTED_SHA}" ]; then
-            echo "FATAL: SHA256 mismatch! Expected ${EXPECTED_SHA}, got ${ACTUAL_SHA}"
-            exit 1
-          fi
-          chmod +x agents/github/lambda/bin/github-mcp-server
-          ls -lh agents/github/lambda/bin/github-mcp-server
+        run: ./scripts/download-mcp-server.sh
 
       - name: Create beta change-set for approval
         id: beta_stack_diff
