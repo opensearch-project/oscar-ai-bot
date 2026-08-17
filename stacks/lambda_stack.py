@@ -160,7 +160,6 @@ class OscarLambdaStack(Stack):
             memory_size=256,
             environment={
                 "WEBHOOK_SECRET_NAME": secret_name,
-                "GITHUB_BOT_USERNAME": os.environ.get("GITHUB_BOT_USERNAME", "oscar-github-agent-test"),
             },
             role=execution_role,
             description="GitHub webhook handler — posts notifications to Slack",

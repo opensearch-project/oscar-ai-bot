@@ -23,17 +23,65 @@ import requests
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
-BOT_MENTION = os.environ.get("GITHUB_BOT_USERNAME", "oscar-github-agent-test")
-if not BOT_MENTION or BOT_MENTION == "oscar-github-agent-test":
-    logger.warning("GITHUB_BOT_USERNAME is not set or using test default — set explicitly in production")
 WEBHOOK_TIMESTAMP_TOLERANCE = 300  # 5 minutes
+MAX_EXTERNAL_BODY_LENGTH = 1000
 
-_BOT_MENTION_RE = re.compile(r'(?<![a-zA-Z0-9_-])@' + re.escape(BOT_MENTION) + r'(?![a-zA-Z0-9_-])')
+_INJECTION_PATTERNS = [
+    re.compile(r'<\s*/?system\s*>', re.IGNORECASE),
+    re.compile(r'\[INST\]|\[/INST\]', re.IGNORECASE),
+    re.compile(r'```\s*system', re.IGNORECASE),
+    re.compile(r'(ignore|disregard|override|forget)\s+(all\s+)?(previous|prior|above)\s+(instructions?|rules?|prompts?)', re.IGNORECASE),
+    re.compile(r'(new|updated?)\s+system\s+prompt', re.IGNORECASE),
+    re.compile(r'you\s+are\s+now\s+(a|an|the)\b', re.IGNORECASE),
+    re.compile(r'act\s+(like|as)\s+(a\s+)?different', re.IGNORECASE),
+    re.compile(r'(reveal|show|print|dump|expose)\s+(your\s+)?(system\s*prompt|instructions|rules)', re.IGNORECASE),
+    re.compile(r'do\s+not\s+follow\s+(your|any|the)', re.IGNORECASE),
+    re.compile(r'pretend\s+(you|that)\s+(are|have)\s+no\s+(rules|restrictions|limits)', re.IGNORECASE),
+]
+
+
+def _screen_content(text: str) -> dict:
+    """Truncate, detect injection patterns, and return sanitized text + flags."""
+    if not text:
+        return {"sanitized": "", "flagged": False, "flags": []}
+
+    truncated = text[:MAX_EXTERNAL_BODY_LENGTH]
+    flags = []
+    sanitized = truncated
+
+    for pattern in _INJECTION_PATTERNS:
+        if pattern.search(sanitized):
+            flags.append(pattern.pattern)
+            sanitized = pattern.sub('[FILTERED]', sanitized)
+
+    return {
+        "sanitized": sanitized,
+        "flagged": bool(flags),
+        "flags": flags,
+    }
+
+
+_bot_mention_re: Optional[re.Pattern] = None
+
+
+def _get_bot_mention_re() -> re.Pattern:
+    """Lazily compile the bot @mention regex from the secret."""
+    global _bot_mention_re
+    if _bot_mention_re is None:
+        bot_username = _secrets().get("GITHUB_BOT_USERNAME", "")
+        if not bot_username:
+            raise ValueError(
+                "GITHUB_BOT_USERNAME not configured in webhook secret"
+            )
+        _bot_mention_re = re.compile(
+            r'(?<![a-zA-Z0-9_-])@' + re.escape(bot_username) + r'(?![a-zA-Z0-9_-])'
+        )
+    return _bot_mention_re
 
 
 def _is_bot_mentioned(text: str) -> bool:
     """Check for exact @mention of the bot (word-boundary match, not substring)."""
-    return bool(_BOT_MENTION_RE.search(text))
+    return bool(_get_bot_mention_re().search(text))
 
 
 def _get_secrets() -> Dict[str, str]:
@@ -81,6 +129,56 @@ def _post_to_slack(payload: Dict[str, Any]) -> None:
         logger.error("Slack webhook returned %d: %s", resp.status_code, resp.text)
 
 
+def _screened_body_blocks(raw_body: str, repo_name: str, issue_number, sender_login: str) -> list:
+    """Screen untrusted body text and return warning + body + injection alert blocks."""
+    screening = _screen_content(raw_body)
+    display_body = screening["sanitized"] or "No description provided."
+    truncated = len(raw_body) > MAX_EXTERNAL_BODY_LENGTH
+
+    blocks = [
+        {
+            "type": "context",
+            "elements": [{
+                "type": "mrkdwn",
+                "text": ":warning: Please review carefully before approving.",
+            }],
+        },
+        {
+            "type": "section",
+            "text": {"type": "mrkdwn", "text": f">>> {display_body}{'...' if truncated else ''}"},
+        },
+    ]
+
+    if screening["flagged"]:
+        logger.warning(
+            "SUSPICIOUS_CONTENT_FLAGGED: repo=%s issue=%s sender=%s patterns=%d",
+            repo_name, issue_number, sender_login, len(screening["flags"]),
+        )
+        blocks.append({
+            "type": "section",
+            "text": {
+                "type": "mrkdwn",
+                "text": ":rotating_light: *Potential prompt injection detected.* "
+                        "Suspicious patterns replaced with `[FILTERED]`. "
+                        "Review the original on GitHub before proceeding.",
+            },
+        })
+
+    return blocks
+
+
+_FOOTER_BLOCKS = [
+    {"type": "divider"},
+    {
+        "type": "context",
+        "elements": [{
+            "type": "mrkdwn",
+            "text": "Reply in this thread by mentioning @oscar with the action you'd like to take.",
+        }],
+    },
+]
+
+
 def _build_slack_message(event_type: str, payload: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     """Build a Slack message from a GitHub webhook payload."""
     if event_type == "issue_comment":
@@ -97,43 +195,24 @@ def _build_slack_message(event_type: str, payload: Dict[str, Any]) -> Optional[D
             return None
 
         issue_type = "PR" if issue.get("pull_request") else "Issue"
-        return {
-            "blocks": [
-                {
-                    "type": "header",
-                    "text": {
-                        "type": "plain_text",
-                        "text": f"GitHub @mention on {issue_type} #{issue.get('number', '')}",
-                    },
-                },
-                {
-                    "type": "section",
-                    "fields": [
-                        {"type": "mrkdwn", "text": f"*Repo:*\n{repo.get('full_name', '')}"},
-                        {"type": "mrkdwn", "text": f"*{issue_type}:*\n<{issue.get('html_url', '')}|#{issue.get('number', '')} {issue.get('title', '')}>"},
-                        {"type": "mrkdwn", "text": f"*From:*\n{sender.get('login', '')}"},
-                        {"type": "mrkdwn", "text": f"*Comment:*\n<{comment.get('html_url', '')}|View comment>"},
-                    ],
-                },
-                {
-                    "type": "section",
-                    "text": {
-                        "type": "mrkdwn",
-                        "text": f">>> {body[:500]}{'...' if len(body) > 500 else ''}",
-                    },
-                },
-                {"type": "divider"},
-                {
-                    "type": "context",
-                    "elements": [
-                        {
-                            "type": "mrkdwn",
-                            "text": "Reply to this request in the Slack channel by mentioning @oscar with the action you'd like to take.",
-                        }
-                    ],
-                },
-            ],
-        }
+        blocks = [
+            {
+                "type": "header",
+                "text": {"type": "plain_text", "text": f"GitHub @mention on {issue_type} #{issue.get('number', '')}"},
+            },
+            {
+                "type": "section",
+                "fields": [
+                    {"type": "mrkdwn", "text": f"*Repo:*\n{repo.get('full_name', '')}"},
+                    {"type": "mrkdwn", "text": f"*{issue_type}:*\n<{issue.get('html_url', '')}|#{issue.get('number', '')} {issue.get('title', '')}>"},
+                    {"type": "mrkdwn", "text": f"*From:*\n{sender.get('login', '')}"},
+                    {"type": "mrkdwn", "text": f"*Comment:*\n<{comment.get('html_url', '')}|View comment>"},
+                ],
+            },
+            *_screened_body_blocks(body, repo.get("full_name", ""), issue.get("number", ""), sender.get("login", "")),
+            *_FOOTER_BLOCKS,
+        ]
+        return {"blocks": blocks}
 
     if event_type == "issues":
         action = payload.get("action")
@@ -152,43 +231,24 @@ def _build_slack_message(event_type: str, payload: Dict[str, Any]) -> Optional[D
             return None
 
         request_type = "Repository Creation" if is_repo_request else "Maintainer Addition"
-        return {
-            "blocks": [
-                {
-                    "type": "header",
-                    "text": {
-                        "type": "plain_text",
-                        "text": f"New {request_type} Request",
-                    },
-                },
-                {
-                    "type": "section",
-                    "fields": [
-                        {"type": "mrkdwn", "text": f"*Repo:*\n{repo.get('full_name', '')}"},
-                        {"type": "mrkdwn", "text": f"*Issue:*\n<{issue.get('html_url', '')}|#{issue.get('number', '')} {title}>"},
-                        {"type": "mrkdwn", "text": f"*From:*\n{sender.get('login', '')}"},
-                        {"type": "mrkdwn", "text": f"*Labels:*\n{', '.join(labels) or 'None'}"},
-                    ],
-                },
-                {
-                    "type": "section",
-                    "text": {
-                        "type": "mrkdwn",
-                        "text": f">>> {issue.get('body', '')[:500] or 'No description provided.'}",
-                    },
-                },
-                {"type": "divider"},
-                {
-                    "type": "context",
-                    "elements": [
-                        {
-                            "type": "mrkdwn",
-                            "text": "Reply to this request in the Slack channel by mentioning @oscar with the action you'd like to take.",
-                        }
-                    ],
-                },
-            ],
-        }
+        blocks = [
+            {
+                "type": "header",
+                "text": {"type": "plain_text", "text": f"New {request_type} Request"},
+            },
+            {
+                "type": "section",
+                "fields": [
+                    {"type": "mrkdwn", "text": f"*Repo:*\n{repo.get('full_name', '')}"},
+                    {"type": "mrkdwn", "text": f"*Issue:*\n<{issue.get('html_url', '')}|#{issue.get('number', '')} {title}>"},
+                    {"type": "mrkdwn", "text": f"*From:*\n{sender.get('login', '')}"},
+                    {"type": "mrkdwn", "text": f"*Labels:*\n{', '.join(labels) or 'None'}"},
+                ],
+            },
+            *_screened_body_blocks(issue.get("body", "") or "", repo.get("full_name", ""), issue.get("number", ""), sender.get("login", "")),
+            *_FOOTER_BLOCKS,
+        ]
+        return {"blocks": blocks}
 
     return None
 
