@@ -35,11 +35,14 @@ class MessageHandler:
         self.message_formatter = MessageFormatter()
         self.response_builder = ResponseBuilder()
 
-    def handle_send_message(self, params: Dict[str, Any], action_group: str, function_name: str) -> Dict[str, Any]:
+    def handle_send_message(self, params: Dict[str, Any], action_group: str, function_name: str, session_attributes: Dict[str, Any] = None) -> Dict[str, Any]:
         """Handle the send_message action.
 
         Args:
             params: Parameters from the agent request
+            action_group: Action group name
+            function_name: Function name
+            session_attributes: Out-of-band session attributes with identity provenance
 
         Returns:
             Response for the agent
@@ -55,7 +58,7 @@ class MessageHandler:
                 return self.response_builder.create_error_response(action_group, function_name, 'Confirmed was not True')
 
             # Two-person review (only when ENABLE_2PR is on)
-            approval_error = validate_two_person_approval(params, config.enable_2pr, f'channel={target_channel}')
+            approval_error = validate_two_person_approval(session_attributes or {}, config.enable_2pr, f'channel={target_channel}')
             if approval_error:
                 return self.response_builder.create_error_response(
                     action_group, function_name, approval_error['message']

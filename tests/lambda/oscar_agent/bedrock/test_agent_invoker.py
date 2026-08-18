@@ -54,6 +54,12 @@ class TestCreateAgentRequest:
         core, _ = agent_core
         req = core.create_agent_request('hello', privilege=True)
         assert req['sessionId'].startswith('session-')
+        assert len(req['sessionId']) == len('session-') + 32  # uuid4 hex is 32 chars
+
+    def test_generated_session_ids_are_unique(self, agent_core):
+        core, _ = agent_core
+        ids = {core.create_agent_request('hello', privilege=True)['sessionId'] for _ in range(100)}
+        assert len(ids) == 100
 
     def test_enable_trace_always_true(self, agent_core):
         core, _ = agent_core

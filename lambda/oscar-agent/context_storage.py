@@ -31,13 +31,23 @@ class StorageInterface(ABC):
         """Get conversation context for a thread."""
 
     @abstractmethod
-    def get_context_for_query(self, thread_key: str) -> str:
+    def get_context_for_query(self, thread_key: str, privileged: bool = True) -> str:
         """Get conversation context formatted for prepending to a query."""
 
     @abstractmethod
     def update_context(self, thread_key: str, query: str, response: str,
-                       session_id: Optional[str], new_session_id: Optional[str]) -> Dict[str, Any]:
+                       session_id: Optional[str], new_session_id: Optional[str],
+                       user_id: Optional[str] = None,
+                       privileged: bool = False) -> Dict[str, Any]:
         """Update the conversation context with the new query and response."""
+
+    @abstractmethod
+    def set_pending_approval_requester(self, thread_key: str, user_id: str) -> None:
+        """Record which user triggered a confirmation prompt (the 2PR requester)."""
+
+    @abstractmethod
+    def clear_pending_approval_requester(self, thread_key: str) -> None:
+        """Clear the pending approval state after an action completes."""
 
     @abstractmethod
     def store_bot_message_context(self, channel: str, thread_ts: str, bot_message: str,
@@ -131,8 +141,14 @@ class StorageManager(StorageInterface):
             logger.error(f"Error retrieving context for {thread_key}: {e}")
             return None
 
-    def get_context_for_query(self, thread_key: str) -> str:
-        """Get conversation context formatted for prepending to a query."""
+    def get_context_for_query(self, thread_key: str, privileged: bool = True) -> str:
+        """Get conversation context formatted for prepending to a query.
+
+        Args:
+            thread_key: Thread identifier.
+            privileged: If False, exclude turns from privileged users to prevent
+                context leakage of sensitive data (e.g. CVE details) to limited users.
+        """
         try:
             context = self.get_context(thread_key)
             if not context:
@@ -144,6 +160,8 @@ class StorageManager(StorageInterface):
 
             context_lines = [""]
             for entry in history:
+                if not privileged and entry.get("privileged"):
+                    continue
                 query = entry.get("query", "")
                 response = entry.get("response", "")
                 context_lines.extend([f"User: {query}", f"Assistant: {response}", ""])
@@ -155,7 +173,9 @@ class StorageManager(StorageInterface):
             return ""
 
     def update_context(self, thread_key: str, query: str, response: str,
-                       session_id: Optional[str], new_session_id: Optional[str]) -> Dict[str, Any]:
+                       session_id: Optional[str], new_session_id: Optional[str],
+                       user_id: Optional[str] = None,
+                       privileged: bool = False) -> Dict[str, Any]:
         """Update the conversation context with the new query and response."""
         try:
             # Get existing context or create a new one
@@ -163,7 +183,8 @@ class StorageManager(StorageInterface):
             if not context:
                 context = {
                     "session_id": new_session_id or session_id,
-                    "history": []
+                    "history": [],
+                    "thread_user_ids": [],
                 }
 
             # Update session ID - prefer new_session_id, but keep existing if new one is None
@@ -172,15 +193,22 @@ class StorageManager(StorageInterface):
             elif session_id and not context.get("session_id"):
                 context["session_id"] = session_id
 
+            # Track authenticated user IDs in thread order (for 2PR provenance)
+            if user_id:
+                thread_users = context.setdefault("thread_user_ids", [])
+                if not thread_users or thread_users[-1] != user_id:
+                    thread_users.append(user_id)
+
             # Ensure history exists
             if "history" not in context:
                 context["history"] = []
 
-            # Append to history
+            # Append to history with privilege marker for context isolation
             new_entry = {
                 "query": query,
                 "response": response,
-                "timestamp": int(time.time())
+                "timestamp": int(time.time()),
+                "privileged": privileged,
             }
             context["history"].append(new_entry)
 
@@ -195,6 +223,30 @@ class StorageManager(StorageInterface):
                 "session_id": new_session_id or session_id,
                 "history": [{"query": query, "response": response, "timestamp": int(time.time())}]
             }
+
+    def set_pending_approval_requester(self, thread_key: str, user_id: str) -> None:
+        """Record which user triggered a confirmation prompt (the 2PR requester)."""
+        try:
+            context = self.get_context(thread_key)
+            if context is None:
+                context = {"session_id": None, "history": [], "thread_user_ids": []}
+            context['pending_approval_requester'] = user_id
+            self.store_context(thread_key, context)
+            logger.info(f"Set pending_approval_requester={user_id} for thread {thread_key}")
+        except Exception as e:
+            logger.error(f"Error setting pending_approval_requester for {thread_key}: {e}")
+
+    def clear_pending_approval_requester(self, thread_key: str) -> None:
+        """Clear the pending approval state after an action completes (no-op if unset)."""
+        try:
+            context = self.get_context(thread_key)
+            if not context or 'pending_approval_requester' not in context:
+                return
+            del context['pending_approval_requester']
+            self.store_context(thread_key, context)
+            logger.info(f"Cleared pending_approval_requester for thread {thread_key}")
+        except Exception as e:
+            logger.error(f"Error clearing pending_approval_requester for {thread_key}: {e}")
 
     def store_bot_message_context(self, channel: str, thread_ts: str, bot_message: str,
                                   session_id: Optional[str] = None, user_query: str = None) -> None:

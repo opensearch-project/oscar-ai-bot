@@ -141,7 +141,9 @@ class TestConfig:
             assert cfg.enable_dm is True
 
     def test_enable_2pr_default_false(self):
-        with patch.dict(os.environ, BASE_ENV, clear=False):
+        env = {**BASE_ENV}
+        env.pop('ENABLE_2PR', None)
+        with patch.dict(os.environ, env, clear=True):
             mod = _load_real_config_module()
             cfg = mod.Config(validate_required=False)
             assert cfg.enable_2pr is False

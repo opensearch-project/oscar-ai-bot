@@ -11,7 +11,8 @@ query strategy for the OSCAR agent system.
 
 import logging
 import re
-from typing import Optional, Tuple
+from datetime import date
+from typing import Dict, Optional, Tuple
 
 from bedrock.agent_invoker import BedrockAgentCore
 from bedrock.error_handler import AgentErrorHandler
@@ -44,7 +45,8 @@ class QueryProcessor:
         query: str,
         privilege: bool,
         session_id: Optional[str] = None,
-        context_summary: Optional[str] = None
+        context_summary: Optional[str] = None,
+        session_attributes: Optional[Dict[str, str]] = None,
     ) -> Tuple[str, Optional[str]]:
         """
         Process a query with intelligent routing and context management.
@@ -63,10 +65,12 @@ class QueryProcessor:
             privilege: Whether the user has privileged access
             session_id: Optional session ID for maintaining conversation context
             context_summary: Optional summary of previous conversation context
+            session_attributes: Out-of-band session attributes (identity provenance)
 
         Returns:
             A tuple containing (response_text, session_id)
         """
+        query = f"[TODAY: {date.today().isoformat()}] {query}"
         logger.info(f"AGENT_QUERY: Starting query - query_len={len(query)}, session_id='{session_id}', context_len={len(context_summary) if context_summary else 0}")
         logger.info(f"AGENT_QUERY: Query preview: {query[:config.log_query_preview_length]}...")
 
@@ -92,11 +96,11 @@ class QueryProcessor:
                     enhanced_query = f"Previous conversation context:\n{context_summary}\n\nCurrent question: {query}"
                     logger.info(f"AGENT_QUERY: Attempting enhanced query WITH session_id: {session_id}, context_len={len(context_summary)}")
                     logger.info(f"AGENT_QUERY: Enhanced query length: {len(enhanced_query)} characters")
-                    response, returned_session_id = self.bedrock_agent.invoke_agent(enhanced_query, privilege, session_id)
+                    response, returned_session_id = self.bedrock_agent.invoke_agent(enhanced_query, privilege, session_id, session_attributes)
                 else:
                     # No context available, use plain query with session_id
                     logger.info(f"AGENT_QUERY: Attempting plain query with session_id: {session_id} (no context available)")
-                    response, returned_session_id = self.bedrock_agent.invoke_agent(query, privilege, session_id)
+                    response, returned_session_id = self.bedrock_agent.invoke_agent(query, privilege, session_id, session_attributes)
 
                 # Ensure we return the session ID (either returned or original)
                 final_session_id = returned_session_id or session_id
@@ -112,7 +116,7 @@ class QueryProcessor:
             enhanced_query = f"Previous conversation context:\n{context_summary}\n\nCurrent question: {query}"
             logger.info(f"AGENT_QUERY: Enhanced query length: {len(enhanced_query)} characters")
             try:
-                response, new_session_id = self.bedrock_agent.invoke_agent(enhanced_query, privilege, None)
+                response, new_session_id = self.bedrock_agent.invoke_agent(enhanced_query, privilege, None, session_attributes)
                 logger.info(f"AGENT_QUERY: Context-enhanced query succeeded with new session: {new_session_id}")
                 logger.info(f"AGENT_QUERY: Response length: {len(response)} characters")
                 return response, new_session_id
@@ -124,7 +128,7 @@ class QueryProcessor:
         # Third attempt: Just use the plain query as last resort
         logger.info("AGENT_QUERY: Using plain query without context or session")
         try:
-            response, new_session_id = self.bedrock_agent.invoke_agent(query, privilege, None)
+            response, new_session_id = self.bedrock_agent.invoke_agent(query, privilege, None, session_attributes)
             logger.info(f"AGENT_QUERY: Plain query succeeded with new session: {new_session_id}")
             logger.info(f"AGENT_QUERY: Response length: {len(response)} characters")
             return response, new_session_id

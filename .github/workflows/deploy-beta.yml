@@ -53,6 +53,9 @@ jobs:
           role-to-assume: ${{ secrets.BETA_DEPLOYMENT_ROLE }}
           aws-region: 'us-east-1'
 
+      - name: Download GitHub MCP Server binary
+        run: ./scripts/download-mcp-server.sh
+
       - name: Create beta change-set for approval
         id: beta_stack_diff
         env:

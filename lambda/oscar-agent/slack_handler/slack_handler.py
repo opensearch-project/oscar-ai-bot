@@ -73,7 +73,8 @@ class SlackHandler:
             self.storage,
             self.oscar_agent,
             self.reaction_manager,
-            self.timeout_handler
+            self.timeout_handler,
+            slack_client=self.client,
         )
         self.event_handlers = EventHandlers(self.message_processor)
         self.slash_commands = SlashCommandHandlers(self.message_processor, self.storage)

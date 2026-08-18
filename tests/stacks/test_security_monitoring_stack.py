@@ -13,6 +13,7 @@ from agents.metrics import MetricsAgent
 from stacks.permissions_stack import OscarPermissionsStack
 from stacks.secrets_stack import OscarSecretsStack
 from stacks.security_monitoring_stack import (CORE_MONITORING,
+                                              WEBHOOK_MONITORING,
                                               OscarSecurityMonitoringStack)
 from stacks.storage_stack import OscarStorageStack
 
@@ -55,15 +56,18 @@ class TestSecurityMonitoringStack:
         })
 
     def test_metric_filter_count(self, template):
-        """Total metric filters = core + all agent-declared configs."""
-        expected = len(CORE_MONITORING) + sum(
+        """Total metric filters = core + webhook + all agent-declared configs."""
+        expected = len(CORE_MONITORING) + len(WEBHOOK_MONITORING) + sum(
             len(a.get_monitoring_config()) for a in ALL_AGENTS
         )
         template.resource_count_is("AWS::Logs::MetricFilter", expected)
 
     def test_alarm_count_matches_filters(self, template):
-        """Each metric filter should have exactly one alarm. Total: 3 core + 2 jenkins + 3 metrics = 8."""
-        template.resource_count_is("AWS::CloudWatch::Alarm", 8)
+        """Each metric filter has exactly one alarm."""
+        expected = len(CORE_MONITORING) + len(WEBHOOK_MONITORING) + sum(
+            len(a.get_monitoring_config()) for a in ALL_AGENTS
+        )
+        template.resource_count_is("AWS::CloudWatch::Alarm", expected)
 
     def test_all_alarms_have_sns_action(self, template):
         alarms = template.find_resources("AWS::CloudWatch::Alarm")

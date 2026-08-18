@@ -21,12 +21,14 @@ _SHARED_LAYER_DIR = os.path.abspath(os.path.join(
 
 def _load_comm_handler():
     """Load the communication handler lambda_function by file path."""
-    # Temporarily prepend comm handler dir so its local imports resolve
+    # Temporarily prepend comm handler dir and shared layer so imports resolve
+    sys.path.insert(0, _SHARED_LAYER_DIR)
     sys.path.insert(0, _COMM_DIR)
     try:
         # Clear any cached versions of modules that lambda_function imports
         for name in ['lambda_function', 'message_handler', 'response_builder',
-                     'slack_client', 'channel_utils']:
+                     'slack_client', 'channel_utils', 'oscar_shared',
+                     'oscar_shared.approval_guard']:
             sys.modules.pop(name, None)
 
         spec = importlib.util.spec_from_file_location(
@@ -38,6 +40,7 @@ def _load_comm_handler():
         return mod
     finally:
         sys.path.remove(_COMM_DIR)
+        sys.path.remove(_SHARED_LAYER_DIR)
 
 
 class TestCommunicationHandlerLambda:
@@ -55,6 +58,7 @@ class TestCommunicationHandlerLambda:
                     {'name': 'target_channel', 'value': 'C123'},
                     {'name': 'message_content', 'value': 'hello'},
                 ],
+                'sessionAttributes': {},
             }
             mod.lambda_handler(event, None)
 
@@ -62,6 +66,7 @@ class TestCommunicationHandlerLambda:
                 {'target_channel': 'C123', 'message_content': 'hello'},
                 'comm',
                 'send_automated_message',
+                {},
             )
 
     def test_unknown_function_returns_error(self):
@@ -172,10 +177,10 @@ class TestSendMessageTwoPersonApproval:
         stub_cfg.config.enable_2pr = True
         handler = self._build_handler(mod)
 
-        result = handler.handle_send_message(self._base_params(), 'comm', 'send_automated_message')
+        result = handler.handle_send_message(self._base_params(), 'comm', 'send_automated_message', {})
 
         assert result['error'] is True
-        assert 'requester_user_id' in result['message']
+        assert 'Two-person approval' in result['message']
         handler.slack_client.send_message.assert_not_called()
 
     def test_2pr_enabled_self_approval_rejected(self):
@@ -184,8 +189,9 @@ class TestSendMessageTwoPersonApproval:
         handler = self._build_handler(mod)
 
         result = handler.handle_send_message(
-            self._base_params(requester_user_id='U_SAME', approver_user_id='U_SAME'),
+            self._base_params(),
             'comm', 'send_automated_message',
+            {'requester_user_id': 'U_SAME', 'approver_user_id': 'U_SAME'},
         )
 
         assert result['error'] is True
@@ -200,8 +206,9 @@ class TestSendMessageTwoPersonApproval:
         handler.slack_client.send_message.return_value = {'success': True, 'message_ts': '1.2'}
 
         result = handler.handle_send_message(
-            self._base_params(requester_user_id='U_REQ', approver_user_id='U_APP'),
+            self._base_params(),
             'comm', 'send_automated_message',
+            {'requester_user_id': 'U_REQ', 'approver_user_id': 'U_APP'},
         )
 
         assert result['success'] is True

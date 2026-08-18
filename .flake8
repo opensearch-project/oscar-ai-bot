@@ -1,5 +1,5 @@
 [flake8]
-ignore = E722,E501,W504
+ignore = E722,E501,W504,W503,E402
 exclude =
     cdk.out
     venv

@@ -265,6 +265,19 @@ class OscarPolicyDefinitions:
             )
         ]
 
+    def get_github_webhook_handler_policies(self) -> List[iam.PolicyStatement]:
+        """Get policies for the GitHub webhook handler Lambda."""
+        return [
+            iam.PolicyStatement(
+                sid="WebhookSecretsAccess",
+                effect=iam.Effect.ALLOW,
+                actions=["secretsmanager:GetSecretValue"],
+                resources=[
+                    f"arn:aws:secretsmanager:{self.region}:{self.account_id}:secret:oscar-github-webhook-{self.env_name}*",
+                ],
+            ),
+        ]
+
     def get_api_gateway_policies(self) -> List[iam.PolicyStatement]:
         """
         Get policies for API Gateway.

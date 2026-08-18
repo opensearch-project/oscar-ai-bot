@@ -16,6 +16,9 @@ logger = logging.getLogger(__name__)
 
 MAX_QUERY_LENGTH = 4000
 
+# Markers injected by the system — must never appear in raw user input
+_USER_ID_MARKER = re.compile(r'\[USER_ID:\s*[^\]]*\]', re.IGNORECASE)
+
 # Patterns that attempt to override agent instructions
 # Intent-based detection: flag when action words and target words co-occur
 _ACTION_WORDS = re.compile(
@@ -71,6 +74,11 @@ def validate_and_sanitize(query: str) -> str:
 
     # Strip control characters (keep newlines and tabs)
     query = re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]', '', query)
+
+    # Strip [USER_ID:] markers — these are system-injected and must not come from users
+    if _USER_ID_MARKER.search(query):
+        logger.warning("IDENTITY_SPOOFING_ATTEMPT: [USER_ID:] marker found in user input")
+        query = _USER_ID_MARKER.sub('', query).strip()
 
     if len(query) > MAX_QUERY_LENGTH:
         raise InputValidationError(
