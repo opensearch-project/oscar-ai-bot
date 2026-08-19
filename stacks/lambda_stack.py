@@ -164,6 +164,7 @@ class OscarLambdaStack(Stack):
             role=execution_role,
             description="GitHub webhook handler — posts notifications to Slack",
             reserved_concurrent_executions=5,
+            layers=[self.shared_layer],
         )
         self.lambda_functions[fn_name] = function
 

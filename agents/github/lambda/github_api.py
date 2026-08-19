@@ -13,20 +13,12 @@ from typing import Dict, List
 
 import requests
 from http_client import API_BASE, GitHubAPIError, get, post
+from oscar_shared.injection_patterns import STRUCTURAL_INJECTION_PATTERNS
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
-# Patterns that should never appear in outbound comments — they could be used
-# to inject prompts into downstream LLM-based tools that read GitHub comments.
-_OUTBOUND_INJECTION_PATTERNS = [
-    re.compile(r'<\s*/?system\s*>', re.IGNORECASE),
-    re.compile(r'\[INST\]|\[/INST\]', re.IGNORECASE),
-    re.compile(r'(ignore|disregard|override|forget)\s+(all\s+)?(previous|prior|above)\s+(instructions?|rules?|prompts?)', re.IGNORECASE),
-    re.compile(r'(new|updated?)\s+system\s+prompt', re.IGNORECASE),
-    re.compile(r'you\s+are\s+now', re.IGNORECASE),
-    re.compile(r'```\s*system', re.IGNORECASE),
-]
+_OUTBOUND_INJECTION_PATTERNS = STRUCTURAL_INJECTION_PATTERNS
 
 
 def _screen_outbound_body(body: str) -> str:

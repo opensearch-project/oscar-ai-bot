@@ -12,38 +12,21 @@ before queries reach the Bedrock agent.
 import logging
 import re
 
+from oscar_shared.injection_patterns import (ACTION_WORDS, REVEAL_WORDS,
+                                             STRUCTURAL_INJECTION_PATTERNS,
+                                             SYSTEM_WORDS, TARGET_WORDS,
+                                             USER_ID_MARKER)
+
 logger = logging.getLogger(__name__)
 
 MAX_QUERY_LENGTH = 4000
 
-# Markers injected by the system — must never appear in raw user input
-_USER_ID_MARKER = re.compile(r'\[USER_ID:\s*[^\]]*\]', re.IGNORECASE)
-
-# Patterns that attempt to override agent instructions
-# Intent-based detection: flag when action words and target words co-occur
-_ACTION_WORDS = re.compile(
-    r"(ignore|disregard|forget|override|bypass|skip|drop|abandon|suppress|erase|delete|remove|clear)", re.IGNORECASE
-)
-_TARGET_WORDS = re.compile(
-    r"(instructions|prompts|rules|guidelines|constraints|guardrails|directives|policies|restrictions|programming|training|told|learned|taught)", re.IGNORECASE
-)
-_REVEAL_WORDS = re.compile(
-    r"(reveal|show|print|output|display|dump|leak|expose|extract|repeat|list|give\s+me)", re.IGNORECASE
-)
-_SYSTEM_WORDS = re.compile(
-    r"(system\s*prompt|instructions|rules|guidelines|initial\s*prompt|hidden\s*prompt|secret\s*prompt|internal\s*prompt|original\s*prompt)", re.IGNORECASE
-)
-
-# Structural patterns that are always suspicious regardless of context
-INJECTION_PATTERNS = [
-    re.compile(r"you\s+are\s+now\s+(a|an|the)\b", re.IGNORECASE),
-    re.compile(r"(new|updated)\s+(system\s+)?prompt\s*:", re.IGNORECASE),
-    re.compile(r"act\s+as\s+if\s+you\s+(have\s+no|don'?t\s+have)\s+(restrictions|rules|guidelines)", re.IGNORECASE),
-    re.compile(r"<\s*/?\s*(system|instruction|prompt)\s*>", re.IGNORECASE),
-    re.compile(r"act\s+(like|as)\s+user\s+\w+", re.IGNORECASE),
-    re.compile(r"do\s+not\s+follow\s+(your|any|the)", re.IGNORECASE),
-    re.compile(r"pretend\s+(you|that)\s+(are|have)\s+no\s+(rules|restrictions|limits)", re.IGNORECASE),
-]
+_USER_ID_MARKER = USER_ID_MARKER
+_ACTION_WORDS = ACTION_WORDS
+_TARGET_WORDS = TARGET_WORDS
+_REVEAL_WORDS = REVEAL_WORDS
+_SYSTEM_WORDS = SYSTEM_WORDS
+INJECTION_PATTERNS = STRUCTURAL_INJECTION_PATTERNS
 
 
 class InputValidationError(Exception):

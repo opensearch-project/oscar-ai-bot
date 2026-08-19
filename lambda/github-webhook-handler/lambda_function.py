@@ -19,6 +19,7 @@ from typing import Any, Dict, Optional
 
 import boto3
 import requests
+from oscar_shared.injection_patterns import STRUCTURAL_INJECTION_PATTERNS
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -26,33 +27,23 @@ logger.setLevel(logging.INFO)
 WEBHOOK_TIMESTAMP_TOLERANCE = 300  # 5 minutes
 MAX_EXTERNAL_BODY_LENGTH = 1000
 
-_INJECTION_PATTERNS = [
-    re.compile(r'<\s*/?system\s*>', re.IGNORECASE),
-    re.compile(r'\[INST\]|\[/INST\]', re.IGNORECASE),
-    re.compile(r'```\s*system', re.IGNORECASE),
-    re.compile(r'(ignore|disregard|override|forget)\s+(all\s+)?(previous|prior|above)\s+(instructions?|rules?|prompts?)', re.IGNORECASE),
-    re.compile(r'(new|updated?)\s+system\s+prompt', re.IGNORECASE),
-    re.compile(r'you\s+are\s+now\s+(a|an|the)\b', re.IGNORECASE),
-    re.compile(r'act\s+(like|as)\s+(a\s+)?different', re.IGNORECASE),
-    re.compile(r'(reveal|show|print|dump|expose)\s+(your\s+)?(system\s*prompt|instructions|rules)', re.IGNORECASE),
-    re.compile(r'do\s+not\s+follow\s+(your|any|the)', re.IGNORECASE),
-    re.compile(r'pretend\s+(you|that)\s+(are|have)\s+no\s+(rules|restrictions|limits)', re.IGNORECASE),
-]
+_INJECTION_PATTERNS = STRUCTURAL_INJECTION_PATTERNS
 
 
 def _screen_content(text: str) -> dict:
-    """Truncate, detect injection patterns, and return sanitized text + flags."""
+    """Detect injection patterns, sanitize, and truncate."""
     if not text:
         return {"sanitized": "", "flagged": False, "flags": []}
 
-    truncated = text[:MAX_EXTERNAL_BODY_LENGTH]
     flags = []
-    sanitized = truncated
+    sanitized = text
 
     for pattern in _INJECTION_PATTERNS:
         if pattern.search(sanitized):
             flags.append(pattern.pattern)
             sanitized = pattern.sub('[FILTERED]', sanitized)
+
+    sanitized = sanitized[:MAX_EXTERNAL_BODY_LENGTH]
 
     return {
         "sanitized": sanitized,
@@ -74,7 +65,8 @@ def _get_bot_mention_re() -> re.Pattern:
                 "GITHUB_BOT_USERNAME not configured in webhook secret"
             )
         _bot_mention_re = re.compile(
-            r'(?<![a-zA-Z0-9_-])@' + re.escape(bot_username) + r'(?![a-zA-Z0-9_-])'
+            r'(?<![a-zA-Z0-9_-])@' + re.escape(bot_username) + r'(?![a-zA-Z0-9_-])',
+            re.IGNORECASE,
         )
     return _bot_mention_re
 
@@ -129,10 +121,15 @@ def _post_to_slack(payload: Dict[str, Any]) -> None:
         logger.error("Slack webhook returned %d: %s", resp.status_code, resp.text)
 
 
+def _escape_mrkdwn(text: str) -> str:
+    """Escape Slack mrkdwn special characters in untrusted content."""
+    return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+
 def _screened_body_blocks(raw_body: str, repo_name: str, issue_number, sender_login: str) -> list:
     """Screen untrusted body text and return warning + body + injection alert blocks."""
     screening = _screen_content(raw_body)
-    display_body = screening["sanitized"] or "No description provided."
+    display_body = _escape_mrkdwn(screening["sanitized"]) or "No description provided."
     truncated = len(raw_body) > MAX_EXTERNAL_BODY_LENGTH
 
     blocks = [
