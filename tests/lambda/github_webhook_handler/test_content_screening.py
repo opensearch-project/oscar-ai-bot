@@ -3,15 +3,22 @@
 
 """Tests for content screening in the GitHub webhook handler."""
 
+import importlib.util
 import sys
 from pathlib import Path
 from unittest.mock import patch
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "lambda" / "github-webhook-handler"))
+_MODULE_PATH = Path(__file__).resolve().parents[3] / "lambda" / "github-webhook-handler" / "lambda_function.py"
 
 with patch("boto3.client"):
-    from lambda_function import (MAX_EXTERNAL_BODY_LENGTH,
-                                 _build_slack_message, _screen_content)
+    _spec = importlib.util.spec_from_file_location("github_webhook_lambda_function", _MODULE_PATH)
+    lambda_function = importlib.util.module_from_spec(_spec)
+    sys.modules[_spec.name] = lambda_function
+    _spec.loader.exec_module(lambda_function)
+
+MAX_EXTERNAL_BODY_LENGTH = lambda_function.MAX_EXTERNAL_BODY_LENGTH
+_build_slack_message = lambda_function._build_slack_message
+_screen_content = lambda_function._screen_content
 
 
 class TestScreenContent:
@@ -72,8 +79,8 @@ class TestScreenContent:
 
 
 class TestBuildSlackMessageScreening:
-    @patch("lambda_function._secrets", return_value={"GITHUB_BOT_USERNAME": "oscar-bot"})
-    @patch("lambda_function._bot_mention_re", None)
+    @patch("github_webhook_lambda_function._secrets", return_value={"GITHUB_BOT_USERNAME": "oscar-bot"})
+    @patch("github_webhook_lambda_function._bot_mention_re", None)
     def test_issue_comment_adds_warning_block(self, _mock_secrets):
         payload = {
             "action": "created",
@@ -91,8 +98,8 @@ class TestBuildSlackMessageScreening:
                     block_texts.append(el.get("text", ""))
         assert any("review carefully before approving" in t for t in block_texts)
 
-    @patch("lambda_function._secrets", return_value={"GITHUB_BOT_USERNAME": "oscar-bot"})
-    @patch("lambda_function._bot_mention_re", None)
+    @patch("github_webhook_lambda_function._secrets", return_value={"GITHUB_BOT_USERNAME": "oscar-bot"})
+    @patch("github_webhook_lambda_function._bot_mention_re", None)
     def test_issue_comment_flags_injection(self, _mock_secrets):
         payload = {
             "action": "created",
