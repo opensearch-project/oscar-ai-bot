@@ -7,17 +7,11 @@ import sys
 from pathlib import Path
 from unittest.mock import patch
 
-import pytest
-
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "lambda" / "github-webhook-handler"))
 
 with patch("boto3.client"):
-    from lambda_function import (
-        MAX_EXTERNAL_BODY_LENGTH,
-        _screen_content,
-        _screened_body_blocks,
-        _build_slack_message,
-    )
+    from lambda_function import (MAX_EXTERNAL_BODY_LENGTH,
+                                 _build_slack_message, _screen_content)
 
 
 class TestScreenContent:
