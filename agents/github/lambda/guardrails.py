@@ -7,6 +7,7 @@ Covers merge operations (single + bulk), bulk commenting, and issue transfers.
 """
 
 import logging
+import os
 import re
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -16,9 +17,9 @@ logger = logging.getLogger(__name__)
 
 BULK_MERGE_MAX_PRS = 25
 
-_ALLOWED_BOT_AUTHORS = frozenset({
-    "opensearch-ci-bot",
-})
+_ALLOWED_BOT_AUTHORS = frozenset(
+    os.environ.get("ALLOWED_MERGE_AUTHORS", "opensearch-ci-bot").split(",")
+)
 
 PR_TYPES = {
     "version_increment": {

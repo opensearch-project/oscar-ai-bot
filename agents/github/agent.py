@@ -32,6 +32,7 @@ class GitHubAgent(OscarAgent):
                 "MCP_READ_ONLY": "false",
                 "GITHUB_ORG": GITHUB_ORG,
                 "ENABLE_2PR": os.environ.get("ENABLE_2PR", "false"),
+                "ALLOWED_MERGE_AUTHORS": os.environ.get("ALLOWED_MERGE_AUTHORS", "opensearch-ci-bot"),
             },
         )
 
