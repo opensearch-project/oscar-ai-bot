@@ -66,15 +66,17 @@ class GitHubAgent(OscarAgent):
         return False
 
     def get_monitoring_config(self):
-        return [
-            MonitoringConfig(
-                pattern="GITHUB_FORCE_MERGE",
-                alarm_threshold=3,
-                description="Force-merges bypassing guardrails",
-            ),
-            MonitoringConfig(
-                pattern="BULK_MERGE_SUCCESS",
-                alarm_threshold=75,
-                description="Bulk merge volume exceeds threshold (runaway operation)",
-            ),
-        ]
+        # TODO: Re-enable after log groups are explicitly created in the Lambda stack.
+        # return [
+        #     MonitoringConfig(
+        #         pattern="GITHUB_FORCE_MERGE",
+        #         alarm_threshold=3,
+        #         description="Force-merges bypassing guardrails",
+        #     ),
+        #     MonitoringConfig(
+        #         pattern="BULK_MERGE_SUCCESS",
+        #         alarm_threshold=75,
+        #         description="Bulk merge volume exceeds threshold (runaway operation)",
+        #     ),
+        # ]
+        return []
