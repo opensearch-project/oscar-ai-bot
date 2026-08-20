@@ -13,7 +13,6 @@ from agents.metrics import MetricsAgent
 from stacks.permissions_stack import OscarPermissionsStack
 from stacks.secrets_stack import OscarSecretsStack
 from stacks.security_monitoring_stack import (CORE_MONITORING,
-                                              WEBHOOK_MONITORING,
                                               OscarSecurityMonitoringStack)
 from stacks.storage_stack import OscarStorageStack
 
