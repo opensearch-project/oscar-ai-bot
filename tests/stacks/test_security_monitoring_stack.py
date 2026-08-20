@@ -56,15 +56,15 @@ class TestSecurityMonitoringStack:
         })
 
     def test_metric_filter_count(self, template):
-        """Total metric filters = core + webhook + all agent-declared configs."""
-        expected = len(CORE_MONITORING) + len(WEBHOOK_MONITORING) + sum(
+        """Total metric filters = core + all agent-declared configs (webhook disabled until log group exists)."""
+        expected = len(CORE_MONITORING) + sum(
             len(a.get_monitoring_config()) for a in ALL_AGENTS
         )
         template.resource_count_is("AWS::Logs::MetricFilter", expected)
 
     def test_alarm_count_matches_filters(self, template):
         """Each metric filter has exactly one alarm."""
-        expected = len(CORE_MONITORING) + len(WEBHOOK_MONITORING) + sum(
+        expected = len(CORE_MONITORING) + sum(
             len(a.get_monitoring_config()) for a in ALL_AGENTS
         )
         template.resource_count_is("AWS::CloudWatch::Alarm", expected)
