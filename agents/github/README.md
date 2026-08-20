@@ -117,7 +117,9 @@ The agent authenticates with GitHub using a GitHub App. Credentials are stored i
 
 ### 2. Store credentials in Secrets Manager
 
-The CDK stack creates a secret named `oscar-github-env-{env}`.
+The CDK stack creates two secrets:
+
+**GitHub Agent secret** (`oscar-github-env-{env}`):
 
 ```bash
 aws secretsmanager put-secret-value \
@@ -128,6 +130,24 @@ aws secretsmanager put-secret-value \
     "GITHUB_INSTALLATION_ID": "78901234"
   }'
 ```
+
+**GitHub Webhook Handler secret** (`oscar-github-webhook-{env}`):
+
+```bash
+aws secretsmanager put-secret-value \
+  --secret-id oscar-github-webhook-dev \
+  --secret-string '{
+    "GITHUB_WEBHOOK_SECRET": "your-github-webhook-secret",
+    "SLACK_WEBHOOK_URL": "https://hooks.slack.com/services/T.../B.../...",
+    "GITHUB_BOT_USERNAME": "oscar-github-agent"
+  }'
+```
+
+| Key | Description |
+|-----|-------------|
+| `GITHUB_WEBHOOK_SECRET` | Secret used to verify GitHub webhook payload signatures |
+| `SLACK_WEBHOOK_URL` | Slack incoming webhook URL for posting GitHub notifications |
+| `GITHUB_BOT_USERNAME` | GitHub App slug used to detect @mentions (e.g., `oscar-github-agent`) |
 
 ## Environment Variables
 

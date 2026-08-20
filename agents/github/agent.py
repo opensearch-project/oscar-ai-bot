@@ -5,8 +5,8 @@
 
 import os
 
-from agents.base_agent import (LambdaConfig, MonitoringConfig, OscarAgent,
-                               SecretConfig)
+from agents.base_agent import (LambdaConfig, MonitoringConfig,  # noqa: F401
+                               OscarAgent, SecretConfig)
 from agents.github.action_groups import get_action_groups
 from agents.github.iam_policies import get_policies
 from agents.github.instructions import (AGENT_INSTRUCTION,
@@ -32,6 +32,7 @@ class GitHubAgent(OscarAgent):
                 "MCP_READ_ONLY": "false",
                 "GITHUB_ORG": GITHUB_ORG,
                 "ENABLE_2PR": os.environ.get("ENABLE_2PR", "false"),
+                "ALLOWED_MERGE_AUTHORS": os.environ.get("ALLOWED_MERGE_AUTHORS", "opensearch-ci-bot"),
             },
         )
 
@@ -66,15 +67,17 @@ class GitHubAgent(OscarAgent):
         return False
 
     def get_monitoring_config(self):
-        return [
-            MonitoringConfig(
-                pattern="GITHUB_FORCE_MERGE",
-                alarm_threshold=3,
-                description="Force-merges bypassing guardrails",
-            ),
-            MonitoringConfig(
-                pattern="BULK_MERGE_SUCCESS",
-                alarm_threshold=75,
-                description="Bulk merge volume exceeds threshold (runaway operation)",
-            ),
-        ]
+        # TODO: Re-enable after log groups are explicitly created in the Lambda stack.
+        # return [
+        #     MonitoringConfig(
+        #         pattern="GITHUB_FORCE_MERGE",
+        #         alarm_threshold=3,
+        #         description="Force-merges bypassing guardrails",
+        #     ),
+        #     MonitoringConfig(
+        #         pattern="BULK_MERGE_SUCCESS",
+        #         alarm_threshold=75,
+        #         description="Bulk merge volume exceeds threshold (runaway operation)",
+        #     ),
+        # ]
+        return []
