@@ -95,13 +95,13 @@ class OscarSecurityMonitoringStack(Stack):
         for config in CORE_MONITORING:
             self._create_filter_and_alarm("core", supervisor_log_group, config)
 
-        # Webhook handler monitoring
-        webhook_log_group = logs.LogGroup.from_log_group_name(
-            self, "WebhookHandlerLogs",
-            f"/aws/lambda/oscar-github-webhook-handler-{environment}",
-        )
-        for config in WEBHOOK_MONITORING:
-            self._create_filter_and_alarm("webhook", webhook_log_group, config)
+        # TODO: Re-enable once webhook handler log group exists (needs first invocation or log_retention on Lambda)
+        # webhook_log_group = logs.LogGroup.from_log_group_name(
+        #     self, "WebhookHandlerLogs",
+        #     f"/aws/lambda/oscar-github-webhook-handler-{environment}",
+        # )
+        # for config in WEBHOOK_MONITORING:
+        #     self._create_filter_and_alarm("webhook", webhook_log_group, config)
 
         # Agent-declared monitoring
         for agent in (agents or []):
