@@ -349,9 +349,11 @@ def _resolve_repo(cve_id: str, project: str, request_id: str):
             'status': 'not_affected',
             'cve_id': cve_id,
             'message': (
-                f"{cve_id} was not found on the main branch of any tracked "
-                f"OpenSearch project. It may not affect them, or may already be "
-                f"fixed on main — no remediation needed."
+                f"{cve_id} was not found on the main branch of any supported "
+                f"component. Remediation currently only covers the OpenSearch and "
+                f"OpenSearch-Dashboards release-bundle components — so either the CVE "
+                f"does not affect them / is already fixed on main, or the target is a "
+                f"non-release component that is not supported yet."
             ),
         }
 

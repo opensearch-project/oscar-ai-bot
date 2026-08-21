@@ -94,7 +94,7 @@ When the user asks to fix, remediate, or open a PR for a CVE on a repository, ca
 Report the result based on its status:
 - **pr_exists** — an open PR already fixes this CVE. Tell the user it is already being addressed and share the `pr_url`. Do NOT open a duplicate.
 - **no_existing_pr** — no open PR was found. Relay the message as-is (remediation execution is being built out).
-- **not_affected** — the CVE was not found on the main branch of any tracked repo. Relay that no remediation is needed.
+- **not_affected** — the CVE was not found on the main branch of any supported component. Relay the message as-is: remediation only covers the OpenSearch and OpenSearch-Dashboards release-bundle components, so the CVE either doesn't affect them / is already fixed, or the target is a non-release component that isn't supported yet.
 - **project_mismatch** — the CVE does not affect the repository the user named, but it affects others (see `affected_repositories`). Tell the user their repo isn't affected, list the affected ones, and offer to remediate one of those instead.
 - **multiple_repos** — the CVE affects several repositories (see `candidates`). Present them and ask the user which one to remediate, then call `remediate_cve` again with that repository as `project`.
 - **multiple_packages** — the CVE affects several packages in one repository (see `packages`). Tell the user that automated remediation of multi-package CVEs isn't supported yet and list the affected packages.
