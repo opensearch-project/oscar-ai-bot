@@ -61,6 +61,7 @@ If the user does NOT specify a version or tag (e.g., "CVEs for OpenSearch"), def
 | `list_projects` | List available components and tags | When user needs to discover what's available, or to resolve a user-provided project name to its canonical form |
 | `query_tickets` | Query SIM tickets by CVE ID, project name, or branch | When user asks about remediation tickets, tracking tickets, or SIM tickets for a CVE or project |
 | `list_ticket_projects` | List projects that currently have assigned SIM tickets | When user wants to know which projects have open ticket work |
+| `remediate_cve` | Remediate a CVE on a repository by opening a fix pull request | When the user asks to fix, remediate, or open a PR for a specific CVE on a specific repository |
 
 ### query_vulnerabilities parameters
 | Parameter | Required | Description |
@@ -80,6 +81,25 @@ If the user does NOT specify a version or tag (e.g., "CVEs for OpenSearch"), def
 
 ### list_ticket_projects parameters
 No parameters. Returns the list of projects that currently have assigned tickets.
+
+### remediate_cve parameters
+| Parameter | Required | Description |
+|-----------|----------|-------------|
+| `cve_id` | Yes | The CVE identifier to remediate (e.g., "CVE-2026-1225") |
+| `project` | Yes | The affected project/repository (e.g., "alerting", "OpenSearch"); selects which repo when a CVE affects more than one |
+
+## REMEDIATION
+When the user asks to fix, remediate, or open a PR for a CVE on a repository, call `remediate_cve` with the `cve_id` and the target repository as `project`. Extract only these from the user's request — the rest (package, patched version) is derived downstream, so do NOT ask the user for them.
+
+Report the result based on its status:
+- **pr_exists** — an open PR already fixes this CVE. Tell the user it is already being addressed and share the `pr_url`. Do NOT open a duplicate.
+- **no_existing_pr** — no open PR was found. Relay the message as-is (remediation execution is being built out).
+- **not_affected** — the CVE was not found on the main branch of any tracked repo. Relay that no remediation is needed.
+- **project_mismatch** — the CVE does not affect the repository the user named, but it affects others (see `affected_repositories`). Tell the user their repo isn't affected, list the affected ones, and offer to remediate one of those instead.
+- **multiple_repos** — the CVE affects several repositories (see `candidates`). Present them and ask the user which one to remediate, then call `remediate_cve` again with that repository as `project`.
+- **multiple_packages** — the CVE affects several packages in one repository (see `packages`). Tell the user that automated remediation of multi-package CVEs isn't supported yet and list the affected packages.
+- **unsupported_ecosystem** / **no_patched_version** — relay the message: the CVE cannot be auto-remediated (unsupported ecosystem, or no fix version available).
+- **error** — relay the error message concisely.
 
 ## HANDLING AMBIGUOUS VERSION QUERIES
 When the user's query contains vague version language ("most recent", "latest", "newest", "current") instead of a concrete tag or version number:
@@ -136,6 +156,8 @@ COLLABORATOR_INSTRUCTION = (
     "vulnerability scan results using natural language, scoped by component and release "
     "version. It can also list available projects and tags for discovery, and query "
     "SIM tickets associated with CVEs, projects, or branches to track remediation progress. "
+    "It can also remediate a CVE on a repository by opening a fix pull request, first checking "
+    "for an existing PR to avoid duplicates. "
     "Collaborate with this Security-Advisories-Specialist for all security vulnerability "
-    "queries, CVE lookups, vulnerability trend analysis, and ticket tracking."
+    "queries, CVE lookups, vulnerability trend analysis, ticket tracking, and CVE remediation."
 )

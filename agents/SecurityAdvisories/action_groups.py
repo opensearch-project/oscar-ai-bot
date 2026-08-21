@@ -20,7 +20,7 @@ def _privileged_action_group(
     """Action group for privileged users — full vulnerability querying."""
     return bedrock.CfnAgent.AgentActionGroupProperty(
         action_group_name="securityAdvisoriesActions",
-        description="Query CVEs and security vulnerabilities for OpenSearch project components",
+        description="Query CVEs and security vulnerabilities for OpenSearch project components, and remediate a CVE by opening a fix pull request",
         action_group_state="ENABLED",
         action_group_executor=bedrock.CfnAgent.ActionGroupExecutorProperty(lambda_=lambda_arn),
         function_schema=bedrock.CfnAgent.FunctionSchemaProperty(
@@ -129,6 +129,36 @@ def _privileged_action_group(
                         "List projects that currently have assigned SIM tickets."
                     ),
                     parameters={},
+                ),
+                bedrock.CfnAgent.FunctionProperty(
+                    name="remediate_cve",
+                    description=(
+                        "Remediate a specific CVE on a specific OpenSearch project "
+                        "repository by opening a pull request that bumps the vulnerable "
+                        "dependency. Before doing any work it checks whether an open PR "
+                        "already fixes this CVE (e.g. from Dependabot, Mend, or a "
+                        "maintainer) and, if so, returns that existing PR instead of "
+                        "opening a duplicate."
+                    ),
+                    parameters={
+                        "cve_id": bedrock.CfnAgent.ParameterDetailProperty(
+                            type="string",
+                            description=(
+                                "The CVE identifier to remediate (e.g., 'CVE-2026-1225')."
+                            ),
+                            required=True,
+                        ),
+                        "project": bedrock.CfnAgent.ParameterDetailProperty(
+                            type="string",
+                            description=(
+                                "The affected project or repository (e.g., 'alerting', "
+                                "'OpenSearch'). Used to select the repository when a CVE "
+                                "affects more than one. The actual repository is resolved "
+                                "from the advisory data."
+                            ),
+                            required=True,
+                        ),
+                    },
                 ),
             ]
         ),
