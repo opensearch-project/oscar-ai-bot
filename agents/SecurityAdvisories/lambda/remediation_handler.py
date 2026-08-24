@@ -361,11 +361,20 @@ def _resolve_repo(cve_id: str, project: str, request_id: str):
 
     # Reconcile against the user-supplied project (a required input). This runs
     # even when a single repo matched, so we never silently remediate a repo the
-    # user did not name. Match the project string against the display name or the
-    # repo slug.
+    # user did not name.
+    #
+    # Prefer an EXACT match on the display name or repo slug, falling back to a
+    # substring match only when nothing matches exactly. Without the exact tier,
+    # a precise request like "opensearch" substring-matches every affected
+    # component's display name ("...: OpenSearch Plugin") and gets forced into a
+    # multiple_repos prompt instead of resolving the core repo directly.
     if project:
         p = project.strip().lower()
-        narrowed = [
+        exact = [
+            m for m in matches
+            if p == m['project_name'].lower() or p == m['repo_name'].lower()
+        ]
+        narrowed = exact if exact else [
             m for m in matches
             if p in m['project_name'].lower() or p in m['repo_name'].lower()
         ]

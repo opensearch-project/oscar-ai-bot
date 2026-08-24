@@ -310,6 +310,24 @@ class TestResolveRepo:
             'opensearch-project/dashboards-reporting',
         }
 
+    def test_exact_slug_resolves_over_substring_siblings(self):
+        # user says 'OpenSearch' — its display name is a substring of every
+        # affected plugin's display ("...: OpenSearch Plugin"), so a plain
+        # substring test would leave >1 and force multiple_repos. Exact-first
+        # must resolve the core repo directly.
+        hits = [
+            _scans_hit('https://github.com/opensearch-project/OpenSearch.git', 'OpenSearch'),
+            _scans_hit('https://github.com/opensearch-project/sql.git', 'SQL: OpenSearch Plugin'),
+            _scans_hit('https://github.com/opensearch-project/alerting.git', 'Alerting: OpenSearch Plugin'),
+        ]
+        mod, _ = _load_remediation_handler(mock_aws=_make_mock_aws(hits=hits))
+        _install_fake_github(mod, advisories=_advisory('npm', 'axios', '1.0'))
+        result = mod.handle_remediate_cve(
+            {'cve_id': 'CVE-2023-45857', 'project': 'OpenSearch'}, 't8d',
+        )
+        assert result['status'] == 'no_existing_pr'
+        assert result['repository'] == 'opensearch-project/OpenSearch'
+
     def test_unparseable_repo_url_is_skipped(self):
         mod, _ = _load_remediation_handler(
             mock_aws=_make_mock_aws(hits=[_scans_hit('not-a-url', 'Weird')]),
