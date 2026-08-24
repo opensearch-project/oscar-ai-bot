@@ -477,7 +477,7 @@ def _matched_packages(hit: Dict[str, Any]) -> List[Dict[str, str]]:
     return packages
 
 
-def _vuln_pkg(vuln: Dict[str, Any]) -> Dict[str, Any]:
+def _vuln_package_obj(vuln: Dict[str, Any]) -> Dict[str, Any]:
     """The package object of a scan vulnerability (nested field may be a list)."""
     pkg = vuln.get('package') or {}
     if isinstance(pkg, list):
@@ -487,12 +487,12 @@ def _vuln_pkg(vuln: Dict[str, Any]) -> Dict[str, Any]:
 
 def _vuln_ecosystem(vuln: Dict[str, Any]) -> str:
     """Ecosystem (scans-cluster vocabulary) of a scan vulnerability entry."""
-    return (_vuln_pkg(vuln).get('ecosystem') or '').strip().lower()
+    return (_vuln_package_obj(vuln).get('ecosystem') or '').strip().lower()
 
 
 def _vuln_package(vuln: Dict[str, Any]) -> str:
     """Repo-specific package name of a scan vulnerability entry."""
-    return (_vuln_pkg(vuln).get('name') or '').strip()
+    return (_vuln_package_obj(vuln).get('name') or '').strip()
 
 
 def _github_headers() -> Dict[str, str]:
