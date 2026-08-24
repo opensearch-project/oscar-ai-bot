@@ -5,6 +5,7 @@
 import json
 import logging
 import os
+import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Optional
@@ -150,24 +151,62 @@ def lambda_handler(event, context):
     return _html(200, "Successfully linked your GitHub account.")
 
 
+class ChannelMembersFetchError(Exception):
+    """Raised when a channel's membership cannot be fully and reliably fetched.
+
+    Signals that validation must abort rather than risk expiring users based on
+    an empty or partial member list.
+    """
+
+
 def _get_channel_members(bot_token: str, channel_id: str) -> set:
-    """Fetch all members of a channel using cursor-based pagination."""
+    """Fetch all members of a channel using cursor-based pagination.
+
+    Raises ChannelMembersFetchError if the full membership cannot be retrieved
+    (Slack API error, rate limit exhausted, or transport failure). Callers must
+    treat a raised error as "unknown membership" and NOT expire any users.
+    """
     members = set()
     cursor = None
+    max_rate_limit_retries = 5
     while True:
         params = {"channel": channel_id, "limit": 1000}
         if cursor:
             params["cursor"] = cursor
-        resp = requests.get(
-            "https://slack.com/api/conversations.members",
-            headers={"Authorization": f"Bearer {bot_token}"},
-            params=params,
-            timeout=10,
-        )
-        data = resp.json()
-        if not data.get("ok"):
-            logger.error(f"conversations.members failed for {channel_id}: {data.get('error')}")
+
+        retries = 0
+        while True:
+            try:
+                resp = requests.get(
+                    "https://slack.com/api/conversations.members",
+                    headers={"Authorization": f"Bearer {bot_token}"},
+                    params=params,
+                    timeout=10,
+                )
+            except requests.RequestException as e:
+                raise ChannelMembersFetchError(f"transport error for {channel_id}: {e}") from e
+
+            # Slack signals rate limiting with HTTP 429 and a Retry-After header.
+            if resp.status_code == 429:
+                if retries >= max_rate_limit_retries:
+                    raise ChannelMembersFetchError(f"rate limited for {channel_id}: retries exhausted")
+                retry_after = int(resp.headers.get("Retry-After", "1"))
+                logger.warning(f"conversations.members rate limited for {channel_id}, retrying in {retry_after}s")
+                time.sleep(retry_after)
+                retries += 1
+                continue
             break
+
+        try:
+            data = resp.json()
+        except ValueError as e:
+            raise ChannelMembersFetchError(f"non-JSON response for {channel_id}: {e}") from e
+
+        if not data.get("ok"):
+            # Any application-level error (ratelimited, invalid_auth, channel_not_found,
+            # not_in_channel, ...) means we cannot trust the membership. Abort, do not expire.
+            raise ChannelMembersFetchError(f"conversations.members failed for {channel_id}: {data.get('error')}")
+
         members.update(data.get("members", []))
         cursor = data.get("response_metadata", {}).get("next_cursor")
         if not cursor:
@@ -212,14 +251,26 @@ def _handle_validation():
 
     logger.info(f"Active mappings: {len(active)}")
 
-    # Step 2: Fetch channel members
+    # Step 2: Fetch channel members.
+    # If ANY channel fails to fetch fully, abort the entire run without expiring
+    # anyone — a partial/empty member list would falsely expire legitimate users.
     valid_users = set()
     for channel_id in channel_ids:
-        members = _get_channel_members(bot_token, channel_id)
+        try:
+            members = _get_channel_members(bot_token, channel_id)
+        except ChannelMembersFetchError as e:
+            logger.error(f"VALIDATION_ABORTED: could not fetch members for {channel_id}: {e}. No mappings expired.")
+            return {"expired": 0, "error": "channel_fetch_failed", "channel": channel_id}
         valid_users.update(members)
         logger.info(f"Channel {channel_id}: {len(members)} members")
 
     logger.info(f"Total valid users across channels: {len(valid_users)}")
+
+    # Defensive floor: if we have active mappings but resolved zero valid users,
+    # something is wrong upstream. Abort rather than expire everyone.
+    if active and not valid_users:
+        logger.error("VALIDATION_ABORTED: active mappings exist but zero valid users resolved. No mappings expired.")
+        return {"expired": 0, "error": "no_valid_users_resolved"}
 
     # Step 3: Expire mappings whose slack_user_id is not in any channel
     now = datetime.now(timezone.utc).isoformat()

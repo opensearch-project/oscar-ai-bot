@@ -356,3 +356,116 @@ class TestWeeklyValidation:
             )
 
         assert result["error"] == "missing bot token"
+
+    @patch("requests.get")
+    def test_slack_api_error_aborts_without_expiring(self, mock_get):
+        """A Slack ok:false response must abort the run and expire nobody."""
+        # 200 OK at the HTTP layer, but application-level failure.
+        mock_get.return_value = MagicMock(
+            status_code=200,
+            json=lambda: {"ok": False, "error": "ratelimited"},
+        )
+
+        with patch("boto3.resource") as mock_resource, \
+             patch("boto3.client") as mock_client:
+
+            mock_table = MagicMock()
+            mock_table.scan.return_value = {
+                "Items": [
+                    {"github_id": 111, "slack_user_id": "U123"},
+                ],
+            }
+            mock_resource.return_value.Table.return_value = mock_table
+
+            mock_secrets = MagicMock()
+            mock_secrets.get_secret_value.return_value = {
+                "SecretString": json.dumps(TEST_SECRETS)
+            }
+            mock_client.return_value = mock_secrets
+
+            lambda_function = _load_identity_lambda()
+            lambda_function._oauth_creds = None
+            result = lambda_function.lambda_handler(
+                {"source": "aws.events"}, None
+            )
+
+        assert result["expired"] == 0
+        assert result["error"] == "channel_fetch_failed"
+        # Critical: no user was expired despite not being "in" the (failed) channel.
+        mock_table.update_item.assert_not_called()
+
+    @patch("time.sleep", return_value=None)
+    @patch("requests.get")
+    def test_rate_limit_retries_then_succeeds(self, mock_get, _mock_sleep):
+        """A 429 is retried (honoring Retry-After) and validation proceeds on success."""
+        rate_limited = MagicMock(status_code=429, headers={"Retry-After": "0"})
+        ok_resp = MagicMock(
+            status_code=200,
+            json=lambda: {
+                "ok": True,
+                "members": ["U123", "U888"],
+                "response_metadata": {"next_cursor": ""},
+            },
+        )
+        # First call rate limited, subsequent calls succeed (2 channels).
+        mock_get.side_effect = [rate_limited, ok_resp, ok_resp]
+
+        with patch("boto3.resource") as mock_resource, \
+             patch("boto3.client") as mock_client:
+
+            mock_table = MagicMock()
+            mock_table.scan.return_value = {
+                "Items": [
+                    {"github_id": 111, "slack_user_id": "U123"},
+                ],
+            }
+            mock_resource.return_value.Table.return_value = mock_table
+
+            mock_secrets = MagicMock()
+            mock_secrets.get_secret_value.return_value = {
+                "SecretString": json.dumps(TEST_SECRETS)
+            }
+            mock_client.return_value = mock_secrets
+
+            lambda_function = _load_identity_lambda()
+            lambda_function._oauth_creds = None
+            result = lambda_function.lambda_handler(
+                {"source": "aws.events"}, None
+            )
+
+        # U123 is present, so not expired; run completed normally.
+        assert result["expired"] == 0
+        mock_table.update_item.assert_not_called()
+
+    @patch("requests.get")
+    def test_transport_error_aborts_without_expiring(self, mock_get):
+        """A network exception fetching members must abort without expiring anyone."""
+        import requests
+        mock_get.side_effect = requests.ConnectionError("boom")
+
+        with patch("boto3.resource") as mock_resource, \
+             patch("boto3.client") as mock_client:
+
+            mock_table = MagicMock()
+            mock_table.scan.return_value = {
+                "Items": [
+                    {"github_id": 111, "slack_user_id": "U123"},
+                ],
+            }
+            mock_resource.return_value.Table.return_value = mock_table
+
+            mock_secrets = MagicMock()
+            mock_secrets.get_secret_value.return_value = {
+                "SecretString": json.dumps(TEST_SECRETS)
+            }
+            mock_client.return_value = mock_secrets
+
+            lambda_function = _load_identity_lambda()
+            lambda_function._oauth_creds = None
+            result = lambda_function.lambda_handler(
+                {"source": "aws.events"}, None
+            )
+
+        assert result["expired"] == 0
+        assert result["error"] == "channel_fetch_failed"
+        mock_table.update_item.assert_not_called()
