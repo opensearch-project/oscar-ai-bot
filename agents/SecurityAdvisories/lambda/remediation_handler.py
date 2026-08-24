@@ -32,6 +32,7 @@ import os
 from typing import Any, Dict, List, Optional
 
 import requests
+import semver
 from aws_utils import get_latest_scans_index, opensearch_request
 from query_utils import connection_error, error_response
 
@@ -135,6 +136,7 @@ def handle_remediate_cve(params: Dict[str, str], request_id: str) -> Dict[str, A
     repo_name = resolved['repo_name']
     ecosystem = resolved['ecosystem']
     package = resolved['package']
+    installed_version = resolved.get('installed_version', '')
     logger.info(
         f"[{request_id}] REMEDIATE_CVE_REPO_RESOLVED: {repo_owner}/{repo_name} "
         f"ecosystem={ecosystem!r} package={package!r} "
@@ -164,9 +166,13 @@ def handle_remediate_cve(params: Dict[str, str], request_id: str) -> Dict[str, A
     # Ecosystem AND the repo-specific package both come from the cluster (above);
     # GitHub only supplies the fix version the cluster doesn't carry. We match the
     # GitHub advisory entry to OUR package, so a multi-package CVE resolves to the
-    # version for the package this repo actually uses (not an arbitrary one).
+    # version for the package this repo actually uses (not an arbitrary one), and
+    # to OUR installed version, so a multi-range advisory resolves to the fix for
+    # the version line this repo is on.
     try:
-        gh_package, patched_version = _derive_patched_version(cve_id, package, request_id)
+        gh_package, patched_version = _derive_patched_version(
+            cve_id, package, installed_version, request_id,
+        )
     except Exception as e:  # advisory lookup failed (network / API error)
         logger.error(f"[{request_id}] REMEDIATE_CVE_DERIVE_FAILED: {e}")
         return error_response(
@@ -299,6 +305,10 @@ def _resolve_repo(cve_id: str, project: str, request_id: str):
                                 'vulnerabilities.id',
                                 'vulnerabilities.package.ecosystem',
                                 'vulnerabilities.package.name',
+                                # installed version — used to pick the right
+                                # patched version when an advisory lists several
+                                # affected ranges for the same package.
+                                'vulnerabilities.package.version',
                             ],
                         },
                         'query': {'bool': {
@@ -411,13 +421,14 @@ def _resolve_repo(cve_id: str, project: str, request_id: str):
                     f"supported."
                 ),
             }
-        one = pkgs[0] if pkgs else {'ecosystem': '', 'package': ''}
+        one = pkgs[0] if pkgs else {'ecosystem': '', 'package': '', 'version': ''}
         return {
             'repo_owner': m['repo_owner'],
             'repo_name': m['repo_name'],
             'project_name': m['project_name'],
             'ecosystem': one['ecosystem'],
             'package': one['package'],
+            'installed_version': one.get('version', ''),
         }, None
 
     listing = sorted(f"{m['repo_owner']}/{m['repo_name']}" for m in matches)
@@ -473,7 +484,11 @@ def _matched_packages(hit: Dict[str, Any]) -> List[Dict[str, str]]:
         name = _vuln_package(src)
         if name and name not in seen:
             seen.add(name)
-            packages.append({'ecosystem': _vuln_ecosystem(src), 'package': name})
+            packages.append({
+                'ecosystem': _vuln_ecosystem(src),
+                'package': name,
+                'version': _vuln_version(src),
+            })
     return packages
 
 
@@ -495,6 +510,11 @@ def _vuln_package(vuln: Dict[str, Any]) -> str:
     return (_vuln_package_obj(vuln).get('name') or '').strip()
 
 
+def _vuln_version(vuln: Dict[str, Any]) -> str:
+    """Installed version of a scan vulnerability entry (the version in the repo)."""
+    return (_vuln_package_obj(vuln).get('version') or '').strip()
+
+
 def _github_headers() -> Dict[str, str]:
     """Headers for GitHub API calls.
 
@@ -510,19 +530,24 @@ def _github_headers() -> Dict[str, str]:
     return headers
 
 
-def _derive_patched_version(cve_id: str, package: str, request_id: str) -> str:
+def _derive_patched_version(
+    cve_id: str, package: str, installed_version: str, request_id: str,
+) -> str:
     """Resolve (github_package_name, patched_version) for ``package`` from the
     GitHub Advisory API.
 
     ``package`` is the repo-specific package resolved from the scans cluster,
     used to match the advisory's ``vulnerabilities[]`` entry (so a multi-package
-    CVE resolves to the package this repo uses). We return the matched entry's
-    OWN package name — GitHub's canonical form (maven ``group:artifact``, npm
-    ``@scope/name``), which is what PR titles use — for the dedup search, plus
-    the first patched version. Returns ``('', '')`` when nothing can be
-    determined (no advisory for the CVE — the CVE is still real, the cluster
-    resolved it; no entry for our package; or no fix version); the caller then
-    reports ``no_patched_version``. Network / API errors propagate to the caller.
+    CVE resolves to the package this repo uses). ``installed_version`` (also from
+    the cluster) disambiguates a multi-RANGE advisory — the same package listed
+    once per affected line, each with its own patched version — to the fix for
+    the line this repo is actually on. We return the matched entry's OWN package
+    name — GitHub's canonical form (maven ``group:artifact``, npm ``@scope/name``),
+    which is what PR titles use — for the dedup search, plus that entry's patched
+    version. Returns ``('', '')`` when nothing can be determined (no advisory for
+    the CVE — the CVE is still real, the cluster resolved it; no entry for our
+    package; or no fix version); the caller then reports ``no_patched_version``.
+    Network / API errors propagate to the caller.
     """
     headers = _github_headers()
 
@@ -544,7 +569,9 @@ def _derive_patched_version(cve_id: str, package: str, request_id: str) -> str:
         logger.info(f"[{request_id}] REMEDIATE_CVE_NO_ADVISORY: {cve_id}")
         return '', ''
 
-    entry = _select_vulnerability(advisories[0].get('vulnerabilities') or [], package)
+    entry = _select_vulnerability(
+        advisories[0].get('vulnerabilities') or [], package, installed_version,
+    )
     if not entry:
         # advisory exists but has no entry for our package -> no known fix version
         return '', ''
@@ -561,14 +588,22 @@ def _derive_patched_version(cve_id: str, package: str, request_id: str) -> str:
 def _select_vulnerability(
     vulnerabilities: List[Dict[str, Any]],
     package: str,
+    installed_version: str = '',
 ) -> Optional[Dict[str, Any]]:
     """Pick the advisory vulnerability entry for ``package``.
 
     Matches the repo-specific package (from the cluster) against the advisory's
     listed packages so a multi-package CVE resolves to the right one:
-      1. exact package-name match,
-      2. loose containment (handles maven ``group:artifact`` vs bare ``artifact``,
-         npm scopes, etc.),
+      1. exact package-name match, else loose containment (handles maven
+         ``group:artifact`` vs bare ``artifact``, npm scopes, etc.),
+      2. among the name-matched entries, when ``installed_version`` is known,
+         prefer the one whose ``vulnerable_version_range`` CONTAINS it. An
+         advisory can list the SAME package once per affected line, each with a
+         different patched version (e.g. form-data: ``< 2.5.6``,
+         ``>= 3.0.0, < 3.0.5``, ``>= 4.0.0, < 4.0.6``); matching the installed
+         version selects the fix for the line the repo is actually on rather
+         than the first-listed one. Falls back to the first name match when the
+         version/ranges can't be compared (e.g. non-semver maven versions).
       3. if ``package`` is known but not listed in the advisory -> None (we don't
          have a reliable fix version for it → no_patched_version),
       4. if no package is known at all -> best effort: first entry with a patched
@@ -579,20 +614,67 @@ def _select_vulnerability(
 
     pkg = _normalize_pkg_name(package)
     if pkg:
-        for v in vulnerabilities:
-            name = _normalize_pkg_name((v.get('package') or {}).get('name'))
-            if name and name == pkg:
-                return v
-        for v in vulnerabilities:
-            name = _normalize_pkg_name((v.get('package') or {}).get('name'))
-            if name and (pkg in name or name in pkg):
-                return v
-        return None
+        def _entry_name(v):
+            return _normalize_pkg_name((v.get('package') or {}).get('name'))
+
+        matched = [v for v in vulnerabilities if _entry_name(v) == pkg]
+        if not matched:
+            matched = [
+                v for v in vulnerabilities
+                if _entry_name(v) and (pkg in _entry_name(v) or _entry_name(v) in pkg)
+            ]
+        if not matched:
+            return None
+        return _entry_for_installed_version(matched, installed_version)
 
     for v in vulnerabilities:
         if v.get('first_patched_version'):
             return v
     return vulnerabilities[0]
+
+
+def _entry_for_installed_version(
+    entries: List[Dict[str, Any]],
+    installed_version: str,
+) -> Dict[str, Any]:
+    """Among same-package advisory entries, prefer the one whose affected range
+    contains ``installed_version``; else the first entry.
+
+    A single entry, an unknown installed version, or ranges we can't compare all
+    fall back to the first entry (the pre-existing behavior).
+    """
+    if len(entries) == 1 or not installed_version:
+        return entries[0]
+    for v in entries:
+        rng = v.get('vulnerable_version_range') or ''
+        if rng and _version_in_range(installed_version, rng):
+            return v
+    return entries[0]
+
+
+def _version_in_range(version: str, version_range: str) -> bool:
+    """True if ``version`` satisfies a GitHub advisory ``vulnerable_version_range``.
+
+    GitHub ranges are a comma-separated AND of comparators, e.g. ``< 2.5.6`` or
+    ``>= 4.0.0, < 4.0.6`` (and ``= 1.2.3`` for a single version). Evaluated with
+    semver; any parse failure — e.g. non-semver maven versions like
+    ``4.1.134.Final`` — returns False, so the caller falls back to first-match
+    rather than guessing a version.
+    """
+    try:
+        v = semver.Version.parse(version)
+        for comp in version_range.split(','):
+            c = comp.strip().replace(' ', '')
+            if not c:
+                continue
+            # GitHub writes an exact single version as "= X"; semver wants "==".
+            if c.startswith('=') and not c.startswith('=='):
+                c = '=' + c
+            if not v.match(c):
+                return False
+        return True
+    except (ValueError, TypeError):
+        return False
 
 
 def _normalize_pkg_name(name: str) -> str:

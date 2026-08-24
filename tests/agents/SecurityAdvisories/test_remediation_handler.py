@@ -44,7 +44,7 @@ class _FakeResp:
 
 def _scans_hit(repo='https://github.com/opensearch-project/OpenSearch-Dashboards.git',
                name='OpenSearch Dashboards', ecosystem='npm',
-               cve='CVE-2023-45857', pkg='axios'):
+               cve='CVE-2023-45857', pkg='axios', version=''):
     """A scans hit shaped like the real response: project in _source, and the
     matched vulnerability delivered via nested inner_hits."""
     return {
@@ -53,8 +53,8 @@ def _scans_hit(repo='https://github.com/opensearch-project/OpenSearch-Dashboards
             'vulnerabilities': {
                 'hits': {
                     'hits': [
-                        {'_source': {'id': cve,
-                                     'package': {'ecosystem': ecosystem, 'name': pkg}}},
+                        {'_source': {'id': cve, 'package': {
+                            'ecosystem': ecosystem, 'name': pkg, 'version': version}}},
                     ],
                 },
             },
@@ -150,6 +150,31 @@ def _advisory(ecosystem='npm', name='axios', patched='1.6.0'):
             'first_patched_version': patched,
         }],
     }]
+
+
+def _advisory_multi(name, entries, ecosystem='npm'):
+    """Advisory listing the same package once per affected line.
+
+    ``entries`` = list of ``(vulnerable_version_range, first_patched_version)``.
+    """
+    return [{
+        'ghsa_id': 'GHSA-multi',
+        'cve_id': 'CVE-2026-12143',
+        'vulnerabilities': [
+            {'package': {'ecosystem': ecosystem, 'name': name},
+             'vulnerable_version_range': rng,
+             'first_patched_version': patched}
+            for rng, patched in entries
+        ],
+    }]
+
+
+# The real form-data advisory (CVE-2026-12143): three affected lines.
+_FORM_DATA_RANGES = [
+    ('< 2.5.6', '2.5.6'),
+    ('>= 3.0.0, < 3.0.5', '3.0.5'),
+    ('>= 4.0.0, < 4.0.6', '4.0.6'),
+]
 
 
 def _pr(number=42, title='Bump axios', url=None):
@@ -481,6 +506,55 @@ class TestDerive:
             {'cve_id': 'CVE-2023-45857', 'project': 'OpenSearch-Dashboards'}, 't16c',
         )
         assert result['status'] == 'no_patched_version'
+
+    def test_multirange_selects_patch_for_installed_line(self):
+        # form-data advisory has 3 affected lines; repo is on 4.0.4 -> must pick
+        # 4.0.6, NOT the first-listed 2.5.6.
+        mod, _ = _load_remediation_handler(mock_aws=_make_mock_aws(hits=[_scans_hit(
+            'https://github.com/opensearch-project/alerting-dashboards-plugin.git',
+            'Alerting: OpenSearch Dashboards Plugin',
+            ecosystem='npm', pkg='form-data', version='4.0.4')]))
+        _install_fake_github(mod, advisories=_advisory_multi('form-data', _FORM_DATA_RANGES))
+        result = mod.handle_remediate_cve(
+            {'cve_id': 'CVE-2026-12143', 'project': 'alerting-dashboards-plugin'}, 'tmr1',
+        )
+        assert result['status'] == 'no_existing_pr'
+        assert result['patched_version'] == '4.0.6'
+
+    def test_multirange_older_install_selects_lower_patch(self):
+        # same advisory, repo on 2.0.0 -> the < 2.5.6 line -> 2.5.6
+        mod, _ = _load_remediation_handler(mock_aws=_make_mock_aws(hits=[_scans_hit(
+            ecosystem='npm', pkg='form-data', version='2.0.0')]))
+        _install_fake_github(mod, advisories=_advisory_multi('form-data', _FORM_DATA_RANGES))
+        result = mod.handle_remediate_cve(
+            {'cve_id': 'CVE-2026-12143', 'project': 'OpenSearch-Dashboards'}, 'tmr2',
+        )
+        assert result['patched_version'] == '2.5.6'
+
+    def test_multirange_no_installed_version_falls_back_to_first(self):
+        # no installed version in the cluster hit -> first entry (2.5.6)
+        mod, _ = _load_remediation_handler(mock_aws=_make_mock_aws(hits=[_scans_hit(
+            ecosystem='npm', pkg='form-data', version='')]))
+        _install_fake_github(mod, advisories=_advisory_multi('form-data', _FORM_DATA_RANGES))
+        result = mod.handle_remediate_cve(
+            {'cve_id': 'CVE-2026-12143', 'project': 'OpenSearch-Dashboards'}, 'tmr3',
+        )
+        assert result['patched_version'] == '2.5.6'
+
+    def test_multirange_non_semver_version_falls_back_to_first(self):
+        # a maven-style installed version can't be semver-parsed -> first entry,
+        # never a wrong guess (range logic degrades gracefully for maven).
+        mod, _ = _load_remediation_handler(mock_aws=_make_mock_aws(hits=[_scans_hit(
+            'https://github.com/opensearch-project/OpenSearch.git', 'OpenSearch',
+            ecosystem='maven', pkg='io.netty/netty', version='4.1.134.Final')]))
+        _install_fake_github(mod, advisories=_advisory_multi('io.netty:netty', [
+            ('< 4.1.135', '4.1.135'),
+            ('>= 4.2.0, < 4.2.15', '4.2.15'),
+        ], ecosystem='maven'))
+        result = mod.handle_remediate_cve(
+            {'cve_id': 'CVE-2026-12143', 'project': 'OpenSearch'}, 'tmr4',
+        )
+        assert result['patched_version'] == '4.1.135'
 
 
 # ---------------------------------------------------------------------------
