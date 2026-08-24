@@ -149,6 +149,64 @@ aws secretsmanager put-secret-value \
 | `SLACK_WEBHOOK_URL` | Slack incoming webhook URL for posting GitHub notifications |
 | `GITHUB_BOT_USERNAME` | GitHub App slug used to detect @mentions (e.g., `oscar-github-agent`) |
 
+## GitHub Webhook Setup
+
+The webhook handler receives events from GitHub and posts notifications to Slack when the bot is @mentioned or when repo/maintainer request issues are opened.
+
+### 1. Configure the webhook on the GitHub App
+
+1. Go to the GitHub App settings (Settings → Developer settings → GitHub Apps → your app).
+2. Under **General**, set the **Webhook URL** to your API Gateway endpoint:
+   ```
+   https://<api-id>.execute-api.<region>.amazonaws.com/<env>/github/webhooks
+   ```
+   Replace `<api-id>`, `<region>`, and `<env>` with your deployed values (visible in the API Gateway console or CDK output).
+3. Set a **Webhook secret** — this must match the `GITHUB_WEBHOOK_SECRET` value stored in Secrets Manager (see [Store credentials in Secrets Manager](#2-store-credentials-in-secrets-manager) above). Generate a strong random string:
+   ```bash
+   openssl rand -hex 32
+   ```
+4. Keep **SSL verification** enabled (default).
+5. Ensure the webhook is **Active**.
+
+### 2. Subscribe to events
+
+1. In the GitHub App settings, go to **Permissions & events** → **Subscribe to events**.
+2. Check the following events:
+   - **Issue comment** — triggers `issue_comment` events (detects @mentions of the bot)
+   - **Issues** — triggers `issues` events (detects repository/maintainer request issues)
+3. Save changes.
+
+## Slack Incoming Webhook Setup
+
+The GitHub webhook handler posts notifications to Slack via an [Incoming Webhook](https://api.slack.com/messaging/webhooks). This is separate from the main OSCAR Slack Bot token.
+
+### 1. Activate Incoming Webhooks in the Slack App
+
+1. Go to https://api.slack.com/apps and select the OSCAR Slack App.
+2. In the left sidebar, click **Incoming Webhooks**.
+3. Toggle **Activate Incoming Webhooks** to **On**.
+
+### 2. Add a new webhook URL
+
+1. Click **Add New Webhook to Workspace** at the bottom of the page.
+2. Select the channel where GitHub notifications should be posted (e.g., `#oscar-github-notifications`).
+3. Click **Allow**.
+4. Copy the generated webhook URL (format: `https://hooks.slack.com/services/T.../B.../...`).
+
+### 3. Store the webhook URL in Secrets Manager
+
+Add the URL to the GitHub webhook secret:
+
+```bash
+aws secretsmanager put-secret-value \
+  --secret-id oscar-github-webhook-<env> \
+  --secret-string '{
+    "GITHUB_WEBHOOK_SECRET": "<your-github-webhook-secret>",
+    "SLACK_WEBHOOK_URL": "https://hooks.slack.com/services/T.../B.../...",
+    "GITHUB_BOT_USERNAME": "oscar-github-agent"
+  }'
+```
+
 ## Environment Variables
 
 | Variable | Description | Default |
