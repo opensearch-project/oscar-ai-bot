@@ -552,6 +552,37 @@ class TestDedup:
         assert result['status'] == 'no_existing_pr'
         assert result['repository'] == 'opensearch-project/OpenSearch-Dashboards'
 
+    def test_package_search_uses_quoted_github_coordinate(self):
+        # cluster stores maven as group/artifact; GitHub (and PR titles) use
+        # group:artifact. Dedup should search the quoted GitHub coordinate +
+        # quoted version — not the cluster's slash form.
+        mod, _ = _load_remediation_handler(
+            mock_aws=_make_mock_aws(hits=[
+                _scans_hit(ecosystem='maven', pkg='io.netty/netty-transport-native-epoll'),
+            ]),
+        )
+        fake = _install_fake_github(
+            mod,
+            advisories=[{'vulnerabilities': [
+                {'package': {'ecosystem': 'maven',
+                             'name': 'io.netty:netty-transport-native-epoll'},
+                 'first_patched_version': '4.2.15.Final'},
+            ]}],
+            cve_pr_items=[], pkg_pr_items=[],
+        )
+        mod.handle_remediate_cve(
+            {'cve_id': 'CVE-2026-45536', 'project': 'OpenSearch'}, 'tqm',
+        )
+        pkg_q = next(
+            c.kwargs['params']['q'] for c in fake.get.call_args_list
+            if c.args and c.args[0].endswith('/search/issues')
+            and 'netty' in c.kwargs['params']['q']
+            and 'CVE-' not in c.kwargs['params']['q']
+        )
+        assert '"io.netty:netty-transport-native-epoll"' in pkg_q  # GitHub colon form, quoted
+        assert '"4.2.15.Final"' in pkg_q                           # version quoted
+        assert 'io.netty/netty-transport-native-epoll' not in pkg_q  # not the slash form
+
 
 # ---------------------------------------------------------------------------
 # Error handling

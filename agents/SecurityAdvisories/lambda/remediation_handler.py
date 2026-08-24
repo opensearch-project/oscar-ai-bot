@@ -166,7 +166,7 @@ def handle_remediate_cve(params: Dict[str, str], request_id: str) -> Dict[str, A
     # GitHub advisory entry to OUR package, so a multi-package CVE resolves to the
     # version for the package this repo actually uses (not an arbitrary one).
     try:
-        patched_version = _derive_patched_version(cve_id, package, request_id)
+        gh_package, patched_version = _derive_patched_version(cve_id, package, request_id)
     except Exception as e:  # advisory lookup failed (network / API error)
         logger.error(f"[{request_id}] REMEDIATE_CVE_DERIVE_FAILED: {e}")
         return error_response(
@@ -175,7 +175,7 @@ def handle_remediate_cve(params: Dict[str, str], request_id: str) -> Dict[str, A
 
     logger.info(
         f"[{request_id}] REMEDIATE_CVE_DERIVED: package={package!r} "
-        f"patched_version={patched_version!r}"
+        f"github_package={gh_package!r} patched_version={patched_version!r}"
     )
 
     # gate 2: do we have a version to upgrade to?
@@ -201,7 +201,7 @@ def handle_remediate_cve(params: Dict[str, str], request_id: str) -> Dict[str, A
     # NOT yet merged, so nothing downstream would catch the duplicate.
     try:
         existing = _find_existing_pr(
-            repo_owner, repo_name, cve_id, package, patched_version, request_id,
+            repo_owner, repo_name, cve_id, gh_package or package, patched_version, request_id,
         )
     except Exception as e:  # network / API errors — surface, don't crash
         logger.error(f"[{request_id}] REMEDIATE_CVE_PR_CHECK_FAILED: {e}")
@@ -502,16 +502,18 @@ def _github_headers() -> Dict[str, str]:
 
 
 def _derive_patched_version(cve_id: str, package: str, request_id: str) -> str:
-    """Fetch the first patched version for ``package`` from the GitHub Advisory API.
+    """Resolve (github_package_name, patched_version) for ``package`` from the
+    GitHub Advisory API.
 
-    ``package`` is the repo-specific package resolved from the scans cluster. For
-    a multi-package CVE, we match the advisory's ``vulnerabilities[]`` entry to
-    THAT package, so the version corresponds to the package this repo actually
-    uses. Returns the patched version string, or '' when it can't be determined —
-    GitHub has no advisory for the CVE (the CVE is still real; the cluster
-    resolved it), the advisory has no entry for our package, or the entry has no
-    fix version. In all those cases the caller reports ``no_patched_version``.
-    Network / API errors propagate to the caller.
+    ``package`` is the repo-specific package resolved from the scans cluster,
+    used to match the advisory's ``vulnerabilities[]`` entry (so a multi-package
+    CVE resolves to the package this repo uses). We return the matched entry's
+    OWN package name — GitHub's canonical form (maven ``group:artifact``, npm
+    ``@scope/name``), which is what PR titles use — for the dedup search, plus
+    the first patched version. Returns ``('', '')`` when nothing can be
+    determined (no advisory for the CVE — the CVE is still real, the cluster
+    resolved it; no entry for our package; or no fix version); the caller then
+    reports ``no_patched_version``. Network / API errors propagate to the caller.
     """
     headers = _github_headers()
 
@@ -531,19 +533,20 @@ def _derive_patched_version(cve_id: str, package: str, request_id: str) -> str:
         # Not an error: the CVE is real (resolved from the cluster); GitHub just
         # has no advisory, so we can't determine a fix version → no_patched_version.
         logger.info(f"[{request_id}] REMEDIATE_CVE_NO_ADVISORY: {cve_id}")
-        return ''
+        return '', ''
 
     entry = _select_vulnerability(advisories[0].get('vulnerabilities') or [], package)
     if not entry:
         # advisory exists but has no entry for our package -> no known fix version
-        return ''
+        return '', ''
 
+    gh_package = ((entry.get('package') or {}).get('name') or '').strip()
     # first_patched_version is a string in the current API; historically an
     # object with an "identifier" key — handle both.
     fpv = entry.get('first_patched_version')
     if isinstance(fpv, dict):
         fpv = fpv.get('identifier')
-    return (fpv or '').strip()
+    return gh_package, (fpv or '').strip()
 
 
 def _select_vulnerability(
@@ -604,10 +607,14 @@ def _find_existing_pr(
 ) -> Optional[Dict[str, str]]:
     """Return an open PR that appears to fix this CVE, or None.
 
+    ``package`` is GitHub's canonical package name (the matched advisory entry's
+    own name — maven ``group:artifact``, npm ``@scope/name``), i.e. the form PR
+    titles use.
+
     Runs up to two searches against the target repo's OPEN pull requests:
       1. By CVE id — catches PRs that reference the CVE in the title or body
          (and our own bot PRs, which carry the CVE in the description/branch).
-      2. By package + version — catches Dependabot / Mend / human "Bump
+      2. By quoted package + version — catches Dependabot / Mend / human "Bump
          <package> to/from <version>" PRs, whose titles deliberately do NOT
          contain the CVE id.
 
@@ -627,9 +634,15 @@ def _find_existing_pr(
         hit['matched_by'] = f'CVE id ({cve_id})'
         return hit
 
-    # 2) package (+ version)
+    # 2) package (+ version), quoted for exact matching. Unquoted, GitHub
+    # tokenizes punctuated terms (e.g. "1.6.0" -> 1/6/0) and matches spuriously.
+    # ``package`` here is GitHub's canonical name (maven group:artifact, npm
+    # @scope/name) — the form PR titles use — so quoting it exact-matches those
+    # PRs without any separator conversion.
     if package:
-        terms = [package] + ([patched_version] if patched_version else [])
+        terms = [f'"{package}"']
+        if patched_version:
+            terms.append(f'"{patched_version}"')
         hit = _search_open_prs(owner, repo, terms, request_id)
         if hit:
             label = package + (f' {patched_version}' if patched_version else '')
