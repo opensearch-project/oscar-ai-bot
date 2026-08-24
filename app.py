@@ -16,9 +16,12 @@ from typing import Optional
 from aws_cdk import App, Environment
 from dotenv import load_dotenv
 
+load_dotenv(override=True)
+
+from agents.github import GitHubAgent
 from agents.jenkins import JenkinsAgent
 from agents.metrics import MetricsAgent
-from agents.security_advisories import SecurityAdvisoriesAgent
+from agents.SecurityAdvisories import SecurityAdvisoriesAgent
 from stacks.api_gateway_stack import OscarApiGatewayStack
 from stacks.bedrock_agents_stack import OscarAgentsStack
 from stacks.knowledge_base_stack import OscarKnowledgeBaseStack
@@ -28,9 +31,6 @@ from stacks.secrets_stack import OscarSecretsStack
 from stacks.security_monitoring_stack import OscarSecurityMonitoringStack
 from stacks.storage_stack import OscarStorageStack
 from stacks.vpc_stack import OscarVpcStack
-
-load_dotenv()
-
 
 # Configure logging
 logging.basicConfig(
@@ -66,6 +66,7 @@ def main() -> None:
         JenkinsAgent(),
         MetricsAgent(),
         SecurityAdvisoriesAgent(),
+        GitHubAgent(),
     ]
 
     # Deploy stacks in dependency order

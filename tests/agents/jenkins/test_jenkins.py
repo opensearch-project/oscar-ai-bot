@@ -317,12 +317,16 @@ class TestLambdaHandler(unittest.TestCase):
 
 @patch.dict(os.environ, _JENKINS_ENV)
 class TestTwoPersonApproval(unittest.TestCase):
-    """Test two-person approval enforcement in handle_trigger_job."""
+    """Test two-person approval enforcement in handle_trigger_job.
+
+    Identity is now passed via sessionAttributes (out-of-band from Slack event
+    metadata), NOT via model-populated action-group parameters.
+    """
 
     def setUp(self):
         _reset_config_cache()
 
-    def _trigger_event(self, **extra_params):
+    def _trigger_event(self, session_attrs=None, **extra_params):
         params = [
             {'name': 'job_name', 'value': 'docker-scan'},
             {'name': 'IMAGE_FULL_NAME', 'value': 'alpine:3.19'},
@@ -330,7 +334,10 @@ class TestTwoPersonApproval(unittest.TestCase):
         ]
         for name, value in extra_params.items():
             params.append({'name': name, 'value': value})
-        return {'function': 'trigger_job', 'parameters': params}
+        event = {'function': 'trigger_job', 'parameters': params}
+        if session_attrs is not None:
+            event['sessionAttributes'] = session_attrs
+        return event
 
     @patch('lambda_function.JenkinsClient')
     @patch('lambda_function.get_job_registry')
@@ -340,10 +347,9 @@ class TestTwoPersonApproval(unittest.TestCase):
         mock_config.enable_2pr = True
         mock_get_registry.return_value = _build_test_registry()
 
-        result = lambda_handler(self._trigger_event(), None)
+        result = lambda_handler(self._trigger_event(session_attrs={}), None)
         body = result['response']['functionResponse']['responseBody']['TEXT']['body']
         self.assertIn('SECURITY ERROR', body)
-        self.assertIn('requester_user_id', body)
         mock_client_cls.return_value.trigger_job.assert_not_called()
 
     @patch('lambda_function.JenkinsClient')
@@ -354,7 +360,9 @@ class TestTwoPersonApproval(unittest.TestCase):
         mock_config.enable_2pr = True
         mock_get_registry.return_value = _build_test_registry()
 
-        event = self._trigger_event(requester_user_id='U_SAME', approver_user_id='U_SAME')
+        event = self._trigger_event(session_attrs={
+            'requester_user_id': 'U_SAME', 'approver_user_id': 'U_SAME',
+        })
         result = lambda_handler(event, None)
         body = result['response']['functionResponse']['responseBody']['TEXT']['body']
         self.assertIn('Self-approval is not permitted', body)
@@ -372,7 +380,9 @@ class TestTwoPersonApproval(unittest.TestCase):
         mock_client = mock_client_cls.return_value
         mock_client.trigger_job.return_value = {'status': 'success', 'workflow_url': 'https://j/job/docker-scan/1/'}
 
-        event = self._trigger_event(requester_user_id='U_REQ', approver_user_id='U_APP')
+        event = self._trigger_event(session_attrs={
+            'requester_user_id': 'U_REQ', 'approver_user_id': 'U_APP',
+        })
         result = lambda_handler(event, None)
         body = result['response']['functionResponse']['responseBody']['TEXT']['body']
         self.assertIn('Success', body)
@@ -394,7 +404,7 @@ class TestTwoPersonApproval(unittest.TestCase):
         mock_client = mock_client_cls.return_value
         mock_client.trigger_job.return_value = {'status': 'success', 'workflow_url': 'https://j/job/docker-scan/1/'}
 
-        # No requester/approver IDs at all
+        # No sessionAttributes — should succeed because 2PR is off
         result = lambda_handler(self._trigger_event(), None)
         body = result['response']['functionResponse']['responseBody']['TEXT']['body']
         self.assertIn('Success', body)

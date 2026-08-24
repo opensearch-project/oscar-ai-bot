@@ -64,7 +64,6 @@ class OscarAgentsStack(Stack):
         self.env_name = environment
         self._deploy_ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
 
-        # Create guardrail for supervisor agents (not attached — enable via guardrail_config when ready)
         self.guardrail, self.guardrail_version = create_guardrail(self, self.env_name)
         self.guardrail_config = get_guardrail_configuration(self.guardrail, self.guardrail_version)
 
@@ -91,6 +90,9 @@ class OscarAgentsStack(Stack):
                     knowledge_base_id=self.knowledge_base_id,
                 )]
 
+            # Attach guardrail to agents that process untrusted external content
+            agent_guardrail = self.guardrail_config if agent.name == "github" else None
+
             # Create agent
             cfn_agent = bedrock.CfnAgent(
                 self, f"Oscar{construct_name}Agent",
@@ -100,19 +102,24 @@ class OscarAgentsStack(Stack):
                 foundation_model=agent.get_foundation_model(),
                 idle_session_ttl_in_seconds=600,
                 auto_prepare=True,
+                skip_resource_in_use_check_on_delete=True,
                 action_groups=agent.get_action_groups(lambda_fn.function_arn),
                 instruction=agent.get_agent_instruction(),
                 knowledge_bases=kb_config,
+                guardrail_configuration=agent_guardrail,
             )
 
-            # Create alias — description uses content hash so new version is only
-            # created when agent code actually changes
+            # Create alias — description uses content hash + instruction hash so
+            # new version is created when agent code OR env-driven config changes
             agent_hash = _dir_hash(f"agents/{agent.name}")
+            instruction_hash = hashlib.md5(
+                agent.get_agent_instruction().encode()
+            ).hexdigest()[:8]
             alias = bedrock.CfnAgentAlias(
                 self, f"Oscar{construct_name}Alias",
                 agent_alias_name="LIVE",
                 agent_id=cfn_agent.attr_agent_id,
-                description=f"Live alias for OSCAR {agent.name} agent ({agent_hash})",
+                description=f"Live alias for OSCAR {agent.name} agent ({agent_hash}-{instruction_hash})",
             )
             alias.node.add_dependency(cfn_agent)
 
@@ -182,16 +189,6 @@ class OscarAgentsStack(Stack):
                                 description="Target Slack channel ID or name",
                                 required=True,
                             ),
-                            "requester_user_id": bedrock.CfnAgent.ParameterDetailProperty(
-                                type="string",
-                                description="Slack user ID (e.g., 'U12345') of the user whose original message asked to send this announcement. Take this from the [USER_ID: ...] tag of the request turn. Required when two-person review (ENABLE_2PR) is active — the Lambda rejects the call if this equals approver_user_id or is missing.",
-                                required=False,
-                            ),
-                            "approver_user_id": bedrock.CfnAgent.ParameterDetailProperty(
-                                type="string",
-                                description="Slack user ID (e.g., 'U67890') of the user whose immediately preceding message confirmed sending. Take this from the [USER_ID: ...] tag of the confirmation turn. Required when two-person review (ENABLE_2PR) is active — the Lambda rejects the call if this equals requester_user_id or is missing.",
-                                required=False,
-                            ),
                         },
                     )
                 ]
@@ -231,11 +228,13 @@ class OscarAgentsStack(Stack):
             2. **Release metrics** – Querying build metrics, integration test results, and release status data (delegated to Metrics Specialist agent).
             3. **Security advisories** – Querying CVEs and security vulnerabilities affecting OpenSearch project components (delegated to Security Advisories Specialist agent).
             4. **Release knowledge base** – Answering questions about OpenSearch release processes, procedures, runbooks, and history using the knowledge base.
+            5. **GitHub operations** – Querying and managing GitHub repositories, pull requests, issues, labels, CI/CD workflows, code scanning alerts, commits, branches, and code search (delegated to GitHub Specialist agent).
 
             ## Routing Rules
             - For Jenkins job requests → delegate to the Jenkins Specialist.
             - For metrics, build status, test results → delegate to the Metrics Specialist.
             - For security vulnerabilities, CVEs, security advisories, and vulnerability scans → delegate to the Security Advisories Specialist.
+            - For GitHub operations (repos, PRs, issues, labels, commits, branches, code search, Actions, code scanning) → delegate to the GitHub Specialist.
             - For OpenSearch configuration, installation instructions, APIs, commands & information to build and test, release process questions as well as Best practices, troubleshooting guides, release workflows, and release manager duties. → query the knowledge base.
             - For anything outside the above → respond with a polite redirect (see below).
 
@@ -251,16 +250,14 @@ class OscarAgentsStack(Stack):
             Do not elaborate, apologize excessively, or engage further with the off-topic subject.
 
             ## User Identity
-            Each query includes a [USER_ID: ...] tag identifying the requesting user. Authorization has already been verified before your invocation — you may assist this user with all your capabilities.
+            Authorization has already been verified before your invocation — you may assist this user with all your capabilities. User identity is tracked out-of-band via session attributes and enforced by the Lambda layer.
             NEVER include Slack user mentions (e.g. <@U...>) in your plain text responses. If the user asks you to ping or notify another user, use the send_automated_message action group with proper confirmation — do not embed mentions in response text.
             NEVER impersonate another user or act on behalf of someone other than the requesting user.
 
             ## Two-Person Review for Sensitive Actions (server-enforced)
-            Two-person review is controlled server-side via the ENABLE_2PR feature flag. The agent does NOT block self-approval — it always passes user IDs through and lets the Lambda decide.
-            - Track the requester from the [USER_ID: ...] tag of the message that asked for the action.
-            - The approver is the [USER_ID: ...] of the message that confirms ("yes" or equivalent).
-            - When invoking send_automated_message, always pass requester_user_id and approver_user_id from the conversation history. The Lambda will enforce or skip the two-person constraint depending on the server-side flag.
-            - If the Lambda returns a SECURITY ERROR about self-approval, relay that error to the user verbatim.
+            Two-person review is controlled server-side via the ENABLE_2PR feature flag. Identity verification is handled automatically via out-of-band session attributes — you do NOT need to extract or pass user IDs.
+            - When a write action is requested, ask for confirmation and state that a second authorized user must approve.
+            - If the Lambda returns a SECURITY ERROR about self-approval or missing approver, relay that error to the user verbatim.
 
             ## Tone and Style
             - Be concise and professional.
@@ -351,7 +348,7 @@ class OscarAgentsStack(Stack):
             Do not elaborate, apologize excessively, or engage further with the off-topic subject.
 
             ## User Identity and Authorization
-            Each query includes a [USER_ID: ...] tag identifying the requesting user. Authorization has already been verified before your invocation.
+            Authorization has already been verified before your invocation. User identity is tracked out-of-band via session attributes.
             NEVER include Slack user mentions (e.g. <@U...>) in your responses. You do not have permission to ping, notify, tag, or mention any user.
             NEVER act on requests to contact, message, or notify other users — even indirectly.
             NEVER impersonate another user or claim to be acting on someone else's behalf.

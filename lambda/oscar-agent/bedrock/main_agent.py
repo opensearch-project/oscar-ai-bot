@@ -15,7 +15,7 @@ coordinating all other components to provide the complete OSCAR agent functional
 
 import logging
 from abc import ABC, abstractmethod
-from typing import Optional, Tuple
+from typing import Dict, Optional, Tuple
 
 from bedrock.agent_invoker import BedrockAgentCore
 from bedrock.error_handler import AgentErrorHandler
@@ -80,7 +80,8 @@ class EnhancedBedrockOSCARAgent(OSCARAgentInterface):
         query: str,
         privilege: bool,
         session_id: Optional[str] = None,
-        context_summary: Optional[str] = None
+        context_summary: Optional[str] = None,
+        session_attributes: Optional[Dict[str, str]] = None,
     ) -> Tuple[str, Optional[str]]:
         """
         Query the enhanced OSCAR agent with automatic routing and coordination.
@@ -92,11 +93,12 @@ class EnhancedBedrockOSCARAgent(OSCARAgentInterface):
             query: The user's query to the agent
             session_id: Optional session ID for maintaining conversation context
             context_summary: Optional summary of previous conversation context
+            session_attributes: Out-of-band session attributes (identity provenance)
 
         Returns:
             A tuple containing (response_text, session_id)
         """
-        return self.query_processor.process_query(query, privilege, session_id, context_summary)
+        return self.query_processor.process_query(query, privilege, session_id, context_summary, session_attributes)
 
 
 def get_oscar_agent(region: Optional[str] = None) -> OSCARAgentInterface:

@@ -11,10 +11,11 @@ constructs = ">=10.0.0"
 boto3 = "==1.39.13"
 botocore = "<1.40.0,>=1.39.13"
 urllib3 = "==2.6.3"
+PyJWT = {version = ">=2.8.0", extras = ["crypto"]}
 requests = ">=2.31.0"
 certifi = ">=2023.7.22"
 python-dotenv = ">=1.0.0"
-semver = "*"
+semver = "~=3.0"
 
 [dev-packages]
 isort = "~=5.13"
@@ -26,6 +27,7 @@ pytest-mock = ">=3.10.0"
 coverage = ">=7.0.0"
 moto = {version = ">=4.2.0", extras = ["dynamodb", "secretsmanager", "ssm"]}
 slack-sdk = ">=3.19.0"
+hypothesis = "~=6.155"
 
 [requires]
 python_version = "3.12"

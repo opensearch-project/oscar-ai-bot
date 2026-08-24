@@ -44,6 +44,9 @@ class OscarPermissionsStack(Stack):
         self.api_gateway_role = self._create_api_gateway_role()
         self.alarm_notification_role = self._create_alarm_notification_role()
 
+        # GitHub webhook handler role
+        self.github_webhook_role = self._create_github_webhook_role()
+
         # Create agent roles
         self.agent_roles: Dict[str, iam.Role] = {}
         if agents:
@@ -121,6 +124,19 @@ class OscarPermissionsStack(Stack):
             roles[agent.name] = role
             created_entries[entry] = role
         return roles
+
+    def _create_github_webhook_role(self) -> iam.Role:
+        role = iam.Role(
+            self, "GitHubWebhookHandlerRole",
+            assumed_by=iam.ServicePrincipal("lambda.amazonaws.com"),
+            managed_policies=[
+                iam.ManagedPolicy.from_aws_managed_policy_name("service-role/AWSLambdaBasicExecutionRole")
+            ],
+            description="Execution role for GitHub webhook handler Lambda",
+        )
+        for stmt in self.policy_definitions.get_github_webhook_handler_policies():
+            role.add_to_policy(stmt)
+        return role
 
     def _create_api_gateway_role(self) -> iam.Role:
         role = iam.Role(

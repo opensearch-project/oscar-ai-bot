@@ -11,7 +11,7 @@ and response processing for the OSCAR agent system.
 
 import json
 import logging
-import time
+import uuid
 from typing import Any, Dict, Optional, Tuple
 
 import boto3
@@ -54,13 +54,20 @@ class BedrockAgentCore:
             f"Region: {self.region}"
         )
 
-    def create_agent_request(self, query: str, privilege: bool, session_id: Optional[str] = None) -> Dict[str, Any]:
+    def create_agent_request(
+        self,
+        query: str,
+        privilege: bool,
+        session_id: Optional[str] = None,
+        session_attributes: Optional[Dict[str, str]] = None,
+    ) -> Dict[str, Any]:
         """
         Create a request for the Bedrock agent.
 
         Args:
             query: The user's query
             session_id: Optional session ID for maintaining conversation context
+            session_attributes: Additional session attributes to pass out-of-band
 
         Returns:
             A dictionary containing the request parameters
@@ -73,22 +80,30 @@ class BedrockAgentCore:
 
         access_tier = "privileged" if privilege else "limited"
 
+        attrs = {'access_tier': access_tier}
+        if session_attributes:
+            attrs.update(session_attributes)
+
         request = {
             'agentId': agent_id,
             'agentAliasId': alias_id,
             'inputText': query,
-            'sessionId': session_id or f"session-{int(time.time())}",
+            'sessionId': session_id or f"session-{uuid.uuid4().hex}",
             'enableTrace': True,  # Enable trace to see raw model output
             'sessionState': {
-                'sessionAttributes': {
-                    'access_tier': access_tier,
-                }
+                'sessionAttributes': attrs,
             }
         }
 
         return request
 
-    def invoke_agent(self, query: str, privilege: bool, session_id: Optional[str] = None) -> Tuple[str, Optional[str]]:
+    def invoke_agent(
+        self,
+        query: str,
+        privilege: bool,
+        session_id: Optional[str] = None,
+        session_attributes: Optional[Dict[str, str]] = None,
+    ) -> Tuple[str, Optional[str]]:
         """
         Invoke the Bedrock agent with the given query.
 
@@ -96,6 +111,7 @@ class BedrockAgentCore:
             query: The user's query
             privilege: Whether to use privileged or limited agent
             session_id: Optional session ID for maintaining conversation context
+            session_attributes: Additional session attributes to pass out-of-band
 
         Returns:
             A tuple containing (response_text, session_id)
@@ -103,7 +119,7 @@ class BedrockAgentCore:
         Raises:
             Exception: If the agent invocation fails after all retries
         """
-        request = self.create_agent_request(query, privilege, session_id)
+        request = self.create_agent_request(query, privilege, session_id, session_attributes)
         logger.info(f"Invoking agent with request: {json.dumps({k: v for k, v in request.items() if k != 'inputText'}, indent=2)}")
         logger.info(f"Log preview length is set to {config.log_query_preview_length}")
         logger.info(f"Query: {query[:config.log_query_preview_length]}...")
@@ -150,7 +166,7 @@ class BedrockAgentCore:
 
             # If still no session ID, generate one for consistency
             else:
-                returned_session_id = f"session-{int(time.time())}"
+                returned_session_id = f"session-{uuid.uuid4().hex}"
                 logger.debug(f"Generated new session ID: {returned_session_id}")
 
             logger.info(f"Agent response received, length: {len(response_text)} characters")

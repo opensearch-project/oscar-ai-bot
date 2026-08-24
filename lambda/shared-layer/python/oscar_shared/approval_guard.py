@@ -5,6 +5,9 @@
 Two-person approval guard.
 
 Shared validation logic used by any Lambda that enforces ENABLE_2PR.
+Identity provenance: requester_user_id and approver_user_id are derived from
+Slack's signed event metadata and passed via Bedrock sessionAttributes — they
+are NOT accepted from model-populated action-group parameters.
 """
 
 import logging
@@ -15,14 +18,16 @@ logger.setLevel(logging.INFO)
 
 
 def validate_two_person_approval(
-    params: Dict[str, Any],
+    session_attributes: Dict[str, Any],
     enable_2pr: bool,
     action_label: str,
 ) -> Optional[Dict[str, Any]]:
     """Validate two-person approval if the feature flag is enabled.
 
     Args:
-        params: Request parameters dict (must contain requester_user_id, approver_user_id).
+        session_attributes: Session attributes from the Bedrock event (out-of-band,
+            populated by the oscar-agent Lambda from authenticated Slack event metadata).
+            Expected keys: 'requester_user_id', 'approver_user_id'.
         enable_2pr: Whether the ENABLE_2PR flag is active.
         action_label: Human-readable label for logs (e.g. 'job=docker-scan', 'channel=C123').
 
@@ -33,13 +38,16 @@ def validate_two_person_approval(
     if not enable_2pr:
         return None
 
-    requester_user_id = params.get('requester_user_id')
-    approver_user_id = params.get('approver_user_id')
+    requester_user_id = session_attributes.get('requester_user_id')
+    approver_user_id = session_attributes.get('approver_user_id')
 
     if not requester_user_id or not approver_user_id:
         return {
             'status': 'error',
-            'message': 'SECURITY ERROR: requester_user_id and approver_user_id are required for two-person approval.',
+            'message': (
+                'SECURITY ERROR: Two-person approval requires both a requester and a distinct '
+                'approver. A second authorized user must confirm this action in the thread.'
+            ),
         }
 
     if requester_user_id.strip() == approver_user_id.strip():

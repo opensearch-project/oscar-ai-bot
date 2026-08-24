@@ -1,0 +1,8 @@
+{
+  "name": "github-mcp-server",
+  "version": "v1.0.4",
+  "source": "https://github.com/github/github-mcp-server/releases",
+  "platform": "Linux_x86_64",
+  "sha256": "f40f32009a3f81c6ff821285a25585b7b29effc8450102c57846861bf6f6e52a",
+  "url": "https://ci.opensearch.org/ci/dbc/tools/github-map-server/github-mcp-server_1.0.4_Linux_x86_64.tar.gz"
+}

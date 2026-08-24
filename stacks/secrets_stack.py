@@ -55,6 +55,14 @@ class OscarSecretsStack(Stack):
             )
         )
 
+        # GitHub webhook handler secret
+        self.github_webhook_secret = secretsmanager.Secret(
+            self, "GitHubWebhookSecret",
+            secret_name=f"oscar-github-webhook-{environment}",
+            description="GitHub webhook secret and Slack incoming webhook URL for Oscar notifications",
+            removal_policy=removal_policy,
+        )
+
         # Create agent-declared secrets
         # Maps "agent_name/secret_suffix" -> secretsmanager.Secret
         self.agent_secrets: Dict[str, secretsmanager.Secret] = {}

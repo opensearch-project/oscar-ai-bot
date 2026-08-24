@@ -10,7 +10,7 @@ import logging
 import queue
 import threading
 import time
-from typing import Callable, Optional, Tuple
+from typing import Callable, Dict, Optional, Tuple
 
 from config import config
 
@@ -32,7 +32,8 @@ class TimeoutHandler:
 
     def query_agent_with_timeout(self, oscar_agent, query: str, privilege: bool, session_id: str, context_summary: str,
                                  channel: str, reaction_ts: str, start_time: float,
-                                 say: Callable, thread_ts: str, user_id: str) -> Tuple[Optional[str], Optional[str]]:
+                                 say: Callable, thread_ts: str, user_id: str,
+                                 session_attributes: Optional[Dict[str, str]] = None) -> Tuple[Optional[str], Optional[str]]:
         """Query the agent with timeout monitoring using simple threading with limits.
 
         Args:
@@ -46,6 +47,7 @@ class TimeoutHandler:
             say: Function to send messages
             thread_ts: Thread timestamp
             user_id: User ID
+            session_attributes: Out-of-band session attributes (identity provenance)
 
         Returns:
             Tuple of (response, new_session_id) or (None, None) if timeout/error
@@ -80,7 +82,8 @@ class TimeoutHandler:
 
                 # Query the agent
                 response, new_session_id = oscar_agent.query(
-                    query, privilege, session_id=session_id, context_summary=context_summary
+                    query, privilege, session_id=session_id, context_summary=context_summary,
+                    session_attributes=session_attributes,
                 )
                 result_queue.put(("success", response, new_session_id))
             except Exception as e:

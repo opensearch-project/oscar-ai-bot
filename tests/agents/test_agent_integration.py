@@ -12,9 +12,10 @@ from aws_cdk import App, Environment
 from aws_cdk.assertions import Match, Template
 
 from agents.base_agent import LambdaConfig, OscarAgent
+from agents.github import GitHubAgent
 from agents.jenkins import JenkinsAgent
 from agents.metrics import MetricsAgent
-from agents.security_advisories import SecurityAdvisoriesAgent
+from agents.SecurityAdvisories import SecurityAdvisoriesAgent
 from stacks.bedrock_agents_stack import OscarAgentsStack
 from stacks.lambda_stack import OscarLambdaStack
 from stacks.permissions_stack import OscarPermissionsStack
@@ -22,7 +23,7 @@ from stacks.secrets_stack import OscarSecretsStack
 from stacks.storage_stack import OscarStorageStack
 from stacks.vpc_stack import OscarVpcStack
 
-ALL_AGENTS = [JenkinsAgent(), MetricsAgent(), SecurityAdvisoriesAgent()]
+ALL_AGENTS = [JenkinsAgent(), MetricsAgent(), SecurityAdvisoriesAgent(), GitHubAgent()]
 AGENT_IDS = [a.name for a in ALL_AGENTS]
 ENV = Environment(account="123456789012", region="us-east-1")
 
@@ -93,8 +94,8 @@ class TestAgentContract:
 class TestAgentRegistration:
     """Validate the specific agent set and their access levels."""
 
-    def test_two_agents_registered(self):
-        assert len(ALL_AGENTS) == 3
+    def test_four_agents_registered(self):
+        assert len(ALL_AGENTS) == 4
 
     def test_agent_names_are_unique(self):
         names = [p.name for p in ALL_AGENTS]
@@ -108,6 +109,115 @@ class TestAgentRegistration:
 
     def test_security_advisories_access_level(self):
         assert SecurityAdvisoriesAgent().get_access_level() == "privileged"
+
+    def test_github_is_privileged_only(self):
+        assert GitHubAgent().get_access_level() == "privileged"
+
+
+# ---------------------------------------------------------------------------
+# Agent name validation tests
+# ---------------------------------------------------------------------------
+
+class TestAgentNameValidation:
+    """OscarAgent rejects names that are not single lowercase or CamelCase."""
+
+    def test_snake_case_rejected(self):
+        with pytest.raises(ValueError, match="must be a single lowercase word"):
+            class BadSnake(OscarAgent):
+                @property
+                def name(self):
+                    return "security_advisories"
+
+                def get_lambda_config(self):
+                    pass
+
+                def get_iam_policies(self, a, r, e):
+                    pass
+
+                def get_action_groups(self, lam):
+                    pass
+
+                def get_agent_instruction(self):
+                    pass
+
+                def get_collaborator_instruction(self):
+                    pass
+
+                def get_collaborator_name(self):
+                    pass
+
+    def test_kebab_case_rejected(self):
+        with pytest.raises(ValueError, match="must be a single lowercase word"):
+            class BadKebab(OscarAgent):
+                @property
+                def name(self):
+                    return "security-advisories"
+
+                def get_lambda_config(self):
+                    pass
+
+                def get_iam_policies(self, a, r, e):
+                    pass
+
+                def get_action_groups(self, lam):
+                    pass
+
+                def get_agent_instruction(self):
+                    pass
+
+                def get_collaborator_instruction(self):
+                    pass
+
+                def get_collaborator_name(self):
+                    pass
+
+    def test_single_lowercase_accepted(self):
+        class GoodLower(OscarAgent):
+            @property
+            def name(self):
+                return "jenkins"
+
+            def get_lambda_config(self):
+                pass
+
+            def get_iam_policies(self, a, r, e):
+                pass
+
+            def get_action_groups(self, lam):
+                pass
+
+            def get_agent_instruction(self):
+                pass
+
+            def get_collaborator_instruction(self):
+                pass
+
+            def get_collaborator_name(self):
+                pass
+
+    def test_camel_case_accepted(self):
+        class GoodCamel(OscarAgent):
+            @property
+            def name(self):
+                return "SecurityAdvisories"
+
+            def get_lambda_config(self):
+                pass
+
+            def get_iam_policies(self, a, r, e):
+                pass
+
+            def get_action_groups(self, lam):
+                pass
+
+            def get_agent_instruction(self):
+                pass
+
+            def get_collaborator_instruction(self):
+                pass
+
+            def get_collaborator_name(self):
+                pass
 
 
 # ---------------------------------------------------------------------------
@@ -159,16 +269,163 @@ class TestAgentStackWiring:
         metrics_fn = stacks.lambda_functions["metrics"]
         assert jenkins_fn is not metrics_fn
 
+    def test_github_has_own_lambda(self, stacks):
+        """GitHub should have a separate Lambda from other agents."""
+        github_fn = stacks.lambda_functions["github"]
+        jenkins_fn = stacks.lambda_functions["jenkins"]
+        metrics_fn = stacks.lambda_functions["metrics"]
+        assert github_fn is not jenkins_fn
+        assert github_fn is not metrics_fn
+
     def test_lambda_function_count(self, stacks):
-        """Should be 3 agent entries + 2 core = 5 keys in lambda_functions dict."""
-        # 3 agents + supervisor-agent + communication-handler = 5 entries
-        assert len(stacks.lambda_functions) == 5
+        """Should be 4 agent entries + 3 core = 7 keys in lambda_functions dict."""
+        # 4 agents + supervisor-agent + communication-handler + github-webhook-handler = 7 entries
+        assert len(stacks.lambda_functions) == 7
 
     def test_lambda_template_function_count(self, stacks):
-        """CloudFormation template should have 5 Lambda functions
-        (supervisor + communication + jenkins + metrics + security-advisories)."""
+        """CloudFormation template should have 7 Lambda functions
+        (supervisor + communication + github-webhook-handler + jenkins + metrics + security-advisories + github)."""
         template = Template.from_stack(stacks)
-        template.resource_count_is("AWS::Lambda::Function", 5)
+        template.resource_count_is("AWS::Lambda::Function", 7)
+
+
+# ---------------------------------------------------------------------------
+# GitHub agent — write operation and authorization tests
+# ---------------------------------------------------------------------------
+
+class TestGitHubAgentWriteOperations:
+    """Validate the GitHub agent's write operation configuration."""
+
+    def test_github_action_group_count(self):
+        """GitHub agent should have 4 action groups (read, write, bulk merge, maintainer lookup)."""
+        agent = GitHubAgent()
+        groups = agent.get_action_groups("arn:aws:lambda:us-east-1:123456789012:function:placeholder")
+        assert len(groups) == 4
+
+    def test_github_write_group_exists(self):
+        """GitHub agent should have a write operations action group."""
+        agent = GitHubAgent()
+        groups = agent.get_action_groups("arn:aws:lambda:us-east-1:123456789012:function:placeholder")
+        group_names = [g.action_group_name for g in groups]
+        assert "githubWriteOperations" in group_names
+
+    def test_github_bulk_merge_group_exists(self):
+        """GitHub agent should have a bulk merge operations action group."""
+        agent = GitHubAgent()
+        groups = agent.get_action_groups("arn:aws:lambda:us-east-1:123456789012:function:placeholder")
+        group_names = [g.action_group_name for g in groups]
+        assert "githubBulkMergeOperations" in group_names
+
+    def test_github_bulk_merge_functions_defined(self):
+        """Bulk merge action group should have list_merge_candidates and bulk_merge_prs."""
+        agent = GitHubAgent()
+        groups = agent.get_action_groups("arn:aws:lambda:us-east-1:123456789012:function:placeholder")
+        merge_group = next(g for g in groups if g.action_group_name == "githubBulkMergeOperations")
+        func_names = [f.name for f in merge_group.function_schema.functions]
+        assert "list_merge_candidates" in func_names
+        assert "bulk_merge_prs" in func_names
+
+    def test_github_write_functions_defined(self):
+        """All expected write functions should be defined in the write action group."""
+        agent = GitHubAgent()
+        groups = agent.get_action_groups("arn:aws:lambda:us-east-1:123456789012:function:placeholder")
+        write_group = next(g for g in groups if g.action_group_name == "githubWriteOperations")
+        func_names = [f.name for f in write_group.function_schema.functions]
+        expected = [
+            "merge_pr", "create_issue", "close_issue",
+            "transfer_issue", "add_comment", "bulk_comment",
+        ]
+        for name in expected:
+            assert name in func_names, f"Missing write function: {name}"
+
+    def test_github_mcp_not_read_only(self):
+        """GitHub agent MCP should NOT be in read-only mode to support writes."""
+        agent = GitHubAgent()
+        config = agent.get_lambda_config()
+        assert config.environment_variables.get("MCP_READ_ONLY") == "false"
+
+    def test_github_agent_instruction_mentions_confirmation(self):
+        """Agent instruction must require confirmation for write operations."""
+        agent = GitHubAgent()
+        instruction = agent.get_agent_instruction()
+        assert "confirmation" in instruction.lower()
+        assert "CONFIRMATION_REQUIRED" in instruction
+
+    def test_github_agent_instruction_mentions_org_enforcement(self):
+        """Agent instruction must enforce organization scope."""
+        agent = GitHubAgent()
+        instruction = agent.get_agent_instruction()
+        assert "ORGANIZATION ENFORCEMENT" in instruction
+
+
+class TestGitHubAuthorizer:
+    """Test the GitHub agent authorization module."""
+
+    def test_write_operations_identified(self):
+        """All write functions should be identified as write operations."""
+        import sys
+        sys.path.insert(0, os.path.join("agents", "github", "lambda"))
+        from authorizer import is_write_operation
+        write_ops = [
+            "merge_pr", "create_issue", "close_issue",
+            "transfer_issue", "add_comment", "bulk_comment",
+            "bulk_merge_prs",
+        ]
+        for op in write_ops:
+            assert is_write_operation(op), f"{op} should be a write operation"
+
+    def test_read_operations_not_write(self):
+        """Read functions should NOT be identified as write operations."""
+        import sys
+        sys.path.insert(0, os.path.join("agents", "github", "lambda"))
+        from authorizer import is_write_operation
+        read_ops = [
+            "get_pr_details", "list_prs", "get_issue_details",
+            "list_issues", "search_issues", "search_pull_requests",
+            "list_merge_candidates",
+        ]
+        for op in read_ops:
+            assert not is_write_operation(op), f"{op} should NOT be a write operation"
+
+    def test_org_scope_rejects_external_repo(self):
+        """Org validation should reject repos outside opensearch-project."""
+        import sys
+        sys.path.insert(0, os.path.join("agents", "github", "lambda"))
+        from authorizer import validate_org_scope
+        error = validate_org_scope("create_pr", {"repo": "other-org/some-repo"})
+        assert error is not None
+        assert "outside" in error.lower()
+
+    def test_org_scope_allows_internal_repo(self):
+        """Org validation should allow repos within opensearch-project."""
+        import sys
+        sys.path.insert(0, os.path.join("agents", "github", "lambda"))
+        from authorizer import validate_org_scope
+        error = validate_org_scope("create_pr", {"repo": "OpenSearch"})
+        assert error is None
+
+    def test_org_scope_rejects_external_transfer(self):
+        """Org validation should reject issue transfers to external repos."""
+        import sys
+        sys.path.insert(0, os.path.join("agents", "github", "lambda"))
+        from authorizer import validate_org_scope
+        error = validate_org_scope("transfer_issue", {
+            "repo": "OpenSearch",
+            "target_repo": "external-org/other-repo",
+        })
+        assert error is not None
+        assert "outside" in error.lower()
+
+    def test_org_scope_allows_internal_transfer(self):
+        """Org validation should allow issue transfers within opensearch-project."""
+        import sys
+        sys.path.insert(0, os.path.join("agents", "github", "lambda"))
+        from authorizer import validate_org_scope
+        error = validate_org_scope("transfer_issue", {
+            "repo": "OpenSearch",
+            "target_repo": "OpenSearch-Dashboards",
+        })
+        assert error is None
 
 
 # ---------------------------------------------------------------------------
@@ -415,6 +672,6 @@ class TestGuardrail:
         agents = agents_template.find_resources("AWS::Bedrock::Agent")
         for logical_id, resource in agents.items():
             name = resource["Properties"].get("AgentName", "")
-            if "privileged" not in name and "limited" not in name:
+            if "privileged" not in name and "limited" not in name and "github" not in name:
                 assert "GuardrailConfiguration" not in resource["Properties"], \
                     f"Collaborator agent '{name}' should not have a guardrail"
