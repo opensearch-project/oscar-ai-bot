@@ -193,6 +193,7 @@ class OscarLambdaStack(Stack):
         rule.add_target(targets.LambdaFunction(function))
 
         self.lambda_functions["identity"] = function
+
     def _create_github_webhook_handler_lambda(self) -> None:
         execution_role = self.permissions_stack.github_webhook_role
         fn_name = self.get_github_webhook_handler_function_name(self.env_name)

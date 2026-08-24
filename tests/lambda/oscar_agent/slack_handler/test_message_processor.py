@@ -284,6 +284,7 @@ class TestProcessMessageContextIntegration:
             timeout_handler=timeout_handler,
             slack_client=slack,
         )
+        mp._has_identity_mapping = Mock(return_value=True)
         say = Mock()
         # message_ts != thread_ts triggers parent context fetch
         mp.process_message('C_ALLOWED', 'thread_ts', 'U_ADMIN', '<@BOT> hello', say, message_ts='msg_ts')

@@ -161,6 +161,7 @@ class OscarApiGatewayStack(Stack):
                 callback_integration,
                 authorization_type=apigateway.AuthorizationType.NONE
             )
+
     def _configure_github_webhook_endpoint(self) -> None:
         """Configure GitHub webhook endpoint at /github/webhooks."""
         github_resource = self.api.root.add_resource("github")

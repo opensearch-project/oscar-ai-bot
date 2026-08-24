@@ -180,6 +180,14 @@ def template_with_identity():
         function_name="oscar-identity-dev",
     )
 
+    mock_webhook_fn = aws_lambda.Function(
+        helper, "MockWebhookLambda",
+        runtime=aws_lambda.Runtime.PYTHON_3_12,
+        handler="index.handler",
+        code=aws_lambda.Code.from_inline("def handler(e,c): pass"),
+        function_name="oscar-github-webhook-handler-dev",
+    )
+
     mock_role = iam.Role(
         helper, "MockApiGwRole",
         assumed_by=iam.ServicePrincipal("apigateway.amazonaws.com"),
@@ -188,9 +196,11 @@ def template_with_identity():
     lambda_stack = MagicMock()
     lambda_stack.lambda_functions = {
         "oscar-supervisor-agent-dev": mock_fn,
+        "oscar-github-webhook-handler-dev": mock_webhook_fn,
         "identity": mock_identity_fn,
     }
     lambda_stack.get_supervisor_agent_function_name.return_value = "oscar-supervisor-agent-dev"
+    lambda_stack.get_github_webhook_handler_function_name.return_value = "oscar-github-webhook-handler-dev"
 
     permissions_stack = MagicMock()
     permissions_stack.api_gateway_role = mock_role

@@ -356,9 +356,6 @@ class MessageProcessor:
                 self._handle_link_github_via_dm(user_id, channel, thread_ts, reaction_ts, say)
                 return
 
-            # ALWAYS add user context to query for agent to use as needed
-            query = self.add_user_context_to_query(query, user_id)
-            logger.info(f"Added user context to query: {query}")
             # Build out-of-band identity attributes from authenticated Slack event
             identity_attrs = self._build_identity_attributes(thread_key, user_id)
             logger.info(f"Identity attributes: {identity_attrs}")
