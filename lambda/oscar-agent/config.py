@@ -50,6 +50,9 @@ class Config:
         self.dm_authorized_users = [u.strip() for u in secrets.get('DM_AUTHORIZED_USERS', '').split(',') if u.strip()]
         self.fully_authorized_users = [u.strip() for u in secrets.get('FULLY_AUTHORIZED_USERS', '').split(',') if u.strip()]
         self.channel_allow_list = [c.strip() for c in secrets.get('CHANNEL_ALLOW_LIST', '').split(',') if c.strip()]
+        self.github_oauth_client_id = secrets.get('GITHUB_OAUTH_CLIENT_ID', '')
+        self.oauth_callback_url = secrets.get('OAUTH_CALLBACK_URL', '')
+        self.oauth_state_secret = secrets.get('OAUTH_STATE_SECRET', '')
 
         if validate_required and not self.slack_bot_token:
             raise ValueError("SLACK_BOT_TOKEN not found in central secret")
@@ -136,6 +139,7 @@ class Config:
         keys_to_extract = {
             'SLACK_BOT_TOKEN', 'SLACK_SIGNING_SECRET',
             'DM_AUTHORIZED_USERS', 'FULLY_AUTHORIZED_USERS', 'CHANNEL_ALLOW_LIST',
+            'GITHUB_OAUTH_CLIENT_ID', 'OAUTH_CALLBACK_URL', 'OAUTH_STATE_SECRET',
         }
         result: Dict[str, str] = {}
 

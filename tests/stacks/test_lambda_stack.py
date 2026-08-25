@@ -133,3 +133,80 @@ class TestLambdaStack:
             "Action": "lambda:InvokeFunction",
             "Principal": "lambda.amazonaws.com",
         })
+
+
+@pytest.fixture
+def template_with_identity():
+    """Synthesise the Lambda stack with identity tables configured."""
+    os.environ["CDK_DEFAULT_ACCOUNT"] = "123456789012"
+    os.environ["CDK_DEFAULT_REGION"] = "us-east-1"
+
+    app = App(context={"aws:cdk:bundling-stacks": []})
+
+    permissions = OscarPermissionsStack(
+        app, "PermsIdentity", environment="dev", agents=AGENTS, env=ENV,
+    )
+    secrets = OscarSecretsStack(
+        app, "SecretsIdentity", environment="dev", agents=AGENTS, env=ENV,
+    )
+    storage = OscarStorageStack(
+        app, "StorageIdentity", environment="dev",
+        workspace_id="T01INTERNAL",
+        env=ENV,
+    )
+    vpc = OscarVpcStack(app, "VpcIdentity", env=ENV)
+
+    stack = OscarLambdaStack(
+        app, "TestLambdaStackIdentity",
+        permissions_stack=permissions,
+        secrets_stack=secrets,
+        storage_stack=storage,
+        vpc_stack=vpc,
+        environment="dev",
+        agents=AGENTS,
+        env=ENV,
+    )
+    return Template.from_stack(stack)
+
+
+class TestIdentityLambda:
+    """Test cases for identity Lambda creation."""
+
+    def test_identity_lambda_created(self, template_with_identity):
+        """Identity Lambda should be created when workspace_id is configured."""
+        template_with_identity.has_resource_properties("AWS::Lambda::Function", {
+            "FunctionName": "oscar-identity-dev",
+            "Runtime": "python3.12",
+            "Handler": "lambda_function.lambda_handler",
+            "Timeout": 300,
+            "MemorySize": 256,
+        })
+
+    def test_identity_lambda_env_vars(self, template_with_identity):
+        """Identity Lambda should have required environment variables."""
+        template_with_identity.has_resource_properties("AWS::Lambda::Function", {
+            "FunctionName": "oscar-identity-dev",
+            "Environment": {
+                "Variables": Match.object_like({
+                    "ENVIRONMENT": "dev",
+                    "IDENTITY_TABLE_NAME": Match.any_value(),
+                }),
+            },
+        })
+
+    def test_identity_validation_schedule_created(self, template_with_identity):
+        """Weekly validation EventBridge rule should be created."""
+        template_with_identity.has_resource_properties("AWS::Events::Rule", {
+            "ScheduleExpression": "rate(7 days)",
+            "Description": "Weekly identity membership validation",
+        })
+
+    def test_no_identity_lambda_without_workspace(self, template):
+        """Identity Lambda should NOT be created when no workspace_id configured."""
+        # The base template fixture has no workspace_id
+        functions = template.find_resources("AWS::Lambda::Function")
+        identity_fns = [
+            k for k, v in functions.items()
+            if v.get("Properties", {}).get("FunctionName", "").startswith("oscar-identity")
+        ]
+        assert len(identity_fns) == 0

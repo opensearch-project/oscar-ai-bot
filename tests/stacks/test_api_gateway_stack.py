@@ -155,3 +155,81 @@ class TestApiGatewayStack:
                 "SampledRequestsEnabled": True,
             },
         })
+
+
+@pytest.fixture
+def template_with_identity():
+    """Synthesise the API Gateway stack with identity Lambda configured."""
+    app = App()
+
+    helper = Stack(app, "HelperIdentity", env=ENV)
+
+    mock_fn = aws_lambda.Function(
+        helper, "MockLambda",
+        runtime=aws_lambda.Runtime.PYTHON_3_12,
+        handler="index.handler",
+        code=aws_lambda.Code.from_inline("def handler(e,c): pass"),
+        function_name="oscar-supervisor-agent-dev",
+    )
+
+    mock_identity_fn = aws_lambda.Function(
+        helper, "MockIdentityLambda",
+        runtime=aws_lambda.Runtime.PYTHON_3_12,
+        handler="index.handler",
+        code=aws_lambda.Code.from_inline("def handler(e,c): pass"),
+        function_name="oscar-identity-dev",
+    )
+
+    mock_webhook_fn = aws_lambda.Function(
+        helper, "MockWebhookLambda",
+        runtime=aws_lambda.Runtime.PYTHON_3_12,
+        handler="index.handler",
+        code=aws_lambda.Code.from_inline("def handler(e,c): pass"),
+        function_name="oscar-github-webhook-handler-dev",
+    )
+
+    mock_role = iam.Role(
+        helper, "MockApiGwRole",
+        assumed_by=iam.ServicePrincipal("apigateway.amazonaws.com"),
+    )
+
+    lambda_stack = MagicMock()
+    lambda_stack.lambda_functions = {
+        "oscar-supervisor-agent-dev": mock_fn,
+        "oscar-github-webhook-handler-dev": mock_webhook_fn,
+        "identity": mock_identity_fn,
+    }
+    lambda_stack.get_supervisor_agent_function_name.return_value = "oscar-supervisor-agent-dev"
+    lambda_stack.get_github_webhook_handler_function_name.return_value = "oscar-github-webhook-handler-dev"
+
+    permissions_stack = MagicMock()
+    permissions_stack.api_gateway_role = mock_role
+
+    stack = OscarApiGatewayStack(
+        app, "TestApiGatewayIdentity",
+        lambda_stack=lambda_stack,
+        permissions_stack=permissions_stack,
+        environment="dev",
+        env=ENV,
+    )
+    return Template.from_stack(stack)
+
+
+class TestOAuthCallbackRoute:
+    """Test cases for OAuth callback endpoint."""
+
+    def test_oauth_callback_get_method_exists(self, template_with_identity):
+        """GET /oauth/callback should exist when identity Lambda is configured."""
+        template_with_identity.has_resource_properties("AWS::ApiGateway::Method", {
+            "HttpMethod": "GET",
+            "AuthorizationType": "NONE",
+        })
+
+    def test_no_oauth_route_without_identity(self, template):
+        """OAuth callback route should NOT exist without identity Lambda."""
+        methods = template.find_resources("AWS::ApiGateway::Method")
+        get_methods = [
+            k for k, v in methods.items()
+            if v.get("Properties", {}).get("HttpMethod") == "GET"
+        ]
+        assert len(get_methods) == 0
