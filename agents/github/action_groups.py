@@ -213,7 +213,7 @@ def get_action_groups(lambda_arn: str) -> List[bedrock.CfnAgent.AgentActionGroup
                             "tag_name": _param("string", "Name for the tag (e.g., '3.12.0')", True),
                             "commit_sha": _param(
                                 "string",
-                                "Commit SHA (full or abbreviated) to tag. "
+                                "Commit SHA (full or abbreviated) or branch name to tag. "
                                 "If omitted, the HEAD of the default branch is used.",
                                 False,
                             ),
@@ -244,7 +244,7 @@ def get_action_groups(lambda_arn: str) -> List[bedrock.CfnAgent.AgentActionGroup
                             "branch_name": _param("string", "Name for the branch (e.g., '3.12')", True),
                             "commit_sha": _param(
                                 "string",
-                                "Commit SHA (full or abbreviated) to branch from. "
+                                "Commit SHA (full or abbreviated) or branch name to branch from. "
                                 "If omitted, the HEAD of the default branch is used.",
                                 False,
                             ),

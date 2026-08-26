@@ -43,7 +43,31 @@ class GitHubAgent(OscarAgent):
         return get_action_groups(lambda_arn)
 
     def get_agent_instruction(self):
-        return AGENT_INSTRUCTION.format(org=GITHUB_ORG)
+        enable_2pr = os.environ.get("ENABLE_2PR", "false").lower() == "true"
+        if enable_2pr:
+            two_person_review_section = (
+                "TWO-PERSON REVIEW (MANDATORY FOR ALL WRITE OPERATIONS):\n"
+                "- When you receive a write request, ask for confirmation and include [CONFIRMATION_REQUIRED].\n"
+                "- State: \"This requires approval from a different authorized user. "
+                "Please have another authorized user reply 'yes' to confirm.\"\n"
+                "- Do NOT treat a different user responding as a new request — it is the approval.\n"
+                "- Do NOT verify or judge authorization yourself. Authorization is enforced entirely "
+                "server-side. Your only job is to call the tool and relay what it returns."
+            )
+            tag_branch_2pr_note = ""
+        else:
+            two_person_review_section = (
+                "CONFIRMATION (MANDATORY FOR ALL WRITE OPERATIONS):\n"
+                "- When you receive a write request, ask for confirmation and include [CONFIRMATION_REQUIRED].\n"
+                "- The same user who requested the action can confirm it.\n"
+                "- Do NOT mention two-person review or ask for a different user to approve."
+            )
+            tag_branch_2pr_note = ""
+        return AGENT_INSTRUCTION.format(
+            org=GITHUB_ORG,
+            two_person_review_section=two_person_review_section,
+            tag_branch_2pr_note=tag_branch_2pr_note,
+        )
 
     def get_collaborator_instruction(self):
         return COLLABORATOR_INSTRUCTION.format(org=GITHUB_ORG)
@@ -52,7 +76,7 @@ class GitHubAgent(OscarAgent):
         return "GitHub-Specialist"
 
     def get_access_level(self):
-        return "privileged"
+        return "both"
 
     def get_secrets(self):
         return [

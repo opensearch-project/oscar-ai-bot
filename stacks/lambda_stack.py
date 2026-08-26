@@ -276,6 +276,11 @@ class OscarLambdaStack(Stack):
             self.lambda_functions[agent.name] = function
             created_entries[config.entry] = function
 
+            # Grant identity table read access to agents that need maintainer lookups
+            if agent.name == "github" and self.storage_stack.identity_table:
+                function.add_environment("IDENTITY_TABLE_NAME", self.storage_stack.identity_table.table_name)
+                self.storage_stack.identity_table.grant_read_data(role)
+
     # ------------------------------------------------------------- env vars
 
     # Keys to pass through from .env to Lambda (if set). Lambda config.py has its own defaults.

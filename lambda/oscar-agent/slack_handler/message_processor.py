@@ -67,6 +67,10 @@ class MessageProcessor:
         requesters for actions they never initiated.
 
         The current_user_id is the authenticated Slack user from the signed event.
+
+        Also sets admin flags for both requester and approver so downstream
+        lambdas can enforce per-operation authorization without needing direct
+        access to the admin list.
         """
         attrs = {'current_user_id': current_user_id}
 
@@ -75,12 +79,16 @@ class MessageProcessor:
             pending_requester = stored_context.get('pending_approval_requester')
             if pending_requester:
                 attrs['requester_user_id'] = pending_requester
+                attrs['requester_is_admin'] = str(self.is_fully_authorized_user(pending_requester))
                 if current_user_id != pending_requester:
                     attrs['approver_user_id'] = current_user_id
+                    attrs['approver_is_admin'] = str(self.is_fully_authorized_user(current_user_id))
             else:
                 attrs['requester_user_id'] = current_user_id
+                attrs['requester_is_admin'] = str(self.is_fully_authorized_user(current_user_id))
         else:
             attrs['requester_user_id'] = current_user_id
+            attrs['requester_is_admin'] = str(self.is_fully_authorized_user(current_user_id))
 
         return attrs
 
@@ -399,6 +407,8 @@ class MessageProcessor:
             if confirmation_required:
                 self.storage.set_pending_approval_requester(thread_key, user_id)
             elif response and 'SECURITY ERROR' in response:
+                pass
+            elif response and 'AUTHORIZATION ERROR' in response:
                 pass
             else:
                 self.storage.clear_pending_approval_requester(thread_key)
