@@ -12,6 +12,7 @@ This module defines the DynamoDB tables used by the OSCAR Slack Bot.
 """
 
 import os
+from typing import Optional
 
 from aws_cdk import Duration, RemovalPolicy, Stack
 from aws_cdk import aws_cloudwatch as cloudwatch
@@ -30,21 +31,25 @@ class OscarStorageStack(Stack):
     """
 
     CONTEXT_TABLE_NAME = "oscar-agent-context"
+    IDENTITY_TABLE_PREFIX = "oscar-identity"
 
     @classmethod
     def get_dynamodb_table_name(cls, environment: str) -> str:
         return f"{cls.CONTEXT_TABLE_NAME}-{environment}"
 
-    def __init__(self, scope: Construct, construct_id: str, environment: str, **kwargs) -> None:
+    def __init__(self, scope: Construct, construct_id: str, environment: str, workspace_id: Optional[str] = None, **kwargs) -> None:
         """
         Initialize storage resources.
         Args:
             scope: The CDK construct scope
             construct_id: The ID of the construct
+            environment: Deployment environment name
+            workspace_id: Slack workspace ID for identity table
             **kwargs: Additional keyword arguments
         """
         super().__init__(scope, construct_id, **kwargs)
 
+        self.env_name = environment
         self.context_table_name: str = self.get_dynamodb_table_name(environment)
 
         # Get TTL values from environment
@@ -61,6 +66,12 @@ class OscarStorageStack(Stack):
             removal_policy,
             context_ttl
         )
+
+        # Identity table for Slack-GitHub mapping
+        self.workspace_id: Optional[str] = workspace_id
+        self.identity_table: Optional[dynamodb.Table] = None
+        if workspace_id:
+            self.identity_table = self._create_identity_table(workspace_id, removal_policy)
 
         # Create monitoring and alerting for context table only
         self._create_context_monitoring(environment)
@@ -99,6 +110,28 @@ class OscarStorageStack(Stack):
             contributor_insights_enabled=True
         )
 
+    def _create_identity_table(self, workspace_id: str, removal_policy: RemovalPolicy) -> dynamodb.Table:
+        """Create a DynamoDB table for Slack-GitHub identity mappings."""
+        table_name = f"{self.IDENTITY_TABLE_PREFIX}-{workspace_id}-{self.env_name}"
+        table = dynamodb.Table(
+            self, f"IdentityTable{workspace_id}",
+            table_name=table_name,
+            partition_key=dynamodb.Attribute(name="github_id", type=dynamodb.AttributeType.NUMBER),
+            billing_mode=dynamodb.BillingMode.PAY_PER_REQUEST,
+            removal_policy=removal_policy,
+            encryption=dynamodb.TableEncryption.AWS_MANAGED,
+            point_in_time_recovery_specification=dynamodb.PointInTimeRecoverySpecification(
+                point_in_time_recovery_enabled=True
+            ),
+        )
+
+        table.add_global_secondary_index(
+            index_name="slack-user-index",
+            partition_key=dynamodb.Attribute(name="slack_user_id", type=dynamodb.AttributeType.STRING),
+        )
+
+        return table
+
     def _create_context_monitoring(self, environment: str) -> None:
         """
         Create CloudWatch monitoring and alerting for the context table only.
@@ -112,13 +145,22 @@ class OscarStorageStack(Stack):
             display_name="OSCAR Storage Monitoring Alerts"
         )
 
-        # Context table monitoring only
+        # Context table monitoring
         self._create_table_alarms(
             table=self.context_table,
             table_type="Context",
             alert_topic=self.alert_topic,
             environment=environment
         )
+
+        # Identity table monitoring
+        if self.identity_table:
+            self._create_table_alarms(
+                table=self.identity_table,
+                table_type="Identity",
+                alert_topic=self.alert_topic,
+                environment=environment
+            )
 
     def _create_table_alarms(
         self,

@@ -7,12 +7,18 @@ Message processing for Slack Handler.
 """
 
 import logging
+import os
 import re
 import time
 from typing import Callable
 
+import boto3
 from config import config
 from input_validator import InputValidationError, validate_and_sanitize
+from oscar_shared.oauth_state import generate_state
+from slack_sdk import WebClient
+
+from .message_formatter import MessageFormatter
 
 logger = logging.getLogger(__name__)
 
@@ -230,6 +236,74 @@ class MessageProcessor:
         logger.debug(f"User {user_id} authorization check: {is_authorized}")
         return is_authorized
 
+    def _get_identity_table(self):
+        """Get the identity DynamoDB table (cached)."""
+        if not hasattr(self, '_identity_table'):
+            table_name = os.environ.get("IDENTITY_TABLE_NAME", "")
+            if not table_name:
+                raise ValueError("IDENTITY_TABLE cannot be fetched.")
+            dynamodb_resource = boto3.resource("dynamodb", region_name=os.environ.get("AWS_REGION", "us-east-1"))
+            self._identity_table = dynamodb_resource.Table(table_name)
+        return self._identity_table
+
+    def _has_identity_mapping(self, user_id: str) -> bool:
+        table = self._get_identity_table()
+        resp = table.query(
+            IndexName="slack-user-index",
+            KeyConditionExpression="slack_user_id = :uid",
+            ExpressionAttributeValues={":uid": user_id},
+        )
+        items = resp.get("Items", [])
+        return any(i.get("status") == "active" for i in items)
+
+    def _handle_link_github_via_dm(self, user_id: str, channel: str, thread_ts: str, reaction_ts: str, say: Callable) -> None:
+        """Handle link-github request by sending OAuth link via DM."""
+
+        table = self._get_identity_table()
+        if not table:
+            say(text="Identity linking is not configured.", thread_ts=thread_ts)
+            self.reaction_manager.manage_reactions(channel, reaction_ts, add_reaction="x", remove_reaction="thinking_face")
+            return
+
+        # Check existing mapping
+        resp = table.query(
+            IndexName="slack-user-index",
+            KeyConditionExpression="slack_user_id = :uid",
+            ExpressionAttributeValues={":uid": user_id},
+        )
+        items = resp.get("Items", [])
+        active = next((i for i in items if i.get("status") == "active"), None)
+        if active:
+            say(text=f"You're already linked to GitHub account *@{active.get('github_handle')}*.", thread_ts=thread_ts)
+            self.reaction_manager.manage_reactions(channel, reaction_ts, add_reaction="white_check_mark", remove_reaction="thinking_face")
+            return
+
+        # Build OAuth URL with HMAC-signed state
+        workspace_id = os.environ.get("SLACK_WORKSPACE_ID", "")
+        client_id = config.github_oauth_client_id
+        callback_url = config.oauth_callback_url
+        state = generate_state(user_id, workspace_id, config.oauth_state_secret)
+        oauth_url = (
+            f"https://github.com/login/oauth/authorize"
+            f"?client_id={client_id}"
+            f"&redirect_uri={callback_url}"
+            f"&state={state}"
+        )
+
+        # Send OAuth link via DM
+        try:
+            client = WebClient(token=config.slack_bot_token)
+            client.chat_postMessage(
+                channel=user_id,
+                text=f"<{oauth_url}|Click here to link your GitHub account>"
+            )
+            say(text="Check your DM for Slack-GitHub linking instructions.", thread_ts=thread_ts)
+            self.reaction_manager.manage_reactions(channel, reaction_ts, add_reaction="white_check_mark", remove_reaction="thinking_face")
+        except Exception as e:
+            logger.error(f"Failed to send DM for GitHub linking: {e}")
+            say(text="Failed to send DM. Please try `/oscar-link-github` instead.", thread_ts=thread_ts)
+            self.reaction_manager.manage_reactions(channel, reaction_ts, add_reaction="x", remove_reaction="thinking_face")
+
     def process_message(self, channel: str, thread_ts: str, user_id: str,
                         text: str, say: Callable, message_ts: str = None,
                         slash_command: str = None, skip_context_storage: bool = False) -> None:
@@ -276,6 +350,10 @@ class MessageProcessor:
                 logger.warning(f"Input validation failed for user {user_id}: {e}")
                 self.reaction_manager.manage_reactions(channel, reaction_ts, add_reaction="x", remove_reaction="thinking_face")
                 say(text=e.user_message, thread_ts=thread_ts)
+                return
+
+            if not self._has_identity_mapping(user_id):
+                self._handle_link_github_via_dm(user_id, channel, thread_ts, reaction_ts, say)
                 return
 
             # Build out-of-band identity attributes from authenticated Slack event
@@ -342,7 +420,6 @@ class MessageProcessor:
                                             user_id=user_id, privileged=privilege)
 
             # Format response for Slack before sending
-            from .message_formatter import MessageFormatter
             formatter = MessageFormatter()
             formatted_response = formatter.format_markdown_to_slack_mrkdwn(response)
             formatted_response = formatter.convert_at_symbols_to_slack_pings(formatted_response)
@@ -393,7 +470,6 @@ class MessageProcessor:
                     error_message = "An unexpected error occurred. Please try again."
 
                 # Format error message for Slack before sending
-                from .message_formatter import MessageFormatter
                 formatter = MessageFormatter()
                 formatted_error = formatter.format_markdown_to_slack_mrkdwn(error_message)
                 formatted_error = formatter.convert_at_symbols_to_slack_pings(formatted_error)

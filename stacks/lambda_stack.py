@@ -15,6 +15,8 @@ import os
 from typing import Any, Dict, List, Optional
 
 from aws_cdk import Duration, Stack
+from aws_cdk import aws_events as events
+from aws_cdk import aws_events_targets as targets
 from aws_cdk import aws_iam as iam
 from aws_cdk import aws_lambda
 from aws_cdk.aws_lambda_python_alpha import PythonFunction
@@ -79,6 +81,10 @@ class OscarLambdaStack(Stack):
         self._create_communication_handler_lambda()
         self._create_github_webhook_handler_lambda()
 
+        # Identity lambda
+        if storage_stack.identity_table:
+            self._create_identity_lambda()
+
         # Agent lambdas
         if agents:
             self._create_agent_lambdas(agents)
@@ -87,6 +93,10 @@ class OscarLambdaStack(Stack):
     def _create_supervisor_agent_lambda(self) -> None:
         execution_role = self.permissions_stack.lambda_execution_roles["base"]
         self.secrets_stack.grant_read_access(execution_role)
+
+        # Grant identity table access if configured
+        if self.storage_stack.identity_table:
+            self.storage_stack.identity_table.grant_read_write_data(execution_role)
 
         function = PythonFunction(
             self, "MainOscarAgentLambda",
@@ -143,6 +153,46 @@ class OscarLambdaStack(Stack):
             source_account=self.account,
         )
         self.lambda_functions[self.get_communication_handler_lambda_function_name(self.env_name)] = function
+
+    # ----------------------------------------------------------- identity
+    def _create_identity_lambda(self) -> None:
+        """Create the OAuth callback Lambda for identity linking."""
+        role = self.permissions_stack.lambda_execution_roles.get("identity")
+        if not role:
+            role = self.permissions_stack.lambda_execution_roles["base"]
+
+        function = PythonFunction(
+            self, "IdentityLambda",
+            function_name=f"oscar-identity-{self.env_name}",
+            runtime=aws_lambda.Runtime.PYTHON_3_12,
+            handler="lambda_handler",
+            entry="lambda/oscar-identity",
+            index="lambda_function.py",
+            timeout=Duration.seconds(300),
+            memory_size=256,
+            layers=[self.shared_layer],
+            environment={
+                "ENVIRONMENT": self.env_name,
+                "CENTRAL_SECRET_NAME": self.secrets_stack.central_env_secret.secret_name,
+                "IDENTITY_TABLE_NAME": self.storage_stack.identity_table.table_name,
+            },
+            role=role,
+            description="Identity linking and weekly membership validation",
+            reserved_concurrent_executions=5,
+        )
+        self.storage_stack.identity_table.grant_read_write_data(role)
+        self.secrets_stack.grant_read_access(role)
+
+        # Weekly EventBridge schedule for membership validation
+        rule = events.Rule(
+            self, "IdentityValidationSchedule",
+            rule_name=f"oscar-identity-validation-{self.env_name}",
+            schedule=events.Schedule.rate(Duration.days(7)),
+            description="Weekly identity membership validation",
+        )
+        rule.add_target(targets.LambdaFunction(function))
+
+        self.lambda_functions["identity"] = function
 
     def _create_github_webhook_handler_lambda(self) -> None:
         execution_role = self.permissions_stack.github_webhook_role
@@ -265,6 +315,10 @@ class OscarLambdaStack(Stack):
             "OSCAR_LIMITED_BEDROCK_AGENT_ALIAS_PARAM_PATH": params["limited_supervisor_agent_alias"],
             "AWS_ACCOUNT_ID": os.environ.get("AWS_ACCOUNT_ID") or os.environ.get("CDK_DEFAULT_ACCOUNT", ""),
         })
+        if self.storage_stack.identity_table:
+            env["ENVIRONMENT"] = self.env_name
+            env["IDENTITY_TABLE_NAME"] = self.storage_stack.identity_table.table_name
+            env["SLACK_WORKSPACE_ID"] = self.storage_stack.workspace_id
         return env
 
     def _get_communication_handler_environment_variables(self) -> Dict[str, str]:

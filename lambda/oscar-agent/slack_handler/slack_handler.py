@@ -102,6 +102,11 @@ class SlackHandler:
         self.app.command("/oscar-integration-test")(self.slash_commands.handle_integration_test_command)
         self.app.command("/oscar-broadcast")(self.slash_commands.handle_broadcast_command)
 
+        # Identity linking commands
+        self.app.command("/oscar-link-github")(self.slash_commands.handle_link_github)
+        self.app.command("/oscar-unlink-github")(self.slash_commands.handle_unlink_github)
+        self.app.command("/oscar-identity-status")(self.slash_commands.handle_identity_status)
+
         logger.info("Registered Slack event handlers and slash commands for OSCAR agent")
         return self.app
 

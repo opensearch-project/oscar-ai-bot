@@ -10,6 +10,7 @@ from unittest.mock import MagicMock
 # Add Lambda source paths for imports
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', 'lambda', 'oscar-agent'))
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', 'lambda', 'oscar-communication-handler'))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', 'lambda', 'shared-layer', 'python'))
 
 
 def _build_mock_config():
