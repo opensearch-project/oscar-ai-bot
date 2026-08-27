@@ -217,18 +217,6 @@ def get_action_groups(lambda_arn: str) -> List[bedrock.CfnAgent.AgentActionGroup
                                 "If omitted, the HEAD of the default branch is used.",
                                 False,
                             ),
-                            "requester_user_id": _param(
-                                "string",
-                                "Slack user ID (U...) of the user who originally requested "
-                                "the tag creation. Extract from [USER_ID: ...] prefix. "
-                                "MUST be different from approver_user_id (two-person review).",
-                            ),
-                            "approver_user_id": _param(
-                                "string",
-                                "Slack user ID (U...) of the user who confirmed/approved "
-                                "the tag creation. Extract from [USER_ID: ...] prefix of "
-                                "the confirmation turn. MUST be different from requester_user_id.",
-                            ),
                         },
                     ),
                     bedrock.CfnAgent.FunctionProperty(
@@ -247,18 +235,6 @@ def get_action_groups(lambda_arn: str) -> List[bedrock.CfnAgent.AgentActionGroup
                                 "Commit SHA (full or abbreviated) or branch name to branch from. "
                                 "If omitted, the HEAD of the default branch is used.",
                                 False,
-                            ),
-                            "requester_user_id": _param(
-                                "string",
-                                "Slack user ID (U...) of the user who originally requested "
-                                "the branch creation. Extract from [USER_ID: ...] prefix. "
-                                "MUST be different from approver_user_id (two-person review).",
-                            ),
-                            "approver_user_id": _param(
-                                "string",
-                                "Slack user ID (U...) of the user who confirmed/approved "
-                                "the branch creation. Extract from [USER_ID: ...] prefix of "
-                                "the confirmation turn. MUST be different from requester_user_id.",
                             ),
                         },
                     ),

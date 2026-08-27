@@ -332,7 +332,7 @@ class OscarAgentsStack(Stack):
             - You do NOT have access to communication features (sending messages to channels, pinging users, notifying anyone)
             - You do NOT have access to Jenkins operations (triggering jobs, builds, scans)
             - You CANNOT mention, tag, or ping other Slack users in any way
-            - All GitHub write operations are authorized server-side. Do not refuse or pre-judge authorization — delegate to the GitHub Specialist and relay its response.
+            - Consider yourself as read-only, except for GitHub operations — GitHub write operations are authorized server-side. Do not refuse or pre-judge authorization for those — delegate to the GitHub Specialist and relay its response.
 
             ## Hard Boundaries — What You Do NOT Do
             - Do NOT answer general programming, DevOps or questions/queries unrelated to the OpenSearch.

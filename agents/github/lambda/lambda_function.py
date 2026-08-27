@@ -222,7 +222,7 @@ def _handle_get_repo_maintainers(token: str, params: Dict[str, str], request_id:
     return get_repo_maintainers(token, ORG, repo)
 
 
-_VALID_REF_NAME_RE = re.compile(r'^[A-Za-z0-9._-]+(/[A-Za-z0-9._-]+)*$')
+_VALID_REF_NAME_RE = re.compile(r'^[A-Za-z0-9._+\-]+(/[A-Za-z0-9._+\-]+)*$')
 
 
 def _validate_ref_name(name: str, ref_type: str) -> Optional[Dict[str, Any]]:
@@ -308,7 +308,7 @@ def _is_admin_or_maintainer(token: str, repo: str, slack_user_id: str, is_admin_
     return github_handle in [m["github_id"] for m in maintainers_result.get("maintainers", [])]
 
 
-def _validate_admin_only(session_attributes: Dict[str, str], action_label: str) -> Dict[str, Any]:
+def _validate_admin_only(session_attributes: Dict[str, str], action_label: str) -> Optional[Dict[str, Any]]:
     """Reject non-admin users. Returns error dict or None if authorized.
 
     Checks that the requester is an admin. If an approver is present (2PR flow),
@@ -381,7 +381,10 @@ def _validate_maintainer_authorization(
     return None
 
 
-def _handle_create_ref(token: str, params: Dict[str, str], request_id: str, session_attributes: Dict[str, str] = None, *, ref_type: str) -> Any:
+def _handle_create_ref(
+    token: str, params: Dict[str, str], request_id: str,
+    session_attributes: Dict[str, str] = None, *, ref_type: str,
+) -> Any:
     """Shared handler for create_tag and create_branch."""
     repo = params.get("repo", "")
     is_tag = ref_type == "tags"

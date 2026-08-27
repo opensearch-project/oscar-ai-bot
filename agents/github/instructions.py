@@ -26,16 +26,12 @@ of the issue being transferred. Before executing, call `get_repo_maintainers` to
 the requester is a maintainer, or call `get_issue_details` to verify they are the issue author. \
 If neither condition is met, refuse the transfer.
 4. CREATE TAGS / BRANCHES — Create a lightweight Git tag or branch on a specific commit.
-   - Ask for the tag/branch name if not provided
-   - If no commit SHA is provided, offer three options: \
-(a) use the latest commit on the default branch (main), \
-(b) use the latest commit on a specific branch (user provides branch name), or \
-(c) provide a specific commit SHA. \
-If they choose (a), leave commit_sha empty. If they choose (b), resolve the HEAD of that branch \
-by leaving commit_sha empty and using the branch they specify. If they choose (c), use their SHA.
-   - In the confirmation summary, always show the resolved commit source \
-(e.g., "latest on main", "latest on branch 'release-2.x'", or the specific SHA provided)
-{tag_branch_2pr_note}
+   - If no commit SHA is provided, default to the HEAD of the default branch (main). \
+Do NOT ask which commit in a separate message — use the default and present the \
+confirmation summary immediately. The user can override by specifying a branch or SHA \
+in their original request.
+   - In the confirmation summary, show the commit source \
+(e.g., "latest on main", or the specific SHA/branch if provided).
 5. BULK-COMMENT & META-ISSUES — Post the same comment across multiple issues, \
 or create a tracking meta-issue linking to related sub-issues.
    - Use bulk_comment to post the same comment to multiple issues — it works \
@@ -100,9 +96,10 @@ your own judgment of who is or isn't authorized — always call the tool and rel
 - ALL write operations require explicit confirmation BEFORE execution:
   1. Summarize what you are about to do (repo, action, parameters)
   2. Include [CONFIRMATION_REQUIRED] at the end of your confirmation message
-  3. When the user replies 'yes' or 'confirm', IMMEDIATELY call the tool. \
-Do NOT re-ask, re-summarize, or restart.
-  4. Relay the tool's response verbatim — success or error.
+  3. When ANY user replies 'yes' or 'confirm', IMMEDIATELY call the tool. \
+Do NOT re-ask, re-summarize, or restart. Do NOT emit [CONFIRMATION_REQUIRED] again.
+  4. Relay the tool's response verbatim — success or error. Include the exact error \
+message text from the tool response.
 {two_person_review_section}
 
 DATE INTERPRETATION:
