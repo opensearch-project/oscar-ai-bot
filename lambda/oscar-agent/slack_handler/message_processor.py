@@ -67,6 +67,10 @@ class MessageProcessor:
         requesters for actions they never initiated.
 
         The current_user_id is the authenticated Slack user from the signed event.
+
+        Also sets admin flags for both requester and approver so downstream
+        lambdas can enforce per-operation authorization without needing direct
+        access to the admin list.
         """
         attrs = {'current_user_id': current_user_id}
 
@@ -75,14 +79,36 @@ class MessageProcessor:
             pending_requester = stored_context.get('pending_approval_requester')
             if pending_requester:
                 attrs['requester_user_id'] = pending_requester
+                attrs['requester_is_admin'] = str(self.is_fully_authorized_user(pending_requester))
                 if current_user_id != pending_requester:
                     attrs['approver_user_id'] = current_user_id
+                    attrs['approver_is_admin'] = str(self.is_fully_authorized_user(current_user_id))
             else:
                 attrs['requester_user_id'] = current_user_id
+                attrs['requester_is_admin'] = str(self.is_fully_authorized_user(current_user_id))
         else:
             attrs['requester_user_id'] = current_user_id
+            attrs['requester_is_admin'] = str(self.is_fully_authorized_user(current_user_id))
 
         return attrs
+
+    @staticmethod
+    def _is_approval_rejection(response: str) -> bool:
+        """Check if the response indicates an approval/authorization rejection.
+
+        The Bedrock agent paraphrases Lambda errors in natural language, so we
+        match on common phrases rather than exact error strings.
+        """
+        lower = response.lower()
+        if 'security error' in lower or 'authorization error' in lower:
+            return True
+        if 'two-person' in lower:
+            return True
+        if 'self-approval' in lower:
+            return True
+        if 'approval' in lower and ('different' in lower or 'second' in lower or 'distinct' in lower):
+            return True
+        return False
 
     def _handle_confirmation_detection(self, response: str, channel: str, thread_ts: str) -> str:
         """Handle confirmation detection and warning reaction management.
@@ -396,9 +422,15 @@ class MessageProcessor:
             # Set when a confirmation prompt is emitted; clear after the next turn
             # (the approval or any non-confirmation response) — UNLESS the response
             # is a self-approval rejection, which means the prompt is still pending.
+            # Only overwrite an existing requester if the current user is authorized
+            # (matches main's behavior where only admins could interact). This prevents
+            # a non-authorized user providing follow-up from becoming the requester.
             if confirmation_required:
-                self.storage.set_pending_approval_requester(thread_key, user_id)
-            elif response and 'SECURITY ERROR' in response:
+                stored_ctx = self.storage.get_context(thread_key)
+                existing_requester = stored_ctx.get('pending_approval_requester') if stored_ctx else None
+                if not existing_requester or self.is_fully_authorized_user(user_id):
+                    self.storage.set_pending_approval_requester(thread_key, user_id)
+            elif response and self._is_approval_rejection(response):
                 pass
             else:
                 self.storage.clear_pending_approval_requester(thread_key)
@@ -415,9 +447,13 @@ class MessageProcessor:
                 response = str(response).strip()
 
             # Update context with new query and response (skip for slash commands to avoid duplication)
+            # Store confirmation-required turns as non-privileged so that a
+            # non-admin approver (e.g. repo maintainer) can see the action
+            # summary they need to approve.
+            store_privileged = privilege if not confirmation_required else False
             if not skip_context_storage:
                 self.storage.update_context(thread_key, query, response, session_id, new_session_id,
-                                            user_id=user_id, privileged=privilege)
+                                            user_id=user_id, privileged=store_privileged)
 
             # Format response for Slack before sending
             formatter = MessageFormatter()

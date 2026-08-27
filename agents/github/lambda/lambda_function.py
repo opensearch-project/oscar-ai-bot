@@ -6,18 +6,20 @@
 import json
 import logging
 import os
+import re
 import traceback
 import uuid
-from typing import Any, Dict
+from functools import partial
+from typing import Any, Dict, Optional
 
 import boto3
 from authorizer import audit_log, validate_org_scope
-from github_api import (add_comment, bulk_comment, get_repo_maintainers,
-                        transfer_issue)
+from github_api import (add_comment, bulk_comment, create_ref,
+                        get_repo_maintainers, transfer_issue)
 from guardrails import (bulk_merge, list_merge_candidates,
                         validate_bulk_comment, validate_comment,
                         validate_single_pr, validate_transfer_issue)
-from http_client import ORG, GitHubAPIError
+from http_client import ORG, GitHubAPIError, get
 from mcp_client import MCPClient
 from oscar_shared.approval_guard import validate_two_person_approval
 from registry import FunctionDef
@@ -220,6 +222,201 @@ def _handle_get_repo_maintainers(token: str, params: Dict[str, str], request_id:
     return get_repo_maintainers(token, ORG, repo)
 
 
+_VALID_REF_NAME_RE = re.compile(r'^[A-Za-z0-9._+\-]+(/[A-Za-z0-9._+\-]+)*$')
+
+
+def _validate_ref_name(name: str, ref_type: str) -> Optional[Dict[str, Any]]:
+    """Validate a Git ref name. Returns error dict or None if valid."""
+    if not name:
+        return {
+            "status": "error",
+            "message": f"VALIDATION ERROR: {ref_type} name must not be empty.",
+        }
+    if '..' in name or name.startswith('.') or name.endswith('.') or name.endswith('.lock'):
+        return {
+            "status": "error",
+            "message": f"VALIDATION ERROR: {ref_type} name '{name}' contains invalid sequences.",
+        }
+    if not _VALID_REF_NAME_RE.match(name):
+        return {
+            "status": "error",
+            "message": (
+                f"VALIDATION ERROR: {ref_type} name '{name}' contains invalid characters. "
+                "Only alphanumeric, '.', '-', '_', and '/' are allowed."
+            ),
+        }
+    return None
+
+
+def _resolve_commit_sha(token: str, repo: str, commit_sha: str) -> str:
+    """Resolve a commit SHA: expand abbreviated SHAs and default to HEAD of default branch."""
+    if not commit_sha:
+        repo_info = get(token, f"/repos/{ORG}/{repo}")
+        default_branch = repo_info.get("default_branch", "main")
+        branch_info = get(token, f"/repos/{ORG}/{repo}/branches/{default_branch}")
+        return branch_info["commit"]["sha"]
+    if len(commit_sha) < 40:
+        commit_info = get(token, f"/repos/{ORG}/{repo}/commits/{commit_sha}")
+        return commit_info["sha"]
+    return commit_sha
+
+
+# ---------------------------------------------------------------------------
+# Role-based authorization (admin or repo maintainer)
+# ---------------------------------------------------------------------------
+
+_identity_table = None
+
+
+def _get_identity_table():
+    """Lazy-init DynamoDB identity table for Slack → GitHub handle lookups."""
+    global _identity_table
+    if _identity_table is None:
+        table_name = os.environ.get("IDENTITY_TABLE_NAME", "")
+        if not table_name:
+            return None
+        _identity_table = boto3.resource("dynamodb").Table(table_name)
+    return _identity_table
+
+
+def _resolve_github_handle(slack_user_id: str) -> str:
+    """Resolve a Slack user ID to their GitHub handle via the identity table."""
+    table = _get_identity_table()
+    if not table or not slack_user_id:
+        return ""
+    resp = table.query(
+        IndexName="slack-user-index",
+        KeyConditionExpression="slack_user_id = :uid",
+        ExpressionAttributeValues={":uid": slack_user_id},
+    )
+    for item in resp.get("Items", []):
+        if item.get("status") == "active":
+            return item.get("github_handle", "")
+    return ""
+
+
+def _is_admin_or_maintainer(token: str, repo: str, slack_user_id: str, is_admin_flag: str) -> bool:
+    """Check if a Slack user is an admin or a maintainer of the given repo."""
+    if is_admin_flag == "True":
+        return True
+    github_handle = _resolve_github_handle(slack_user_id)
+    if not github_handle:
+        return False
+    maintainers_result = json.loads(get_repo_maintainers(token, ORG, repo))
+    if maintainers_result.get("status") != "success":
+        return False
+    return github_handle in [m["github_id"] for m in maintainers_result.get("maintainers", [])]
+
+
+def _validate_admin_only(session_attributes: Dict[str, str], action_label: str) -> Optional[Dict[str, Any]]:
+    """Reject non-admin users. Returns error dict or None if authorized.
+
+    Checks that the requester is an admin. If an approver is present (2PR flow),
+    also checks that they are an admin.
+    """
+    requester_is_admin = session_attributes.get("requester_is_admin", "False")
+    if requester_is_admin != "True":
+        return {
+            "status": "error",
+            "message": (
+                f"AUTHORIZATION ERROR: {action_label} requires admin privileges. "
+                "Only fully authorized users can perform this operation."
+            ),
+        }
+    approver_id = session_attributes.get("approver_user_id")
+    if approver_id:
+        approver_is_admin = session_attributes.get("approver_is_admin", "False")
+        if approver_is_admin != "True":
+            return {
+                "status": "error",
+                "message": (
+                    f"AUTHORIZATION ERROR: {action_label} requires admin privileges for the approver. "
+                    "Only fully authorized users can approve this operation."
+                ),
+            }
+    return None
+
+
+def _validate_maintainer_authorization(
+    token: str, repo: str, session_attributes: Dict[str, str], action_label: str,
+) -> Dict[str, Any]:
+    """Validate requester (and approver if present) are admins or maintainers of the repo."""
+    attrs = session_attributes or {}
+    requester_id = attrs.get("requester_user_id", "")
+    approver_id = attrs.get("approver_user_id", "")
+    requester_admin = attrs.get("requester_is_admin", "False")
+    approver_admin = attrs.get("approver_is_admin", "False")
+
+    if not requester_id:
+        return {
+            "status": "error",
+            "message": (
+                f"AUTHORIZATION ERROR: {action_label} requires a requester "
+                "who is an admin or maintainer of this repository."
+            ),
+        }
+
+    if not _is_admin_or_maintainer(token, repo, requester_id, requester_admin):
+        return {
+            "status": "error",
+            "message": (
+                f"AUTHORIZATION ERROR: Requester is not an admin or maintainer of {repo}. "
+                f"Only admins and repo maintainers can request {action_label}."
+            ),
+        }
+
+    if approver_id and not _is_admin_or_maintainer(token, repo, approver_id, approver_admin):
+        return {
+            "status": "error",
+            "message": (
+                f"AUTHORIZATION ERROR: Approver is not an admin or maintainer of {repo}. "
+                f"Only admins and repo maintainers can approve {action_label}."
+            ),
+        }
+
+    logger.info(
+        "MAINTAINER_AUTH: %s authorized — requester=%s approver=%s repo=%s",
+        action_label, requester_id, approver_id or "N/A", repo,
+    )
+    return None
+
+
+def _handle_create_ref(
+    token: str, params: Dict[str, str], request_id: str,
+    session_attributes: Dict[str, str] = None, *, ref_type: str,
+) -> Any:
+    """Shared handler for create_tag and create_branch."""
+    repo = params.get("repo", "")
+    is_tag = ref_type == "tags"
+    name = params.get("tag_name" if is_tag else "branch_name", "")
+    label = "tag" if is_tag else "branch"
+
+    validation_error = _validate_ref_name(name, label.capitalize())
+    if validation_error:
+        return json.dumps(validation_error)
+
+    enable_2pr = os.environ.get("ENABLE_2PR", "false").lower() == "true"
+    approval_error = validate_two_person_approval(
+        session_attributes or {}, enable_2pr, f'action=create_{label}, repo={repo}, {label}={name}',
+    )
+    if approval_error:
+        return json.dumps(approval_error)
+
+    auth_error = _validate_maintainer_authorization(
+        token, repo, session_attributes or {}, f'create_{label} on {repo}',
+    )
+    if auth_error:
+        return json.dumps(auth_error)
+
+    commit_sha = _resolve_commit_sha(token, repo, params.get("commit_sha", ""))
+
+    logger.info(
+        "GITHUB [%s]: create_%s repo=%s %s=%s commit=%s",
+        request_id, label, repo, label, name, commit_sha,
+    )
+    return create_ref(token, ORG, repo, ref_type, name, commit_sha)
+
+
 # ---------------------------------------------------------------------------
 # Function registry — single source of truth
 # ---------------------------------------------------------------------------
@@ -259,6 +456,7 @@ FUNCTIONS: Dict[str, FunctionDef] = {
         mcp_tool="merge_pull_request",
         write=True,
         needs_owner=True,
+        auth_policy="admin",
         transform=_transform_merge_pr,
     ),
     "create_issue": FunctionDef(
@@ -278,6 +476,7 @@ FUNCTIONS: Dict[str, FunctionDef] = {
     "transfer_issue": FunctionDef(
         write=True,
         token_scope="org",
+        auth_policy="admin",
         handler=_handle_transfer_issue,
     ),
     "add_comment": FunctionDef(
@@ -287,6 +486,7 @@ FUNCTIONS: Dict[str, FunctionDef] = {
     "bulk_comment": FunctionDef(
         write=True,
         token_scope="org",
+        auth_policy="admin",
         handler=_handle_bulk_comment,
     ),
 
@@ -298,12 +498,23 @@ FUNCTIONS: Dict[str, FunctionDef] = {
     "bulk_merge_prs": FunctionDef(
         write=True,
         token_scope="org",
+        auth_policy="admin",
         handler=_handle_bulk_merge_prs,
     ),
 
     # Maintainer lookup (direct API, repo-scoped)
     "get_repo_maintainers": FunctionDef(
         handler=_handle_get_repo_maintainers,
+    ),
+
+    # Tag and branch operations (direct API)
+    "create_tag": FunctionDef(
+        write=True,
+        handler=partial(_handle_create_ref, ref_type="tags"),
+    ),
+    "create_branch": FunctionDef(
+        write=True,
+        handler=partial(_handle_create_ref, ref_type="heads"),
     ),
 }
 
@@ -405,6 +616,13 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             logger.warning("GITHUB [%s]: Org validation failed: %s", request_id, org_error)
             audit_log(function_name, params, org_error, False, request_id, session_attributes)
             return create_response(event, {"error": org_error})
+
+        # --- Authorization: policy-based guard ---
+        if func_def.auth_policy == "admin":
+            admin_error = _validate_admin_only(session_attributes, function_name)
+            if admin_error:
+                audit_log(function_name, params, admin_error["message"], False, request_id, session_attributes)
+                return create_response(event, json.dumps(admin_error))
 
         # --- Audit log write operations (redacting sensitive fields) ---
         if func_def.write:
