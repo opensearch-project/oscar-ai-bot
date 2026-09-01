@@ -7,28 +7,31 @@
 Backs the ``remediate_cve`` action group. For a chosen repo it runs the
 pre-flight — confirm the repo is affected, gate on ecosystem, derive the patched
 version, and check for an existing open PR that already fixes this CVE (from
-Dependabot, Mend, or a human maintainer) so we never open a duplicate. This
-slice performs the pre-flight only: when a fix is needed and no duplicate PR
-exists it returns ``remediation_unavailable`` with the resolved fix. Remediation
-execution (opening the PR) is a separate follow-up.
+Dependabot, Mend, or a human maintainer) so we never open a duplicate — then
+dispatches the actual fix to the ecosystem's remediation worker.
 
 Important repo detail: the existing-PR check reads the **upstream org
 repository** (``opensearch-project/<repo>``), NOT a bot fork — the PRs we must
 not duplicate live upstream, not on a fork. Reading open PRs on a public repo
-needs no credentials; a token (from Secrets Manager, if configured) is used only
-to raise the API rate limit.
+needs no credentials, so this check runs unauthenticated (a token is used only
+if one happens to be present in the environment, purely to raise the rate limit).
+
+The actual remediation (clone -> edit -> regenerate -> push -> open PR) runs on a
+per-ecosystem Fargate worker, dispatched here via ``ecs.run_task`` (see
+``_dispatch_remediation``). If no worker is wired for the ecosystem yet, a
+``remediation_unavailable`` result reports the resolved fix without remediating.
 
 Repository selection is split across two action-group functions, mirroring the
 list_projects -> query_vulnerabilities pattern the rest of this agent uses:
 ``list_affected_repositories`` returns the repos a CVE affects (the agent, with
 full conversational context, resolves the user's phrasing to one), and
-``remediate_cve`` takes that exact repo and runs the pre-flight. This handler
-does NO name matching itself — it only confirms the chosen repo is genuinely in
-the affected set.
+``remediate_cve`` takes that exact repo and runs the pre-flight + remediation.
+This handler does NO name matching itself — it only confirms the chosen repo is
+genuinely in the affected set.
 
 Functions:
     handle_list_affected_repositories: List repos a CVE affects on main.
-    handle_remediate_cve: Pre-flight a CVE on a chosen repo (dedup + report).
+    handle_remediate_cve: Remediate a CVE on a chosen repo (dedup + dispatch).
 """
 
 import json
@@ -91,19 +94,26 @@ SCANS_MAIN_TAG = 'origin/main'
 SCANS_RELEASE_TYPES = ['bundle_opensearch', 'bundle_opensearch_dashboards']
 
 
-def handle_remediate_cve(params: Dict[str, str], request_id: str) -> Dict[str, Any]:
+def handle_remediate_cve(
+    params: Dict[str, str],
+    request_id: str,
+    session_attributes: Optional[Dict[str, str]] = None,
+) -> Dict[str, Any]:
     """Handle a remediate_cve request for one chosen repository.
 
     The caller (agent) has already picked which repository to remediate — via
     ``list_affected_repositories`` — so this takes the exact ``repo_name`` and:
     confirms it is genuinely in the CVE's affected set (a membership guard, not
-    name matching), gates on ecosystem, derives the patched version, and checks
-    for an existing PR. This slice performs the pre-flight only — when a fix is
-    needed and no duplicate PR exists it returns ``remediation_unavailable``;
-    remediation execution (opening the PR) is not wired up yet.
+    name matching), gates on ecosystem, derives the patched version, checks for
+    an existing PR, and dispatches to the per-ecosystem Fargate worker.
 
-    Outcomes: already_patched, pr_exists, no_patched_version, not_affected,
-    unsupported_ecosystem, multiple_packages, remediation_unavailable.
+    Dispatch is ASYNCHRONOUS: the worker's clone + install can exceed Bedrock's
+    ~120s action-group timeout, so we launch the task and return immediately
+    with ``remediation_started``. The worker posts the resulting PR link back to
+    the Slack thread when it finishes (using the thread context carried in
+    ``session_attributes``). All the pre-flight outcomes (already_patched,
+    pr_exists, no_patched_version, not_affected, unsupported_ecosystem,
+    multiple_packages) are fast and still return synchronously.
 
     Args:
         params: Flat parameter dict from the Bedrock event. Recognized keys:
@@ -112,10 +122,14 @@ def handle_remediate_cve(params: Dict[str, str], request_id: str) -> Dict[str, A
                                    by list_affected_repositories (e.g.
                                    "alerting-dashboards-plugin").
         request_id: Short request ID for log correlation.
+        session_attributes: Out-of-band attributes carried from the Slack event
+            via Bedrock (e.g. ``slack_channel``, ``slack_thread_ts``), forwarded
+            to the worker so it can reply in the originating thread.
 
     Returns:
         Structured result dict (wrapped in the Bedrock envelope by the caller).
     """
+    session_attributes = session_attributes or {}
     cve_id = (params.get('cve_id') or '').strip()
     repo_name_in = (params.get('repo_name') or '').strip()
 
@@ -315,13 +329,55 @@ def handle_remediate_cve(params: Dict[str, str], request_id: str) -> Dict[str, A
             ),
         }
 
-    # --- no existing PR --------------------------------------------------
-    # A real CVE with a known fix and no duplicate PR. This slice performs the
-    # pre-flight only; remediation execution (opening the fix PR) is not wired
-    # up yet, so report the resolved fix as remediation_unavailable.
+    # --- no existing PR: hand the fix to the ecosystem's Fargate worker -----
+    # Slack thread context rides along in the payload so the worker can post the
+    # PR link back when it finishes. If no worker is wired for this ecosystem yet,
+    # we fall back to remediation_unavailable below.
+    payload = {
+        'repo_name': repo_name,
+        'cve_id': cve_id,
+        'package': package,
+        'patched_version': patched_version,
+        'installed_version': installed_version,
+        # We remediate main only; the worker pushes to the fork's main.
+        'base_branch': SCANS_MAIN_TAG.split('/')[-1],
+        # Slack thread context so the worker replies in the originating thread
+        # (empty when invoked outside Slack — the worker then just logs).
+        'slack_channel': (session_attributes.get('slack_channel') or '').strip(),
+        'slack_thread_ts': (session_attributes.get('slack_thread_ts') or '').strip(),
+    }
+    try:
+        dispatched = _dispatch_remediation(ecosystem, payload, request_id)
+    except Exception as e:  # run_task launch failure
+        logger.error(f"[{request_id}] REMEDIATE_CVE_DISPATCH_FAILED: {e}")
+        return error_response(
+            'remediation_error', 'Failed to start automated remediation.',
+        )
+
+    if dispatched:
+        logger.info(
+            f"[{request_id}] REMEDIATE_CVE_STARTED: async remediation dispatched "
+            f"for {cve_id} on {repo_owner}/{repo_name} ({ecosystem})"
+        )
+        return {
+            'status': 'remediation_started',
+            'cve_id': cve_id,
+            'repository': f'{repo_owner}/{repo_name}',
+            'ecosystem': ecosystem,
+            'package': package,
+            'patched_version': patched_version,
+            'message': (
+                f"Started remediation for {cve_id} on {repo_owner}/{repo_name} "
+                f"(bumping {package} to {patched_version}). This runs in the "
+                f"background; the pull request link will be posted here shortly."
+            ),
+        }
+
+    # No Fargate worker for this ecosystem yet: a real CVE with a known fix we
+    # just can't auto-remediate here → report the fix as remediation_unavailable.
     logger.info(
         f"[{request_id}] REMEDIATE_CVE: no existing PR for {cve_id} on "
-        f"{repo_owner}/{repo_name}; remediation execution not yet available"
+        f"{repo_owner}/{repo_name}; no {ecosystem} Fargate worker wired"
     )
     return {
         'status': 'remediation_unavailable',
@@ -400,6 +456,102 @@ def handle_list_affected_repositories(
             f"branch of the supported release-bundle components."
         ),
     }
+
+
+# Env var holding the per-ecosystem remediation Fargate task definition ARN. The
+# CDK stack injects the value when it wires the ECS task to this handler.
+_REMEDIATION_TASKDEF_ENV = {
+    'npm': 'NPM_REMEDIATION_TASKDEF',
+    # 'maven': 'MAVEN_REMEDIATION_TASKDEF',  # added with the maven ecosystem
+}
+
+# The container in the task definition to override (see the CDK task def).
+_REMEDIATION_CONTAINER = 'worker'
+
+# Remediation payload key -> container environment variable name. The worker's
+# ECS entrypoint (main.py) reads these env vars back into the same event keys.
+_PAYLOAD_TO_ENV = {
+    'repo_name': 'REPO_NAME',
+    'cve_id': 'CVE_ID',
+    'package': 'PACKAGE',
+    'patched_version': 'PATCHED_VERSION',
+    'installed_version': 'INSTALLED_VERSION',
+    'base_branch': 'BASE_BRANCH',
+    'slack_channel': 'SLACK_CHANNEL',
+    'slack_thread_ts': 'SLACK_THREAD_TS',
+}
+
+
+def _dispatch_remediation(ecosystem: str, payload: Dict[str, Any], request_id: str) -> bool:
+    """Launch the per-ecosystem remediation worker as a Fargate task (async).
+
+    The worker (clone + install + PR) far exceeds Bedrock's ~120s action-group
+    timeout and, for large repos, Lambda's own limits — so it runs as an ECS
+    Fargate task, dispatched fire-and-forget: ``run_task`` returns as soon as the
+    task is accepted and we do NOT wait. The worker posts its outcome (PR link)
+    back to the Slack thread when it finishes (thread context is in the payload,
+    passed as container env overrides). Returns True when the task was accepted,
+    or False when no task definition is configured for this ecosystem (the caller
+    then reports the resolved fix without opening a PR). Raises on a launch
+    failure (the caller surfaces an error).
+    """
+    env_key = _REMEDIATION_TASKDEF_ENV.get(ecosystem)
+    task_definition = os.environ.get(env_key) if env_key else None
+    if not task_definition:
+        return False
+
+    cluster = os.environ.get('REMEDIATION_ECS_CLUSTER')
+    subnets = [s for s in os.environ.get('REMEDIATION_ECS_SUBNETS', '').split(',') if s]
+    security_group = os.environ.get('REMEDIATION_ECS_SECURITY_GROUP')
+    if not (cluster and subnets and security_group):
+        # A task definition is wired but the network config is missing — a
+        # deployment/config error, not an unsupported ecosystem. Fail loudly.
+        raise RuntimeError(
+            'remediation ECS network configuration is incomplete '
+            '(REMEDIATION_ECS_CLUSTER / _SUBNETS / _SECURITY_GROUP)'
+        )
+
+    environment = [
+        {'name': env, 'value': str(payload.get(key, ''))}
+        for key, env in _PAYLOAD_TO_ENV.items()
+    ]
+    logger.info(
+        f"[{request_id}] REMEDIATE_CVE_DISPATCH: running Fargate task "
+        f"{task_definition} on {cluster} payload={payload}"
+    )
+    client = boto3.client('ecs')
+    response = client.run_task(
+        cluster=cluster,
+        taskDefinition=task_definition,
+        launchType='FARGATE',
+        count=1,
+        networkConfiguration={
+            'awsvpcConfiguration': {
+                'subnets': subnets,
+                'securityGroups': [security_group],
+                # Public subnets with a public IP so the task can reach GitHub,
+                # Slack, and package registries without a NAT gateway.
+                'assignPublicIp': 'ENABLED',
+            }
+        },
+        overrides={
+            'containerOverrides': [
+                {'name': _REMEDIATION_CONTAINER, 'environment': environment}
+            ]
+        },
+    )
+    failures = response.get('failures') or []
+    tasks = response.get('tasks') or []
+    if failures or not tasks:
+        raise RuntimeError(
+            f"run_task for {task_definition} failed: {failures or 'no task returned'}"
+        )
+    task_arn = tasks[0].get('taskArn', '')
+    logger.info(
+        f"[{request_id}] REMEDIATE_CVE_DISPATCH_ACCEPTED: {task_definition} "
+        f"task={task_arn.rsplit('/', 1)[-1]}"
+    )
+    return True
 
 
 def _affected_candidates(cve_id: str, request_id: str):
@@ -632,19 +784,19 @@ _GH_TOKEN_CACHE: Optional[str] = None
 def _resolve_github_token() -> str:
     """GitHub token for the read-side API calls (advisory + PR-dedup search).
 
-    From Secrets Manager, named by ``GH_TOKEN_SECRET_NAME`` (no raw-token env var,
-    which would be plaintext in the Lambda config). These calls only read PUBLIC
-    data, so a scopeless token suffices — it's used purely to raise the API rate
-    limit above the unauthenticated per-IP ceiling. Returns '' when none is
-    configured (calls then run unauthenticated). Cached per container.
+    Env ``GH_TOKEN`` (dev PAT) first, else Secrets Manager named by
+    ``GH_TOKEN_SECRET_NAME``. These calls only read PUBLIC data, so a scopeless
+    token suffices — it's used purely to raise the API rate limit above the
+    unauthenticated per-IP ceiling. Returns '' when none is configured (calls
+    then run unauthenticated). Cached per container.
     """
     global _GH_TOKEN_CACHE
     if _GH_TOKEN_CACHE is not None:
         return _GH_TOKEN_CACHE
 
-    token = ''
+    token = os.environ.get('GH_TOKEN') or ''
     secret_name = os.environ.get('GH_TOKEN_SECRET_NAME')
-    if secret_name:
+    if not token and secret_name:
         try:
             value = boto3.client('secretsmanager').get_secret_value(
                 SecretId=secret_name)['SecretString'].strip()
