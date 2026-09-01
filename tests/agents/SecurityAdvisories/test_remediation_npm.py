@@ -13,9 +13,9 @@ against the live fork, not here.
 import importlib.util
 import json
 import os
+from unittest.mock import patch
 
 import pytest
-from unittest.mock import patch
 
 _NPM_PATH = os.path.join(
     os.path.dirname(__file__), '..', '..', '..',
