@@ -17,9 +17,8 @@ _ENV_KEYS = [
     "OPENSEARCH_SERVICE",
     "OPENSEARCH_REQUEST_TIMEOUT",
     "SECURITY_ADVISORIES_CROSS_ACCOUNT_ROLE_ARN",
-    # Secrets Manager secret name for the GitHub token used by the remediation
-    # pre-flight (read-side API calls). The value is fetched at runtime — never
-    # passed as a raw token env var (which would be plaintext in the Lambda config).
+    # GitHub token for the remediation pre-flight (read-side API calls).
+    "GH_TOKEN",
     "GH_TOKEN_SECRET_NAME",
 ]
 
@@ -38,8 +37,8 @@ class SecurityAdvisoriesAgent(OscarAgent):
     def get_lambda_config(self):
         return LambdaConfig(
             entry="agents/SecurityAdvisories/lambda",
-            # The handler runs a fast pre-flight (cluster query + advisory + PR
-            # search) and returns; it never runs long remediation work.
+            # Dispatch is fire-and-forget (ecs.run_task), so this handler only
+            # does fast pre-flight and never waits for the remediation to finish.
             timeout_seconds=180,
             memory_size=1024,
             reserved_concurrency=10,

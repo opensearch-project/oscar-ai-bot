@@ -27,8 +27,10 @@ from typing import Any, Dict, List
 
 from config import config
 from projects_handler import handle_list_projects
-from remediation_handler import (handle_list_affected_repositories,
-                                 handle_remediate_cve)
+from remediation_handler import (
+    handle_list_affected_repositories,
+    handle_remediate_cve,
+)
 from response_builder import create_response
 from tickets_handler import handle_list_ticket_projects, handle_query_tickets
 from vulnerabilities_handler import handle_query_vulnerabilities
@@ -63,6 +65,12 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
 
         params = _parse_parameters(parameters)
 
+        # Out-of-band session attributes carried from the Slack event through
+        # Bedrock (sessionState.sessionAttributes) — e.g. the Slack channel and
+        # thread_ts, so remediation can post the PR link back to the originating
+        # thread when the async worker finishes.
+        session_attributes = event.get('sessionAttributes') or {}
+
         logger.info(
             f"[{request_id}] Function: {function_name}, Params: {params}",
         )
@@ -78,7 +86,7 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         elif function_name == 'list_affected_repositories':
             result = handle_list_affected_repositories(params, request_id)
         elif function_name == 'remediate_cve':
-            result = handle_remediate_cve(params, request_id)
+            result = handle_remediate_cve(params, request_id, session_attributes)
         else:
             result = {
                 'status': 'error',

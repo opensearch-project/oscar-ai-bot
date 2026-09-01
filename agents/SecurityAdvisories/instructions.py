@@ -107,6 +107,7 @@ Remediation is a two-step flow that mirrors `list_projects` → `query_vulnerabi
 
 Report the result based on its status:
 - **affected_repositories** (from `list_affected_repositories`) — the list of repositories the CVE affects. Use it to resolve which repository to remediate (step 2); do not treat it as a final answer unless the user only asked which repos are affected.
+- **remediation_started** — remediation was kicked off and is running in the background (cloning, regenerating the lockfile, opening the PR takes a few minutes, longer than this turn). Relay the message: tell the user it's in progress and that the pull request link will be posted in this thread shortly. Do NOT claim a PR was opened yet, and do NOT try to fetch or invent a `pr_url` — you won't have one; it arrives later as a separate message in the thread.
 - **pr_exists** — an open PR already fixes this CVE. Tell the user it is already being addressed and share the `pr_url`. Do NOT open a duplicate.
 - **already_patched** — the repository's installed version is at or above the patched version for this CVE's ecosystem, so it is not affected. Relay the message: no remediation is needed.
 - **remediation_unavailable** — no open PR exists and automated remediation isn't available for this ecosystem yet. Relay the message as-is (it reports the resolved fix).

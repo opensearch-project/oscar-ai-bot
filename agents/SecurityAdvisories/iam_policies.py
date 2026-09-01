@@ -33,6 +33,30 @@ def get_policies(account_id: str, region: str, env: str) -> List[iam.PolicyState
                 f"arn:aws:logs:{region}:{account_id}:log-group:/aws/lambda/oscar-security-advisories-*"
             ],
         ),
+        # Deterministic string ARNs (not the CDK construct ARNs) so this identity
+        # policy — in the permissions stack — does not create a cyclic dependency
+        # on the lambda stack where the task definition lives.
+        iam.PolicyStatement(
+            sid="SecurityAdvisoriesRemediationRunTask",
+            effect=iam.Effect.ALLOW,
+            actions=["ecs:RunTask"],
+            # Family ARN with :* covers every task-definition revision.
+            resources=[
+                f"arn:aws:ecs:{region}:{account_id}:task-definition/oscar-remediation-npm-{env}:*"
+            ],
+        ),
+        # RunTask hands the task + execution roles to the ECS tasks service; the
+        # caller needs PassRole for them. Scope by the target service rather than
+        # role ARNs (the ECS role names are CDK-generated, not deterministic).
+        iam.PolicyStatement(
+            sid="SecurityAdvisoriesRemediationPassRole",
+            effect=iam.Effect.ALLOW,
+            actions=["iam:PassRole"],
+            resources=["*"],
+            conditions={
+                "StringEquals": {"iam:PassedToService": "ecs-tasks.amazonaws.com"}
+            },
+        ),
     ]
 
     cross_account_role = os.environ.get("SECURITY_ADVISORIES_CROSS_ACCOUNT_ROLE_ARN")
