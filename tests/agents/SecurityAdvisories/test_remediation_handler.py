@@ -24,6 +24,7 @@ Both OpenSearch (scans) and GitHub network calls are mocked — no live HTTP.
 """
 
 import importlib.util
+import json
 import os
 from unittest.mock import MagicMock, patch
 
@@ -945,6 +946,136 @@ class TestSelectCandidate:
         assert mod._select_candidate(self._CANDIDATES, '   ') is None
 
 
+# ---------------------------------------------------------------------------
+# Dispatch to the ecosystem remediation container Lambda
+# ---------------------------------------------------------------------------
+
+
+def _install_fake_ecs(mod, accepted=True):
+    """Replace the module's ``boto3`` with a fake ECS client.
+
+    Dispatch launches a Fargate task fire-and-forget: ``run_task`` returns the
+    accepted task (with a taskArn) and an empty ``failures`` list. Set
+    ``accepted=False`` to simulate a launch failure. Returns the fake client so
+    tests can inspect the run_task call.
+    """
+    client = MagicMock()
+    if accepted:
+        client.run_task.return_value = {
+            'tasks': [{'taskArn': 'arn:aws:ecs:us-east-1:1:task/c/abc123'}],
+            'failures': [],
+        }
+    else:
+        client.run_task.return_value = {
+            'tasks': [], 'failures': [{'reason': 'RESOURCE:MEMORY'}],
+        }
+    fake_boto3 = MagicMock()
+    fake_boto3.client.return_value = client
+    mod.boto3 = fake_boto3
+    return client
+
+
+def _override_env(client):
+    """Extract the container env-override list from a run_task call as a dict."""
+    overrides = client.run_task.call_args.kwargs['overrides']
+    env = overrides['containerOverrides'][0]['environment']
+    return {e['name']: e['value'] for e in env}
+
+
+def _reach_dispatch(mod):
+    """GitHub fakes so a form-data npm CVE reaches dispatch: an advisory with a
+    patched version and no existing PRs."""
+    _install_fake_github(
+        mod, advisories=_advisory('npm', 'form-data', '4.0.6'),
+        cve_pr_items=[], pkg_pr_items=[],
+    )
+
+
+def _npm_form_data_handler():
+    # installed 4.0.4 < patched 4.0.6 -> genuinely affected, so it reaches dispatch.
+    mod, _ = _load_remediation_handler(mock_aws=_make_mock_aws(
+        hits=[_scans_hit(ecosystem='npm', pkg='form-data', version='4.0.4')]))
+    _reach_dispatch(mod)
+    return mod
+
+
+class TestDispatch:
+    # Full ECS wiring the dispatch reads: task definition + network config.
+    _ENV = {
+        'NPM_REMEDIATION_TASKDEF': 'oscar-remediation-npm-dev',
+        'REMEDIATION_ECS_CLUSTER': 'oscar-remediation-dev',
+        'REMEDIATION_ECS_SUBNETS': 'subnet-aaa,subnet-bbb',
+        'REMEDIATION_ECS_SECURITY_GROUP': 'sg-123',
+    }
+    _EVENT = {'cve_id': 'CVE-2026-12143', 'repo_name': 'OpenSearch-Dashboards'}
+    _SLACK = {'slack_channel': 'C0123', 'slack_thread_ts': '1699999999.0001'}
+
+    def _run(self, mod, accepted=True, session_attributes=None, env=None):
+        client = _install_fake_ecs(mod, accepted=accepted)
+        with patch.dict(os.environ, env or self._ENV, clear=False):
+            out = mod.handle_remediate_cve(dict(self._EVENT), 'td', session_attributes)
+        return out, client
+
+    def test_async_dispatch_returns_remediation_started(self):
+        out, client = self._run(_npm_form_data_handler())
+        assert out['status'] == 'remediation_started'
+        assert out['repository'] == 'opensearch-project/OpenSearch-Dashboards'
+        assert out['patched_version'] == '4.0.6'
+        # launched as a Fargate task, fire-and-forget (no waiter)
+        kwargs = client.run_task.call_args.kwargs
+        assert kwargs['launchType'] == 'FARGATE'
+        assert kwargs['taskDefinition'] == 'oscar-remediation-npm-dev'
+        assert kwargs['cluster'] == 'oscar-remediation-dev'
+
+    def test_network_configuration_uses_public_subnets(self):
+        _out, client = self._run(_npm_form_data_handler())
+        netcfg = client.run_task.call_args.kwargs['networkConfiguration']['awsvpcConfiguration']
+        assert netcfg['subnets'] == ['subnet-aaa', 'subnet-bbb']
+        assert netcfg['securityGroups'] == ['sg-123']
+        assert netcfg['assignPublicIp'] == 'ENABLED'
+
+    def test_payload_carries_derived_context_and_slack_thread(self):
+        _out, client = self._run(_npm_form_data_handler(), session_attributes=self._SLACK)
+        env = _override_env(client)
+        assert env['REPO_NAME'] == 'OpenSearch-Dashboards'
+        assert env['PACKAGE'] == 'form-data'
+        assert env['PATCHED_VERSION'] == '4.0.6'
+        assert env['INSTALLED_VERSION'] == '4.0.4'
+        assert env['BASE_BRANCH'] == 'main'
+        # Slack thread context carried through for the worker's reply
+        assert env['SLACK_CHANNEL'] == 'C0123'
+        assert env['SLACK_THREAD_TS'] == '1699999999.0001'
+
+    def test_missing_slack_context_dispatches_with_empty_thread(self):
+        # invoked outside Slack (no session attributes) -> still dispatches, with
+        # empty thread fields (worker will just log instead of posting).
+        _out, client = self._run(_npm_form_data_handler(), session_attributes=None)
+        env = _override_env(client)
+        assert env['SLACK_CHANNEL'] == ''
+        assert env['SLACK_THREAD_TS'] == ''
+
+    def test_dispatch_failure_returns_error(self):
+        # a run_task failure surfaces as a clean error, not a crash.
+        out, _ = self._run(_npm_form_data_handler(), accepted=False)
+        assert out['status'] == 'error'
+        assert out['type'] == 'remediation_error'
+
+    def test_incomplete_network_config_returns_error(self):
+        # task def wired but network config missing -> deployment error, surfaced.
+        env = {'NPM_REMEDIATION_TASKDEF': 'oscar-remediation-npm-dev'}
+        out, _ = self._run(_npm_form_data_handler(), env=env)
+        assert out['status'] == 'error'
+        assert out['type'] == 'remediation_error'
+
+    def test_no_taskdef_configured_falls_back_to_remediation_unavailable(self):
+        mod = _npm_form_data_handler()
+        _install_fake_ecs(mod)  # boto3 present, but taskdef env unset -> not launched
+        for k in self._ENV:
+            os.environ.pop(k, None)
+        out = mod.handle_remediate_cve(dict(self._EVENT), 'td2')
+        assert out['status'] == 'remediation_unavailable'
+
+
 class TestGithubToken:
     """Read-side GitHub token resolution for _github_headers (env -> Secrets
     Manager, cached; used only to raise the API rate limit)."""
@@ -963,13 +1094,11 @@ class TestGithubToken:
         assert 'Authorization' not in headers
         assert headers['Accept'] == 'application/vnd.github+json'
 
-    def test_raw_env_token_is_ignored(self):
-        # A raw GH_TOKEN env var is NOT used (Secrets Manager only) — so with no
-        # secret configured, the calls run unauthenticated even if GH_TOKEN is set.
+    def test_env_token_takes_precedence(self):
         mod, _ = _load_remediation_handler()
         with patch.dict(os.environ, {'GH_TOKEN': 'ghp_env'}, clear=True):
             headers = mod._github_headers()
-        assert 'Authorization' not in headers
+        assert headers['Authorization'] == 'Bearer ghp_env'
 
     def test_secrets_manager_raw_token(self):
         mod, _ = _load_remediation_handler()
