@@ -109,8 +109,12 @@ class MessageFormatter:
             formatted = re.sub(r'^[\*\-]\s+', r'• ', formatted, flags=re.MULTILINE)
 
             # Step 6: Convert #channel mentions to Slack format <#channel>
-            # Only convert if not already in Slack format
-            formatted = re.sub(r'(?<!<)#([a-zA-Z0-9_-]+)(?!>)', r'<#\1>', formatted)
+            # Require a LEADING LETTER so issue/PR references like "#1494" are not
+            # mistaken for channels — a digit-led "#<number>" is never a channel
+            # name, and wrapping it as <#1494> (esp. inside a <url|...> link built
+            # in Step 4) corrupts the surrounding link and breaks its rendering.
+            # Only convert if not already in Slack format.
+            formatted = re.sub(r'(?<!<)#([a-zA-Z][a-zA-Z0-9_-]*)(?!>)', r'<#\1>', formatted)
 
             # Step 7: Clean up any formatting artifacts
             # Remove any double asterisks that might have been created
