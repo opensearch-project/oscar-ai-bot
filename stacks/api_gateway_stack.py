@@ -12,11 +12,14 @@ This module defines the API Gateway with Slack webhook endpoints, security,
 and monitoring for the OSCAR Slack Bot infrastructure.
 """
 
-from typing import Any
+from typing import Any, Optional
 
 from aws_cdk import RemovalPolicy, Stack
 from aws_cdk import aws_apigateway as apigateway
+from aws_cdk import aws_certificatemanager as acm
 from aws_cdk import aws_logs as logs
+from aws_cdk import aws_route53 as route53
+from aws_cdk import aws_route53_targets as route53_targets
 from aws_cdk import aws_wafv2 as wafv2
 from constructs import Construct
 
@@ -38,6 +41,7 @@ class OscarApiGatewayStack(Stack):
         lambda_stack: Any,
         permissions_stack: Any,
         environment: str,
+        custom_domain: Optional[str] = None,
         **kwargs
     ) -> None:
         """
@@ -47,6 +51,11 @@ class OscarApiGatewayStack(Stack):
             construct_id: The ID of the construct
             lambda_stack: The Lambda stack with functions
             permissions_stack: The permissions stack with IAM roles
+            environment: The deployment environment name, only set for prod environment
+            custom_domain: Optional custom domain name (e.g. oscar.opensearch.org).
+                When set, this stack creates a PUBLIC Route 53 hosted zone for the
+                domain, an ACM certificate validated against that zone, an API
+                Gateway custom domain, and an alias A-record pointing at it.
             **kwargs: Additional keyword arguments for Stack
         """
         super().__init__(scope, construct_id, **kwargs)
@@ -54,6 +63,7 @@ class OscarApiGatewayStack(Stack):
         self.lambda_stack = lambda_stack
         self.permissions_stack = permissions_stack
         self.env_name = environment
+        self.custom_domain = custom_domain
         # Get the main Lambda function and API Gateway role
         self.lambda_function = lambda_stack.lambda_functions[lambda_stack.get_supervisor_agent_function_name(self.env_name)]
         self.github_webhook_function = lambda_stack.lambda_functions[lambda_stack.get_github_webhook_handler_function_name(self.env_name)]
@@ -70,6 +80,10 @@ class OscarApiGatewayStack(Stack):
 
         # Configure GitHub webhook endpoint
         self._configure_github_webhook_endpoint()
+
+        # Optionally attach a custom domain with an in-stack ACM certificate
+        if self.custom_domain:
+            self._configure_custom_domain()
 
         # Attach WAF for rate limiting and payload protection
         self.web_acl = self._create_waf()
@@ -177,6 +191,67 @@ class OscarApiGatewayStack(Stack):
             "POST",
             github_integration,
             authorization_type=apigateway.AuthorizationType.NONE,
+        )
+
+    def _configure_custom_domain(self) -> None:
+        """
+        Attach a custom domain to the API using an in-stack ACM certificate,
+        backed by a public Route 53 hosted zone owned by this account.
+
+        This account owns a public hosted zone for the custom domain (a subdomain delegated under the parent org's domain, e.g.
+        ``oscar.opensearch.org`` under ``opensearch.org``). This stack:
+
+        One-time delegation: after the hosted zone is created, its name servers
+        must be given to the owner of the parent domain (opensearch.org), who
+        creates NS records delegating the subdomain to them once. After that, all
+        validation and routing records are managed automatically by this stack.
+
+        """
+        # This method is only invoked when custom_domain is set; assert for the
+        # type checker and as a defensive runtime guard.
+        assert self.custom_domain is not None
+        custom_domain = self.custom_domain
+
+        # 1. Public hosted zone owned by this account for the subdomain.
+        #    Retain on stack deletion
+        hosted_zone = route53.PublicHostedZone(
+            self, "ApiCustomDomainHostedZone",
+            zone_name=custom_domain,
+        )
+        hosted_zone.apply_removal_policy(RemovalPolicy.RETAIN)
+        self.hosted_zone = hosted_zone
+
+        # 2. ACM certificate validated against the zone above (automatic).
+        certificate = acm.Certificate(
+            self, "ApiCustomDomainCert",
+            domain_name=custom_domain,
+            validation=acm.CertificateValidation.from_dns(hosted_zone),
+        )
+
+        # 3. Regional API Gateway custom domain using the validated certificate.
+        domain_name = apigateway.DomainName(
+            self, "ApiCustomDomain",
+            domain_name=custom_domain,
+            certificate=certificate,
+            endpoint_type=apigateway.EndpointType.REGIONAL,
+            security_policy=apigateway.SecurityPolicy.TLS_1_2,
+        )
+
+        # 3a. Base path mapping under the environment name (e.g. "prod") so URLs keep the stage prefix: https://<domain>/prod/slack/events. This
+        #     mirrors the default execute-api URL structure (/<stage>/...).
+        domain_name.add_base_path_mapping(
+            self.api,
+            base_path=self.env_name,
+            stage=self.api.deployment_stage,
+        )
+
+        # 4. Alias A-record at the zone apex routing the domain at the API
+        route53.ARecord(
+            self, "ApiCustomDomainAliasRecord",
+            zone=hosted_zone,
+            target=route53.RecordTarget.from_alias(
+                route53_targets.ApiGatewayDomain(domain_name)
+            ),
         )
 
     def _create_waf(self) -> wafv2.CfnWebACL:

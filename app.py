@@ -137,13 +137,17 @@ def main() -> None:
     lambda_stack.add_dependency(storage_stack)
 
     # 7. API Gateway
+    # Custom domain is driven per-environment via API_CUSTOM_DOMAIN
+    api_custom_domain = os.environ.get("API_CUSTOM_DOMAIN", "").strip() or None
+
     api_gateway_stack = OscarApiGatewayStack(
         app, f"OscarApiGatewayStack-{environment}",
         lambda_stack=lambda_stack,
         permissions_stack=permissions_stack,
         env=env,
         description="OSCAR API Gateway",
-        environment=environment
+        environment=environment,
+        custom_domain=api_custom_domain
     )
     api_gateway_stack.add_dependency(permissions_stack)
     api_gateway_stack.add_dependency(lambda_stack)
