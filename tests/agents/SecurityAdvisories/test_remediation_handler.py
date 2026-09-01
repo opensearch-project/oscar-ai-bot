@@ -24,7 +24,6 @@ Both OpenSearch (scans) and GitHub network calls are mocked — no live HTTP.
 """
 
 import importlib.util
-import json
 import os
 from unittest.mock import MagicMock, patch
 

@@ -27,10 +27,8 @@ from typing import Any, Dict, List
 
 from config import config
 from projects_handler import handle_list_projects
-from remediation_handler import (
-    handle_list_affected_repositories,
-    handle_remediate_cve,
-)
+from remediation_handler import (handle_list_affected_repositories,
+                                 handle_remediate_cve)
 from response_builder import create_response
 from tickets_handler import handle_list_ticket_projects, handle_query_tickets
 from vulnerabilities_handler import handle_query_vulnerabilities
