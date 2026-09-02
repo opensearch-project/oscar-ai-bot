@@ -131,14 +131,34 @@ def _privileged_action_group(
                     parameters={},
                 ),
                 bedrock.CfnAgent.FunctionProperty(
+                    name="list_affected_repositories",
+                    description=(
+                        "List the OpenSearch project repositories that a specific CVE "
+                        "affects on the main branch. Call this FIRST when the user asks "
+                        "to remediate a CVE: use the returned list to resolve which "
+                        "repository the user means before calling remediate_cve. Do NOT "
+                        "guess or hardcode repository names."
+                    ),
+                    parameters={
+                        "cve_id": bedrock.CfnAgent.ParameterDetailProperty(
+                            type="string",
+                            description=(
+                                "The CVE identifier to look up (e.g., 'CVE-2026-1225')."
+                            ),
+                            required=True,
+                        ),
+                    },
+                ),
+                bedrock.CfnAgent.FunctionProperty(
                     name="remediate_cve",
                     description=(
                         "Remediate a specific CVE on a specific OpenSearch project "
                         "repository by opening a pull request that bumps the vulnerable "
-                        "dependency. Before doing any work it checks whether an open PR "
-                        "already fixes this CVE (e.g. from Dependabot, Mend, or a "
-                        "maintainer) and, if so, returns that existing PR instead of "
-                        "opening a duplicate."
+                        "dependency. Call list_affected_repositories first to get the "
+                        "exact repository name. Before doing any work it checks whether "
+                        "an open PR already fixes this CVE (e.g. from Dependabot, Mend, "
+                        "or a maintainer) and, if so, returns that existing PR instead "
+                        "of opening a duplicate."
                     ),
                     parameters={
                         "cve_id": bedrock.CfnAgent.ParameterDetailProperty(
@@ -148,13 +168,13 @@ def _privileged_action_group(
                             ),
                             required=True,
                         ),
-                        "project": bedrock.CfnAgent.ParameterDetailProperty(
+                        "repo_name": bedrock.CfnAgent.ParameterDetailProperty(
                             type="string",
                             description=(
-                                "The affected project or repository (e.g., 'alerting', "
-                                "'OpenSearch'). Used to select the repository when a CVE "
-                                "affects more than one. The actual repository is resolved "
-                                "from the advisory data."
+                                "The exact repository to remediate, as returned by "
+                                "list_affected_repositories (e.g., "
+                                "'alerting-dashboards-plugin'). Must be one of the "
+                                "repositories that CVE affects."
                             ),
                             required=True,
                         ),

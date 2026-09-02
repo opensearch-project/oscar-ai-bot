@@ -85,7 +85,7 @@ def _load_lambda_function(
     if mock_remediation_handler is None:
         mock_remediation_handler = MagicMock()
         mock_remediation_handler.handle_remediate_cve = MagicMock(
-            return_value={'status': 'no_existing_pr', 'cve_id': 'CVE-0000-0000',
+            return_value={'status': 'remediation_unavailable', 'cve_id': 'CVE-0000-0000',
                           'repository': 'opensearch-project/repo'},
         )
     if mock_response_builder is None:
@@ -581,7 +581,7 @@ class TestRoutingToRemediateCve:
     def test_routes_to_remediation_handler(self):
         mock_rem = MagicMock()
         mock_rem.handle_remediate_cve = MagicMock(
-            return_value={'status': 'no_existing_pr'},
+            return_value={'status': 'remediation_unavailable'},
         )
         mod, _, _, _, _ = _load_lambda_function(mock_remediation_handler=mock_rem)
 
@@ -590,7 +590,7 @@ class TestRoutingToRemediateCve:
             'actionGroup': 'securityAdvisoriesActions',
             'parameters': [
                 {'name': 'cve_id', 'value': 'CVE-2023-45857'},
-                {'name': 'project', 'value': 'OpenSearch-Dashboards'},
+                {'name': 'repo_name', 'value': 'OpenSearch-Dashboards'},
             ],
         }
         mod.lambda_handler(event, None)
@@ -600,7 +600,7 @@ class TestRoutingToRemediateCve:
     def test_passes_parsed_params_to_handler(self):
         mock_rem = MagicMock()
         mock_rem.handle_remediate_cve = MagicMock(
-            return_value={'status': 'no_existing_pr'},
+            return_value={'status': 'remediation_unavailable'},
         )
         mod, _, _, _, _ = _load_lambda_function(mock_remediation_handler=mock_rem)
 
@@ -609,14 +609,14 @@ class TestRoutingToRemediateCve:
             'actionGroup': 'securityAdvisoriesActions',
             'parameters': [
                 {'name': 'cve_id', 'value': 'CVE-2023-45857'},
-                {'name': 'project', 'value': 'OpenSearch-Dashboards'},
+                {'name': 'repo_name', 'value': 'OpenSearch-Dashboards'},
             ],
         }
         mod.lambda_handler(event, None)
 
         params = mock_rem.handle_remediate_cve.call_args[0][0]
         assert params['cve_id'] == 'CVE-2023-45857'
-        assert params['project'] == 'OpenSearch-Dashboards'
+        assert params['repo_name'] == 'OpenSearch-Dashboards'
 
     def test_remediate_cve_in_available_functions(self):
         mod, _, _, _, _ = _load_lambda_function()
@@ -632,3 +632,47 @@ class TestRoutingToRemediateCve:
             response['response']['functionResponse']['responseBody']['TEXT']['body'],
         )
         assert 'remediate_cve' in body['available_functions']
+
+
+# ---------------------------------------------------------------------------
+# Routing tests for list_affected_repositories
+# ---------------------------------------------------------------------------
+
+
+class TestRoutingToListAffectedRepositories:
+    """Test routing to the list_affected_repositories handler."""
+
+    def test_routes_to_list_affected_handler(self):
+        mock_rem = MagicMock()
+        mock_rem.handle_list_affected_repositories = MagicMock(
+            return_value={'status': 'affected_repositories', 'repositories': []},
+        )
+        mod, _, _, _, _ = _load_lambda_function(mock_remediation_handler=mock_rem)
+
+        event = {
+            'function': 'list_affected_repositories',
+            'actionGroup': 'securityAdvisoriesActions',
+            'parameters': [
+                {'name': 'cve_id', 'value': 'CVE-2023-45857'},
+            ],
+        }
+        mod.lambda_handler(event, None)
+
+        mock_rem.handle_list_affected_repositories.assert_called_once()
+        params = mock_rem.handle_list_affected_repositories.call_args[0][0]
+        assert params['cve_id'] == 'CVE-2023-45857'
+
+    def test_list_affected_repositories_in_available_functions(self):
+        mod, _, _, _, _ = _load_lambda_function()
+
+        event = {
+            'function': 'nonexistent_function',
+            'actionGroup': 'securityAdvisoriesActions',
+            'parameters': [],
+        }
+        response = mod.lambda_handler(event, None)
+
+        body = json.loads(
+            response['response']['functionResponse']['responseBody']['TEXT']['body'],
+        )
+        assert 'list_affected_repositories' in body['available_functions']

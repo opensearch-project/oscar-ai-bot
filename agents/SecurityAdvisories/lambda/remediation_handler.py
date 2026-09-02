@@ -4,26 +4,31 @@
 
 """Remediation Handler for Security Advisories Lambda Functions.
 
-Backs the ``remediate_cve`` action group. Today this handler performs only the
-**pre-flight existing-PR check** — before any remediation work is attempted, it
-asks GitHub whether the target repository already has an open pull request that
-fixes this CVE (from Dependabot, Mend, or a human maintainer). If one exists,
-remediation is skipped and the existing PR is surfaced; this both avoids
-duplicate PRs and is cheap enough to run before spinning up any heavier work.
+Backs the ``remediate_cve`` action group. For a chosen repo it runs the
+pre-flight — confirm the repo is affected, gate on ecosystem, derive the patched
+version, and check for an existing open PR that already fixes this CVE (from
+Dependabot, Mend, or a human maintainer) so we never open a duplicate. This
+slice performs the pre-flight only: when a fix is needed and no duplicate PR
+exists it returns ``remediation_unavailable`` with the resolved fix. Remediation
+execution (opening the PR) is a separate follow-up.
 
-Important repo detail: the check reads the **upstream org repository**
-(``opensearch-project/<repo>``), NOT a bot fork — the PRs we must not duplicate
-live upstream, not on a fork. Reading open PRs on a public repo needs no
-credentials, so this check runs unauthenticated (a token is used only if one
-happens to be present in the environment, purely to raise the rate limit).
+Important repo detail: the existing-PR check reads the **upstream org
+repository** (``opensearch-project/<repo>``), NOT a bot fork — the PRs we must
+not duplicate live upstream, not on a fork. Reading open PRs on a public repo
+needs no credentials; a token (from Secrets Manager, if configured) is used only
+to raise the API rate limit.
 
-The actual remediation (clone -> edit -> regenerate -> push -> open PR) is done
-by per-ecosystem container-image Lambdas, invoked from here once they exist.
-Until then, a "no existing PR" result returns a placeholder indicating that
-remediation execution is not yet wired.
+Repository selection is split across two action-group functions, mirroring the
+list_projects -> query_vulnerabilities pattern the rest of this agent uses:
+``list_affected_repositories`` returns the repos a CVE affects (the agent, with
+full conversational context, resolves the user's phrasing to one), and
+``remediate_cve`` takes that exact repo and runs the pre-flight. This handler
+does NO name matching itself — it only confirms the chosen repo is genuinely in
+the affected set.
 
 Functions:
-    handle_remediate_cve: Handle remediate_cve requests (existing-PR check).
+    handle_list_affected_repositories: List repos a CVE affects on main.
+    handle_remediate_cve: Pre-flight a CVE on a chosen repo (dedup + report).
 """
 
 import json
@@ -31,6 +36,7 @@ import logging
 import os
 from typing import Any, Dict, List, Optional
 
+import boto3
 import requests
 import semver
 from aws_utils import get_latest_scans_index, opensearch_request
@@ -86,51 +92,106 @@ SCANS_RELEASE_TYPES = ['bundle_opensearch', 'bundle_opensearch_dashboards']
 
 
 def handle_remediate_cve(params: Dict[str, str], request_id: str) -> Dict[str, Any]:
-    """Handle a remediate_cve request.
+    """Handle a remediate_cve request for one chosen repository.
 
-    Currently performs the existing-PR dedup check against the upstream org
-    repository and returns the result. Remediation execution (via the
-    per-ecosystem container Lambdas) is not yet wired — a "no existing PR"
-    result returns a placeholder.
+    The caller (agent) has already picked which repository to remediate — via
+    ``list_affected_repositories`` — so this takes the exact ``repo_name`` and:
+    confirms it is genuinely in the CVE's affected set (a membership guard, not
+    name matching), gates on ecosystem, derives the patched version, and checks
+    for an existing PR. This slice performs the pre-flight only — when a fix is
+    needed and no duplicate PR exists it returns ``remediation_unavailable``;
+    remediation execution (opening the PR) is not wired up yet.
+
+    Outcomes: already_patched, pr_exists, no_patched_version, not_affected,
+    unsupported_ecosystem, multiple_packages, remediation_unavailable.
 
     Args:
         params: Flat parameter dict from the Bedrock event. Recognized keys:
-            cve_id (required)        — the CVE identifier, e.g. "CVE-2026-1225".
-            project (required)       — the affected project/repo, used to pick which
-                                       repository when a CVE affects more than one.
+            cve_id (required)    — the CVE identifier, e.g. "CVE-2026-1225".
+            repo_name (required) — the exact repository to remediate, as returned
+                                   by list_affected_repositories (e.g.
+                                   "alerting-dashboards-plugin").
         request_id: Short request ID for log correlation.
 
     Returns:
         Structured result dict (wrapped in the Bedrock envelope by the caller).
     """
     cve_id = (params.get('cve_id') or '').strip()
-    project = (params.get('project') or '').strip()
+    repo_name_in = (params.get('repo_name') or '').strip()
 
-    if not cve_id or not project:
+    if not cve_id or not repo_name_in:
         logger.warning(
             f"[{request_id}] REMEDIATE_CVE: missing required params "
-            f"(cve_id={cve_id!r}, project={project!r})"
+            f"(cve_id={cve_id!r}, repo_name={repo_name_in!r})"
         )
         return error_response(
             'invalid_request',
-            'Both cve_id and project (repository name) are required.',
+            'Both cve_id and repo_name are required. Call '
+            'list_affected_repositories first to get the exact repository name.',
         )
 
     logger.info(
-        f"[{request_id}] REMEDIATE_CVE: cve_id={cve_id!r} project={project!r}"
+        f"[{request_id}] REMEDIATE_CVE: cve_id={cve_id!r} repo_name={repo_name_in!r}"
     )
 
-    # --- resolve the target repo from the scans cluster (main branch) --------
-    # This both derives the real GitHub owner/repo (no display-name guessing) and
-    # validates that the CVE actually affects a tracked repo on main — if it
-    # doesn't, there is nothing to remediate.
+    # --- resolve the chosen repo from the scans cluster (main branch) --------
+    # Membership guard, NOT intent-matching: re-run the affected-repos query and
+    # confirm the caller's chosen repo is in the set (also derives the GitHub
+    # owner, ecosystem, and repo-specific package).
     try:
-        resolved, resolve_resp = _resolve_repo(cve_id, project, request_id)
+        candidates, not_affected = _affected_candidates(cve_id, request_id)
     except Exception as e:  # OpenSearch query failed
         logger.error(f"[{request_id}] REMEDIATE_CVE_RESOLVE_FAILED: {e}")
         return connection_error(e)
-    if resolve_resp:
-        return resolve_resp
+    if not_affected:
+        return not_affected
+
+    match = _select_candidate(candidates, repo_name_in)
+    if match is None:
+        affected = sorted(f"{c['repo_owner']}/{c['repo_name']}" for c in candidates)
+        logger.info(
+            f"[{request_id}] REMEDIATE_CVE_NOT_IN_SET: {repo_name_in!r} not among "
+            f"affected repos for {cve_id} ({affected})"
+        )
+        return {
+            'status': 'not_affected',
+            'cve_id': cve_id,
+            'requested_repository': repo_name_in,
+            'affected_repositories': affected,
+            'message': (
+                f"{cve_id} does not affect '{repo_name_in}' on the main branch of "
+                f"a supported release-bundle component. It affects: "
+                f"{', '.join(affected)}."
+            ),
+        }
+
+    # One repo, multiple affected packages — surface it rather than silently
+    # remediating only the first.
+    pkgs = match['packages']
+    if len(pkgs) > 1:
+        names = sorted(p['package'] for p in pkgs)
+        return {
+            'status': 'multiple_packages',
+            'cve_id': cve_id,
+            'repository': f"{match['repo_owner']}/{match['repo_name']}",
+            'packages': names,
+            'message': (
+                f"{cve_id} affects multiple packages in "
+                f"{match['repo_owner']}/{match['repo_name']}: {', '.join(names)}. "
+                f"Remediating multiple packages for a single CVE is not yet "
+                f"supported."
+            ),
+        }
+
+    one = pkgs[0] if pkgs else {'ecosystem': '', 'package': '', 'version': ''}
+    resolved = {
+        'repo_owner': match['repo_owner'],
+        'repo_name': match['repo_name'],
+        'project_name': match['project_name'],
+        'ecosystem': one['ecosystem'],
+        'package': one['package'],
+        'installed_version': one.get('version', ''),
+    }
 
     repo_owner = resolved['repo_owner']
     repo_name = resolved['repo_name']
@@ -171,7 +232,7 @@ def handle_remediate_cve(params: Dict[str, str], request_id: str) -> Dict[str, A
     # the version line this repo is on.
     try:
         gh_package, patched_version = _derive_patched_version(
-            cve_id, package, installed_version, request_id,
+            cve_id, ecosystem, package, installed_version, request_id,
         )
     except Exception as e:  # advisory lookup failed (network / API error)
         logger.error(f"[{request_id}] REMEDIATE_CVE_DERIVE_FAILED: {e}")
@@ -198,13 +259,32 @@ def handle_remediate_cve(params: Dict[str, str], request_id: str) -> Dict[str, A
             ),
         }
 
+    # gate 3: cross-check GitHub's patched version against the cluster's installed
+    # version to avoid false positives — skip if installed >= patched. Semver
+    # only; unparseable versions (e.g. maven) proceed, since we can't prove safe.
+    if installed_version and _at_or_above_version(installed_version, patched_version):
+        logger.info(
+            f"[{request_id}] REMEDIATE_CVE_NOT_AFFECTED: {repo_owner}/{repo_name} "
+            f"has {package} {installed_version} >= patched {patched_version} for {cve_id}"
+        )
+        return {
+            'status': 'already_patched',
+            'cve_id': cve_id,
+            'repository': f'{repo_owner}/{repo_name}',
+            'package': package,
+            'installed_version': installed_version,
+            'patched_version': patched_version,
+            'message': (
+                f"{repo_owner}/{repo_name} already has {package} {installed_version}, "
+                f"which is at or above the patched version {patched_version} for "
+                f"{cve_id} in the {ecosystem} ecosystem — it is not affected, so no "
+                f"remediation is needed."
+            ),
+        }
+
     # --- pre-flight: is there already an OPEN PR fixing this CVE? -----------
-    # We check open PRs only. An already-MERGED fix means the target branch is
-    # already updated, which the ecosystem Lambda detects authoritatively at
-    # clone time ("no files changed"), with no branch-ambiguity — so a merged-PR
-    # heuristic here would add false positives (e.g. a PR merged to a release
-    # branch but not main) for no correctness gain. An open PR, by contrast, is
-    # NOT yet merged, so nothing downstream would catch the duplicate.
+    # Look for an open PR already fixing this CVE; if found, surface it and stop
+    # (dedup — don't open a duplicate).
     try:
         existing = _find_existing_pr(
             repo_owner, repo_name, cve_id, gh_package or package, patched_version, request_id,
@@ -235,16 +315,16 @@ def handle_remediate_cve(params: Dict[str, str], request_id: str) -> Dict[str, A
             ),
         }
 
-    # --- no existing PR: hand off to the ecosystem remediation Lambda -------
-    # This is where dispatch(ctx) will invoke the per-ecosystem container Lambda
-    # with the derived details below. Until those Lambdas exist, return a
-    # placeholder that carries the full resolved context.
+    # --- no existing PR --------------------------------------------------
+    # A real CVE with a known fix and no duplicate PR. This slice performs the
+    # pre-flight only; remediation execution (opening the fix PR) is not wired
+    # up yet, so report the resolved fix as remediation_unavailable.
     logger.info(
-        f"[{request_id}] REMEDIATE_CVE: no existing PR found for {cve_id} on "
-        f"{repo_owner}/{repo_name}; ecosystem={ecosystem} remediation not yet wired"
+        f"[{request_id}] REMEDIATE_CVE: no existing PR for {cve_id} on "
+        f"{repo_owner}/{repo_name}; remediation execution not yet available"
     )
     return {
-        'status': 'no_existing_pr',
+        'status': 'remediation_unavailable',
         'cve_id': cve_id,
         'repository': f'{repo_owner}/{repo_name}',
         'ecosystem': ecosystem,
@@ -253,28 +333,93 @@ def handle_remediate_cve(params: Dict[str, str], request_id: str) -> Dict[str, A
         'message': (
             f"No open PR was found for {cve_id} on {repo_owner}/{repo_name}. "
             f"Resolved fix: bump {package} to {patched_version} ({ecosystem}). "
-            f"Remediation execution is not yet implemented."
+            f"Automated remediation for the {ecosystem} ecosystem is not yet enabled."
         ),
     }
 
 
-def _resolve_repo(cve_id: str, project: str, request_id: str):
-    """Resolve the target GitHub repo for a CVE from the scans index (main only).
+def handle_list_affected_repositories(
+    params: Dict[str, str], request_id: str,
+) -> Dict[str, Any]:
+    """Handle a list_affected_repositories request.
 
-    Queries the latest scans index for main-branch (``origin/main``) scans whose
-    vulnerabilities include ``cve_id`` (by ``id`` or ``aliases``) and are not
-    ``excluded``, then parses each project's authoritative ``project.repo`` URL
-    into owner/repo.
+    Returns the repositories a CVE affects on the main branch of the supported
+    release-bundle components. The release_type scoping already limits these to
+    the OpenSearch and OpenSearch-Dashboards bundles, which are structurally
+    maven and npm only — so every repo listed is remediable; remediate_cve's
+    ecosystem gate is the per-repo backstop if a stray ecosystem ever slips
+    through the scan data. Each repo is annotated with its ecosystem for context.
+    The agent uses this list (with full conversational context) to resolve the
+    user's phrasing to one exact repo before calling ``remediate_cve`` —
+    mirroring how ``list_projects`` precedes ``query_vulnerabilities``. This
+    function does NO name matching itself.
 
-    Returns ``(resolved, response)``:
-      - ``resolved`` = ``{'repo_owner', 'repo_name', 'project_name', 'ecosystem',
-        'package'}`` when exactly one repo and one affected package are
-        identified (after reconciling with ``project``), with ``response`` None.
-      - ``response`` = an early-return status dict, with ``resolved`` None, for:
-        ``not_affected`` (CVE on no main-branch repo), ``project_mismatch``
-        (affected repos don't include the one the user named), ``multiple_repos``
-        (ambiguous across repos), or ``multiple_packages`` (one repo, several
-        affected packages).
+    Args:
+        params: Flat parameter dict; recognized key: cve_id (required).
+        request_id: Short request ID for log correlation.
+
+    Returns:
+        Structured result dict (wrapped in the Bedrock envelope by the caller):
+        ``affected_repositories`` (with the repo list) or ``not_affected``.
+    """
+    cve_id = (params.get('cve_id') or '').strip()
+    if not cve_id:
+        logger.warning(f"[{request_id}] LIST_AFFECTED_REPOS: missing cve_id")
+        return error_response('invalid_request', 'cve_id is required.')
+
+    logger.info(f"[{request_id}] LIST_AFFECTED_REPOS: cve_id={cve_id!r}")
+    try:
+        candidates, not_affected = _affected_candidates(cve_id, request_id)
+    except Exception as e:  # OpenSearch query failed
+        logger.error(f"[{request_id}] LIST_AFFECTED_REPOS_FAILED: {e}")
+        return connection_error(e)
+    if not_affected:
+        return not_affected
+
+    repositories = []
+    for c in candidates:
+        ecos = sorted({p['ecosystem'] for p in c['packages'] if p['ecosystem']})
+        repositories.append({
+            'repository': f"{c['repo_owner']}/{c['repo_name']}",
+            'repo_name': c['repo_name'],
+            'project_name': c['project_name'],
+            'ecosystem': '/'.join(ecos),
+        })
+    repositories.sort(key=lambda r: r['repository'])
+
+    logger.info(
+        f"[{request_id}] LIST_AFFECTED_REPOS_RESULT: {cve_id} -> "
+        f"{[r['repository'] for r in repositories]}"
+    )
+    return {
+        'status': 'affected_repositories',
+        'cve_id': cve_id,
+        'repositories': repositories,
+        'message': (
+            f"{cve_id} affects {len(repositories)} repository(ies) on the main "
+            f"branch of the supported release-bundle components."
+        ),
+    }
+
+
+def _affected_candidates(cve_id: str, request_id: str):
+    """Repositories a CVE affects on the main branch, from the scans index.
+
+    Queries the latest scans index for main-branch (``origin/main``) scans in the
+    supported release-bundle components whose vulnerabilities include ``cve_id``
+    (by ``id`` or ``aliases``) and are not ``excluded``, then parses each
+    project's authoritative ``project.repo`` URL into owner/repo.
+
+    Returns ``(candidates, response)``:
+      - ``candidates`` = a list of ``{'repo_owner', 'repo_name', 'project_name',
+        'packages'}`` dicts, one per distinct affected repo, where ``packages``
+        is the distinct ``{'ecosystem', 'package', 'version'}`` set the CVE hits
+        in that repo (usually one). ``response`` is None.
+      - ``response`` = a ``not_affected`` status dict (with ``candidates`` == [])
+        when the CVE affects no supported main-branch repo.
+
+    Does NO name matching — selecting among candidates is the caller's job (the
+    agent, which has full conversational context, mirroring list_projects).
     """
     body = json.dumps({
         'size': 50,
@@ -354,8 +499,24 @@ def _resolve_repo(cve_id: str, project: str, request_id: str):
             'packages': _matched_packages(hit),
         }
 
+    # Log the affected repos + matched package(s) with the installed version —
+    # the inputs that drive ecosystem/package/patched-version selection.
+    logger.info(
+        f"[{request_id}] REMEDIATE_CVE_SCANS: {len(hits)} hit(s); candidates="
+        + str([
+            {
+                'repo': repo,
+                'packages': [
+                    f"{p.get('ecosystem', '')}:{p.get('package', '')}@{p.get('version', '')}"
+                    for p in c['packages']
+                ],
+            }
+            for repo, c in candidates.items()
+        ])
+    )
+
     if not candidates:
-        return None, {
+        return [], {
             'status': 'not_affected',
             'cve_id': cve_id,
             'message': (
@@ -367,80 +528,27 @@ def _resolve_repo(cve_id: str, project: str, request_id: str):
             ),
         }
 
-    matches = list(candidates.values())
+    return list(candidates.values()), None
 
-    # Reconcile against the user-supplied project (a required input). This runs
-    # even when a single repo matched, so we never silently remediate a repo the
-    # user did not name.
-    #
-    # Prefer an EXACT match on the display name or repo slug, falling back to a
-    # substring match only when nothing matches exactly. Without the exact tier,
-    # a precise request like "opensearch" substring-matches every affected
-    # component's display name ("...: OpenSearch Plugin") and gets forced into a
-    # multiple_repos prompt instead of resolving the core repo directly.
-    if project:
-        p = project.strip().lower()
-        exact = [
-            m for m in matches
-            if p == m['project_name'].lower() or p == m['repo_name'].lower()
-        ]
-        narrowed = exact if exact else [
-            m for m in matches
-            if p in m['project_name'].lower() or p in m['repo_name'].lower()
-        ]
-        if not narrowed:
-            affected = sorted(f"{m['repo_owner']}/{m['repo_name']}" for m in matches)
-            return None, {
-                'status': 'project_mismatch',
-                'cve_id': cve_id,
-                'requested_project': project,
-                'affected_repositories': affected,
-                'message': (
-                    f"{cve_id} does not affect '{project}' on the main branch. "
-                    f"It affects: {', '.join(affected)}."
-                ),
-            }
-        matches = narrowed
 
-    if len(matches) == 1:
-        m = matches[0]
-        pkgs = m['packages']
-        if len(pkgs) > 1:
-            # one CVE, multiple affected packages in this repo — surface it
-            # rather than silently remediating only the first.
-            names = sorted(p['package'] for p in pkgs)
-            return None, {
-                'status': 'multiple_packages',
-                'cve_id': cve_id,
-                'repository': f"{m['repo_owner']}/{m['repo_name']}",
-                'packages': names,
-                'message': (
-                    f"{cve_id} affects multiple packages in "
-                    f"{m['repo_owner']}/{m['repo_name']}: {', '.join(names)}. "
-                    f"Remediating multiple packages for a single CVE is not yet "
-                    f"supported."
-                ),
-            }
-        one = pkgs[0] if pkgs else {'ecosystem': '', 'package': '', 'version': ''}
-        return {
-            'repo_owner': m['repo_owner'],
-            'repo_name': m['repo_name'],
-            'project_name': m['project_name'],
-            'ecosystem': one['ecosystem'],
-            'package': one['package'],
-            'installed_version': one.get('version', ''),
-        }, None
+def _select_candidate(
+    candidates: List[Dict[str, Any]], repo_name: str,
+) -> Optional[Dict[str, Any]]:
+    """Return the candidate whose repo matches ``repo_name`` exactly, or None.
 
-    listing = sorted(f"{m['repo_owner']}/{m['repo_name']}" for m in matches)
-    return None, {
-        'status': 'multiple_repos',
-        'cve_id': cve_id,
-        'candidates': listing,
-        'message': (
-            f"{cve_id} affects multiple repositories on main: "
-            f"{', '.join(listing)}. Please specify which one to remediate."
-        ),
-    }
+    An exact membership guard, NOT intent-matching: the agent has already chosen
+    which repository to remediate (from list_affected_repositories), so we only
+    confirm that choice is genuinely in the CVE's affected set. Accepts a bare
+    repo slug ("alerting-dashboards-plugin") or an "owner/repo" form, compared
+    case-insensitively against the authoritative slug parsed from the cluster.
+    """
+    wanted = (repo_name or '').strip().lower().rsplit('/', 1)[-1]
+    if not wanted:
+        return None
+    for c in candidates:
+        if c['repo_name'].lower() == wanted:
+            return c
+    return None
 
 
 def _parse_repo_url(repo_url: str):
@@ -515,31 +623,66 @@ def _vuln_version(vuln: Dict[str, Any]) -> str:
     return (_vuln_package_obj(vuln).get('version') or '').strip()
 
 
-def _github_headers() -> Dict[str, str]:
-    """Headers for GitHub API calls.
+# Resolved GitHub token, cached per container (None = not resolved yet, '' =
+# resolved to none → run unauthenticated). Avoids a Secrets Manager fetch on
+# every API call (each remediate_cve makes up to 3).
+_GH_TOKEN_CACHE: Optional[str] = None
 
-    Uses a token if one is in the environment (raising rate limits); runs
-    unauthenticated otherwise — which is the current mode. A token is added with
-    the remediation-execution / ecosystem work, at which point these calls pick
-    it up automatically with no change here.
+
+def _resolve_github_token() -> str:
+    """GitHub token for the read-side API calls (advisory + PR-dedup search).
+
+    From Secrets Manager, named by ``GH_TOKEN_SECRET_NAME`` (no raw-token env var,
+    which would be plaintext in the Lambda config). These calls only read PUBLIC
+    data, so a scopeless token suffices — it's used purely to raise the API rate
+    limit above the unauthenticated per-IP ceiling. Returns '' when none is
+    configured (calls then run unauthenticated). Cached per container.
     """
+    global _GH_TOKEN_CACHE
+    if _GH_TOKEN_CACHE is not None:
+        return _GH_TOKEN_CACHE
+
+    token = ''
+    secret_name = os.environ.get('GH_TOKEN_SECRET_NAME')
+    if secret_name:
+        try:
+            value = boto3.client('secretsmanager').get_secret_value(
+                SecretId=secret_name)['SecretString'].strip()
+            # The secret may be the raw token or a JSON blob with a "token" field.
+            token = (json.loads(value).get('token', '') if value.startswith('{')
+                     else value).strip()
+        except Exception as e:  # never leak the underlying error
+            logger.error(f"Failed to read GitHub token from Secrets Manager: {e}")
+            token = ''
+
+    _GH_TOKEN_CACHE = token
+    return token
+
+
+def _github_headers() -> Dict[str, str]:
+    """Headers for GitHub API calls; authenticated if a token is configured."""
     headers = {'Accept': 'application/vnd.github+json'}
-    token = os.environ.get('GITHUB_TOKEN') or os.environ.get('GH_TOKEN')
+    token = _resolve_github_token()
     if token:
         headers['Authorization'] = f'Bearer {token}'
     return headers
 
 
 def _derive_patched_version(
-    cve_id: str, package: str, installed_version: str, request_id: str,
+    cve_id: str, ecosystem: str, package: str, installed_version: str, request_id: str,
 ) -> str:
     """Resolve (github_package_name, patched_version) for ``package`` from the
     GitHub Advisory API.
 
-    ``package`` is the repo-specific package resolved from the scans cluster,
-    used to match the advisory's ``vulnerabilities[]`` entry (so a multi-package
-    CVE resolves to the package this repo uses). ``installed_version`` (also from
-    the cluster) disambiguates a multi-RANGE advisory — the same package listed
+    ``ecosystem`` (cluster vocabulary, e.g. ``npm``/``maven``) scopes the advisory
+    entries to OUR ecosystem FIRST: a single CVE can list the same package name
+    under several ecosystems (e.g. langsmith under both pip ``< 0.8.0`` and npm
+    ``< 0.6.0``) with different ranges and patched versions, so matching by name
+    alone can return the wrong ecosystem's fix. ``package`` is the repo-specific
+    package resolved from the scans cluster, used to match the advisory's
+    ``vulnerabilities[]`` entry (so a multi-package CVE resolves to the package
+    this repo uses). ``installed_version`` (also from the cluster) disambiguates a
+    multi-RANGE advisory — the same package listed
     once per affected line, each with its own patched version — to the fix for
     the line this repo is actually on. We return the matched entry's OWN package
     name — GitHub's canonical form (maven ``group:artifact``, npm ``@scope/name``),
@@ -570,7 +713,7 @@ def _derive_patched_version(
         return '', ''
 
     entry = _select_vulnerability(
-        advisories[0].get('vulnerabilities') or [], package, installed_version,
+        advisories[0].get('vulnerabilities') or [], ecosystem, package, installed_version,
     )
     if not entry:
         # advisory exists but has no entry for our package -> no known fix version
@@ -582,18 +725,34 @@ def _derive_patched_version(
     fpv = entry.get('first_patched_version')
     if isinstance(fpv, dict):
         fpv = fpv.get('identifier')
-    return gh_package, (fpv or '').strip()
+    patched_version = (fpv or '').strip()
+    # Log which advisory line we matched: the ecosystem it was scoped to and the
+    # affected range the installed version fell in. This is the signal for
+    # multi-range / multi-ecosystem mis-selection (e.g. langsmith npm vs pip).
+    logger.info(
+        f"[{request_id}] REMEDIATE_CVE_ADVISORY_MATCH: ecosystem={ecosystem!r} "
+        f"gh_package={gh_package!r} "
+        f"range={(entry.get('vulnerable_version_range') or '')!r} "
+        f"patched_version={patched_version!r}"
+    )
+    return gh_package, patched_version
 
 
 def _select_vulnerability(
     vulnerabilities: List[Dict[str, Any]],
+    ecosystem: str,
     package: str,
     installed_version: str = '',
 ) -> Optional[Dict[str, Any]]:
-    """Pick the advisory vulnerability entry for ``package``.
+    """Pick the advisory vulnerability entry for our ``ecosystem`` + ``package``.
 
     Matches the repo-specific package (from the cluster) against the advisory's
     listed packages so a multi-package CVE resolves to the right one:
+      0. FIRST scope the entries to OUR ecosystem. A CVE can list the same
+         package name under several ecosystems with different ranges/patched
+         versions (e.g. langsmith: pip ``< 0.8.0`` vs npm ``< 0.6.0``), so a
+         name-only match can return another ecosystem's fix. If the advisory has
+         no entry for our ecosystem at all -> None (no known fix for us).
       1. exact package-name match, else loose containment (handles maven
          ``group:artifact`` vs bare ``artifact``, npm scopes, etc.),
       2. among the name-matched entries, when ``installed_version`` is known,
@@ -611,6 +770,18 @@ def _select_vulnerability(
     """
     if not vulnerabilities:
         return None
+
+    # 0. scope to our ecosystem (cluster vocab == GitHub vocab for npm/maven).
+    eco = (ecosystem or '').strip().lower()
+    if eco:
+        scoped = [
+            v for v in vulnerabilities
+            if ((v.get('package') or {}).get('ecosystem') or '').strip().lower() == eco
+        ]
+        # If the advisory lists nothing for our ecosystem, we have no fix for it.
+        if not scoped:
+            return None
+        vulnerabilities = scoped
 
     pkg = _normalize_pkg_name(package)
     if pkg:
@@ -673,6 +844,21 @@ def _version_in_range(version: str, version_range: str) -> bool:
             if not v.match(c):
                 return False
         return True
+    except (ValueError, TypeError):
+        return False
+
+
+def _at_or_above_version(installed: str, patched: str) -> bool:
+    """True if ``installed`` >= ``patched`` (both parsed as semver).
+
+    Used to decide the repo is already fixed (not affected). Returns False when
+    either version can't be parsed as semver (e.g. non-semver maven versions) —
+    we then do NOT gate and proceed, since we can't prove the repo is safe. So
+    the affected-check is conservative: it only skips remediation when it can
+    positively confirm the installed version is at/above the patched one.
+    """
+    try:
+        return semver.Version.parse(installed) >= semver.Version.parse(patched)
     except (ValueError, TypeError):
         return False
 
@@ -768,6 +954,7 @@ def _search_open_prs(
     )
     response.raise_for_status()
     items = response.json().get('items', [])
+    logger.info(f"[{request_id}] REMEDIATE_CVE_PR_SEARCH_RESULT: {len(items)} open PR(s)")
     if not items:
         return None
 
