@@ -34,8 +34,12 @@ name = "npm"
 _MANIFEST_SECTIONS = ("dependencies", "devDependencies", "resolutions")
 
 
-def build_context(event, write_owner):
-    """Resolve the L2L event into a context dict for the shared flow."""
+def build_context(event, write_owner, base_owner):
+    """Resolve the L2L event into a context dict for the shared flow.
+
+    ``write_owner`` is the fork the fix branch is pushed to; ``base_owner`` is
+    the repo cloned from and the PR is opened against (see remediation.py).
+    """
     package_name = (event.get("package") or "").strip()
     patched_version = (event.get("patched_version") or "").strip()
     cve_id = (event.get("cve_id") or "").strip()
@@ -52,6 +56,7 @@ def build_context(event, write_owner):
         "cve_id": cve_id,
         "repo_name": repo_name,
         "write_owner": write_owner,
+        "base_owner": base_owner,
         "base_branch": (event.get("base_branch") or "main").strip(),
         "branch_name": new_branch_name(cve_id, package_name),
     }

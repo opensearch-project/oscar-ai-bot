@@ -241,16 +241,21 @@ class OscarLambdaStack(Stack):
         never both required). Kept as a helper so the container and task
         definition can't drift apart.
         """
-        # The fork remediation PRs are pushed to. Required — no default, so a
-        # deploy that omits it fails at synth.
+        # WRITE_OWNER = fork the fix branch is pushed to; BASE_OWNER = repo cloned
+        # from and the PR opened against. Both required — no default, so a deploy
+        # that omits either fails at synth. Dev sets both to the personal fork;
+        # prod sets BASE_OWNER to the upstream org and WRITE_OWNER to the bot fork.
         write_owner = os.environ.get("REMEDIATION_WRITE_OWNER")
-        if not write_owner:
+        base_owner = os.environ.get("REMEDIATION_BASE_OWNER")
+        if not write_owner or not base_owner:
             raise ValueError(
-                "REMEDIATION_WRITE_OWNER must be set (the fork remediation PRs "
-                "are pushed to). Set it in the deploy env / .env."
+                "REMEDIATION_WRITE_OWNER (push-target fork) and "
+                "REMEDIATION_BASE_OWNER (clone/PR-target repo) must both be set. "
+                "Set them in the deploy env / .env."
             )
         env = {
             "REMEDIATION_WRITE_OWNER": write_owner,
+            "REMEDIATION_BASE_OWNER": base_owner,
             # Unbuffered stdout so logs reach CloudWatch: a short Fargate task
             # exits before block-buffered Python output flushes to the awslogs
             # driver, otherwise leaving an empty log stream.
