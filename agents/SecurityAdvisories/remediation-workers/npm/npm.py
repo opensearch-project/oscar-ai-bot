@@ -33,6 +33,11 @@ name = "npm"
 # package.json sections we will edit, in the order we report them.
 _MANIFEST_SECTIONS = ("dependencies", "devDependencies", "resolutions")
 
+# Timeout (seconds) for yarn install/upgrade — the long pole (a large repo like
+# OpenSearch-Dashboards installs in ~2-3 min; this leaves headroom). Bounds a
+# hung yarn since Fargate has no max task duration.
+YARN_TIMEOUT = 600
+
 
 def build_context(event, write_owner, base_owner):
     """Resolve the L2L event into a context dict for the shared flow.
@@ -161,7 +166,12 @@ def regenerate(work_dir, ctx):
         cmd = ["yarn", "install", *common]
 
     logger.info("Running: %s", " ".join(cmd))
-    result = subprocess.run(cmd, cwd=work_dir, capture_output=True, text=True, env=env)
+    try:
+        result = subprocess.run(cmd, cwd=work_dir, capture_output=True, text=True,
+                                env=env, timeout=YARN_TIMEOUT)
+    except subprocess.TimeoutExpired:
+        # Fargate won't stop a hung task on its own, so bound the install/upgrade.
+        raise RemediationError(f"yarn {cmd[1]} timed out after {YARN_TIMEOUT}s")
     if result.returncode != 0:
         logger.error("%s failed: %s", cmd[1], result.stderr[-500:])
         raise RemediationError(f"yarn {cmd[1]} failed: {result.stderr[-300:]}")
