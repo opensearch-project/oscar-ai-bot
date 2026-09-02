@@ -46,13 +46,17 @@ def get_policies(account_id: str, region: str, env: str) -> List[iam.PolicyState
             ],
         ),
         # RunTask hands the task + execution roles to the ECS tasks service; the
-        # caller needs PassRole for them. Scope by the target service rather than
-        # role ARNs (the ECS role names are CDK-generated, not deterministic).
+        # caller needs PassRole for exactly those two roles (named deterministically
+        # in lambda_stack). Scoped to their ARNs — not "*" — so no other role in
+        # the account can be passed. The service condition is defense in depth.
         iam.PolicyStatement(
             sid="SecurityAdvisoriesRemediationPassRole",
             effect=iam.Effect.ALLOW,
             actions=["iam:PassRole"],
-            resources=["*"],
+            resources=[
+                f"arn:aws:iam::{account_id}:role/oscar-remediation-ecs-task-{env}",
+                f"arn:aws:iam::{account_id}:role/oscar-remediation-ecs-exec-{env}",
+            ],
             conditions={
                 "StringEquals": {"iam:PassedToService": "ecs-tasks.amazonaws.com"}
             },
