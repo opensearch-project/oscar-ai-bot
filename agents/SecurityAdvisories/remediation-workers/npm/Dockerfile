@@ -26,7 +26,10 @@ RUN dnf install -y git tar findutils && \
 # calls remediation.handle. We override the Lambda base image's runtime-client
 # ENTRYPOINT to run it directly (the base image is used only for its AL2023 +
 # Python + toolchain, not the Lambda runtime).
-COPY remediation.py npm.py main.py ${LAMBDA_TASK_ROOT}/
+COPY remediation.py npm.py main.py git-askpass.sh ${LAMBDA_TASK_ROOT}/
+# git-askpass.sh feeds the token to git as the HTTPS password (via GIT_ASKPASS)
+# so it never lands in a URL/argv/.git/config; ensure it's executable.
+RUN chmod +x ${LAMBDA_TASK_ROOT}/git-askpass.sh
 
 ENTRYPOINT ["/var/lang/bin/python"]
 CMD ["/var/task/main.py"]

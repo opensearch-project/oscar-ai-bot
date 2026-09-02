@@ -1093,11 +1093,13 @@ class TestGithubToken:
         assert 'Authorization' not in headers
         assert headers['Accept'] == 'application/vnd.github+json'
 
-    def test_env_token_takes_precedence(self):
+    def test_raw_env_token_is_ignored(self):
+        # A raw GH_TOKEN env var is NOT used (Secrets Manager only) — so with no
+        # secret configured, the calls run unauthenticated even if GH_TOKEN is set.
         mod, _ = _load_remediation_handler()
         with patch.dict(os.environ, {'GH_TOKEN': 'ghp_env'}, clear=True):
             headers = mod._github_headers()
-        assert headers['Authorization'] == 'Bearer ghp_env'
+        assert 'Authorization' not in headers
 
     def test_secrets_manager_raw_token(self):
         mod, _ = _load_remediation_handler()

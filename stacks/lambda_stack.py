@@ -256,8 +256,10 @@ class OscarLambdaStack(Stack):
             # driver, otherwise leaving an empty log stream.
             "PYTHONUNBUFFERED": "1",
         }
-        for key in ("GH_TOKEN", "GH_TOKEN_SECRET_NAME",
-                    "SLACK_BOT_TOKEN", "SLACK_BOT_TOKEN_SECRET_NAME"):
+        # Only the Secrets Manager NAMES — never raw token VALUES, which would be
+        # stored in plaintext in the task definition (visible via
+        # ecs:DescribeTaskDefinition). The worker fetches the values at runtime.
+        for key in ("GH_TOKEN_SECRET_NAME", "SLACK_BOT_TOKEN_SECRET_NAME"):
             if os.environ.get(key):
                 env[key] = os.environ[key]
         return env

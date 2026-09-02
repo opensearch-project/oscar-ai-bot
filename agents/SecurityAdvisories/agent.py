@@ -17,8 +17,9 @@ _ENV_KEYS = [
     "OPENSEARCH_SERVICE",
     "OPENSEARCH_REQUEST_TIMEOUT",
     "SECURITY_ADVISORIES_CROSS_ACCOUNT_ROLE_ARN",
-    # GitHub token for the remediation pre-flight (read-side API calls).
-    "GH_TOKEN",
+    # Secrets Manager secret name for the GitHub token used by the remediation
+    # pre-flight (read-side API calls). The value is fetched at runtime — never
+    # passed as a raw token env var (which would be plaintext in the Lambda config).
     "GH_TOKEN_SECRET_NAME",
 ]
 
