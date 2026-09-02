@@ -128,15 +128,12 @@ def _execute(event, strategy):
 # --------------------------------------------------------------------------
 
 def _resolve_token():
-    """GitHub token from the environment, else from Secrets Manager.
+    """GitHub token from Secrets Manager, named by ``GH_TOKEN_SECRET_NAME``.
 
-    Dev uses a ``GH_TOKEN`` env var (a personal PAT). Prod stores the bot
-    credential in Secrets Manager named by ``GH_TOKEN_SECRET_NAME``.
+    Secrets Manager only — no raw-token env var, which would be stored in
+    plaintext in the task definition. The value may be the raw token or a JSON
+    blob with a ``token`` field.
     """
-    token = os.environ.get("GH_TOKEN")
-    if token:
-        return token
-
     secret_name = os.environ.get("GH_TOKEN_SECRET_NAME")
     if not secret_name:
         return ""
@@ -199,16 +196,11 @@ def _format_slack_message(result):
 
 
 def _resolve_slack_token():
-    """Slack bot token from the environment, else from Secrets Manager.
+    """Slack bot token from Secrets Manager, named by ``SLACK_BOT_TOKEN_SECRET_NAME``.
 
-    Mirrors ``_resolve_token`` for GitHub: dev can set ``SLACK_BOT_TOKEN``; prod
-    stores it in Secrets Manager named by ``SLACK_BOT_TOKEN_SECRET_NAME`` (raw
-    token or a JSON blob with a ``token`` field).
+    Secrets Manager only (mirrors ``_resolve_token``) — no raw-token env var. The
+    value may be the raw token or a JSON blob with a ``token`` field.
     """
-    token = os.environ.get("SLACK_BOT_TOKEN")
-    if token:
-        return token
-
     secret_name = os.environ.get("SLACK_BOT_TOKEN_SECRET_NAME")
     if not secret_name:
         return ""
@@ -254,34 +246,58 @@ def _post_slack_message(token, channel, thread_ts, text):
 # Shared git / GitHub steps
 # --------------------------------------------------------------------------
 
+# Askpass helper shipped alongside this module (see Dockerfile). git calls it for
+# the HTTPS password so the token stays out of the URL/argv/.git/config.
+_ASKPASS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "git-askpass.sh")
+
+
+def _git_env(token):
+    """Environment for git network ops: token supplied via GIT_ASKPASS, not the URL.
+
+    The URL carries only the (non-secret) ``x-access-token`` username; git asks
+    GIT_ASKPASS for the password, which reads GH_TOKEN from here. GIT_TERMINAL_PROMPT=0
+    makes git fail fast rather than hang if the credential can't be supplied.
+    """
+    return {
+        **os.environ,
+        "GH_TOKEN": token,
+        "GIT_ASKPASS": _ASKPASS,
+        "GIT_TERMINAL_PROMPT": "0",
+    }
+
+
 def _clone(work_dir, owner, repo_name, token, base_branch="main", sparse_paths=None):
     """Shallow-clone ``owner/repo_name`` at ``base_branch`` into ``work_dir``.
 
-    Authenticates the clone so it works on a private fork and so the later push
-    reuses the same credentials. ``sparse_paths`` (for huge repos like core) does
-    a blobless sparse checkout; npm repos clone normally.
+    Authenticates via GIT_ASKPASS so the same credential mechanism covers both
+    the clone and the later push (the fork is public, so the clone itself needs
+    no auth). ``sparse_paths`` (for huge repos like core) does a blobless sparse
+    checkout; npm repos clone normally.
     """
     # Lambda reuses /tmp across warm invocations — remove any prior checkout.
     shutil.rmtree(work_dir, ignore_errors=True)
-    url = f"https://x-access-token:{token}@github.com/{owner}/{repo_name}.git"
+    url = f"https://x-access-token@github.com/{owner}/{repo_name}.git"
+    env = _git_env(token)
 
     if sparse_paths:
         _run(["git", "clone", "--depth", "1", "--filter=blob:none", "--sparse",
-              "--branch", base_branch, url, work_dir], "git clone (sparse)",
-             redact=token)
+              "--branch", base_branch, url, work_dir], "git clone (sparse)", env=env)
         _run(["git", "-C", work_dir, "sparse-checkout", "set", "--no-cone",
               *sparse_paths], "git sparse-checkout set")
     else:
         logger.info("Cloning %s/%s (%s) ...", owner, repo_name, base_branch)
         _run(["git", "clone", "--depth", "1", "--branch", base_branch, url,
-              work_dir], "git clone", redact=token)
+              work_dir], "git clone", env=env)
 
 
 def _commit_and_open_pr(work_dir, ctx, token):
     """Create a branch, commit the changed files, push to the fork, open a PR."""
     owner, repo_name = ctx["write_owner"], ctx["repo_name"]
     branch_name, base_branch = ctx["branch_name"], ctx["base_branch"]
-    remote = f"https://x-access-token:{token}@github.com/{owner}/{repo_name}.git"
+    # No token in the URL — only the (non-secret) username; git gets the token
+    # from GIT_ASKPASS via _git_env below.
+    remote = f"https://x-access-token@github.com/{owner}/{repo_name}.git"
+    env = _git_env(token)
 
     _run(["git", "-C", work_dir, "config", "user.name", GIT_USER_NAME],
          "git config name")
@@ -296,11 +312,10 @@ def _commit_and_open_pr(work_dir, ctx, token):
     _run(["git", "-C", work_dir, "commit", "-s", "-m", ctx["commit_message"]],
          "git commit")
     _run(["git", "-C", work_dir, "push", remote,
-          f"HEAD:refs/heads/{branch_name}"], "git push", redact=token)
+          f"HEAD:refs/heads/{branch_name}"], "git push", env=env)
 
     # PR is opened WITHIN the fork (base = the fork's base_branch), so we never
-    # open a pull request on the live upstream repo.
-    env = {**os.environ, "GH_TOKEN": token}
+    # open a pull request on the live upstream repo. gh reads GH_TOKEN from env.
     result = subprocess.run(
         ["gh", "pr", "create",
          "--repo", f"{owner}/{repo_name}",
@@ -326,14 +341,16 @@ def _changed_files(work_dir):
     return [line.strip() for line in result.stdout.splitlines() if line.strip()]
 
 
-def _run(cmd, label, redact=None):
-    """Run a subprocess, raising RemediationError on failure (token-safe logs)."""
-    result = subprocess.run(cmd, capture_output=True, text=True)
+def _run(cmd, label, env=None):
+    """Run a subprocess, raising RemediationError on failure.
+
+    ``env`` is passed through for git network ops that need GIT_ASKPASS/GH_TOKEN.
+    The token is never on the command line (it's supplied via GIT_ASKPASS), so
+    there's nothing to redact from the captured stderr.
+    """
+    result = subprocess.run(cmd, capture_output=True, text=True, env=env)
     if result.returncode != 0:
-        err = result.stderr[-300:]
-        if redact:
-            err = err.replace(redact, "***")
-        raise RemediationError(f"{label} failed: {err}")
+        raise RemediationError(f"{label} failed: {result.stderr[-300:]}")
     return result
 
 
