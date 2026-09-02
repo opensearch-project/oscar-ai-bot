@@ -68,8 +68,9 @@ class TestBuildContext:
 
     def test_builds_generic_title_cve_in_body_and_branch(self):
         npm, _ = _load_npm()
-        ctx = npm.build_context(self._event(), 'v-e-e-m-a')
+        ctx = npm.build_context(self._event(), 'v-e-e-m-a', 'opensearch-project')
         assert ctx['write_owner'] == 'v-e-e-m-a'
+        assert ctx['base_owner'] == 'opensearch-project'
         assert ctx['base_branch'] == 'main'
         # generic title, no CVE id
         assert ctx['pr_title'] == 'Bump form-data to 4.0.6'
@@ -82,7 +83,7 @@ class TestBuildContext:
     def test_missing_required_field_raises(self):
         npm, rem = _load_npm()
         with pytest.raises(rem.RemediationError):
-            npm.build_context(self._event(patched_version=''), 'v-e-e-m-a')
+            npm.build_context(self._event(patched_version=''), 'v-e-e-m-a', 'opensearch-project')
 
 
 # ---------------------------------------------------------------------------

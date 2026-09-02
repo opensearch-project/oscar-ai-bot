@@ -1,26 +1,29 @@
 # Copyright OpenSearch Contributors
 # SPDX-License-Identifier: Apache-2.0
 
-"""Ecosystem-agnostic CVE remediation flow (container Lambda).
+"""Ecosystem-agnostic CVE remediation flow (ECS Fargate worker).
 
 Everything that is the SAME for every ecosystem lives here: clone the repo,
-commit the changed files, push to the bot fork, and open a pull request via the
-GitHub CLI. The ecosystem-specific part — which manifest to edit and how to
-regenerate the lockfile — is supplied by a ``strategy`` module (see ``npm.py``).
+commit the changed files, push the fix branch to the bot fork, and open a pull
+request via the GitHub CLI. The ecosystem-specific part — which manifest to edit
+and how to regenerate the lockfile — is supplied by a ``strategy`` module (see
+``npm.py``).
 
-Unlike the SecurityAdvisories agent Lambda, this Lambda is NOT a Bedrock action
-group. It is invoked Lambda-to-Lambda by the SecurityAdvisories remediation
-handler's ``dispatch`` step with a plain event dict, and returns a plain result
-dict (no Bedrock envelope):
+This runs as a Fargate task, launched by the SecurityAdvisories remediation
+handler's dispatch step (ecs.run_task). The payload arrives as environment
+variables (see ``main.py``, the entrypoint); this module works from a plain
+event dict and returns a plain result dict:
 
     event  = {repo_name, cve_id, package, patched_version, installed_version,
-              base_branch?}
+              base_branch?, slack_channel?, slack_thread_ts?}
     result = {status, pr_url?, changed_files?, message, ...}
 
-Write target: fixes are pushed to a FORK (never a branch on the live org repo),
-with the PR opened against that fork. The fork owner is ``REMEDIATION_WRITE_OWNER``
-(dev: a personal fork; prod: the bot fork). The affected upstream repo name is
-passed in ``repo_name``; the fork carries the same name.
+Repo owners (both required): ``REMEDIATION_BASE_OWNER`` is the repo we clone from
+and open the PR against; ``REMEDIATION_WRITE_OWNER`` is the fork we push the fix
+branch to. Dev sets both to a personal fork (clone the fork, PR within it); prod
+sets BASE_OWNER to the upstream org and WRITE_OWNER to the bot fork, so the fix
+never depends on the fork being in sync with upstream. We never push a branch to
+the live upstream repo — only the PR is opened there.
 """
 
 import logging
@@ -44,8 +47,13 @@ GIT_USER_EMAIL = os.environ.get(
 
 WORK_DIR = "/tmp/repo"
 
-# Owner of the fork we push to and open the PR against. Never the live org repo.
+# WRITE_OWNER: the fork we push the fix branch to. BASE_OWNER: the repo we clone
+# from and open the PR against. Dev sets both to the personal fork (clone the
+# fork, PR within it). Prod sets BASE_OWNER to the upstream org (clone the
+# current upstream, PR to upstream) and WRITE_OWNER to the bot's fork — so the
+# fork's staleness never affects the fix.
 WRITE_OWNER = os.environ.get("REMEDIATION_WRITE_OWNER", "")
+BASE_OWNER = os.environ.get("REMEDIATION_BASE_OWNER", "")
 
 
 class RemediationError(Exception):
@@ -79,14 +87,19 @@ def _execute(event, strategy):
     if not WRITE_OWNER:
         return {"status": "error",
                 "message": "REMEDIATION_WRITE_OWNER is not configured."}
+    if not BASE_OWNER:
+        return {"status": "error",
+                "message": "REMEDIATION_BASE_OWNER is not configured."}
 
     try:
-        ctx = strategy.build_context(event, WRITE_OWNER)
+        ctx = strategy.build_context(event, WRITE_OWNER, BASE_OWNER)
     except RemediationError as e:
         return {"status": "error", "message": str(e)}
 
     try:
-        _clone(WORK_DIR, ctx["write_owner"], ctx["repo_name"],
+        # Clone from BASE_OWNER (upstream in prod, the fork in dev) so the fix is
+        # computed against current state, independent of the fork's sync status.
+        _clone(WORK_DIR, ctx["base_owner"], ctx["repo_name"],
                token=token, base_branch=ctx["base_branch"],
                sparse_paths=getattr(strategy, "sparse_paths", None))
 
@@ -116,7 +129,7 @@ def _execute(event, strategy):
         "status": "success",
         "ecosystem": strategy.name,
         "cve_id": ctx["cve_id"],
-        "repository": f"{ctx['write_owner']}/{ctx['repo_name']}",
+        "repository": f"{ctx['base_owner']}/{ctx['repo_name']}",
         "pr_url": pr_url,
         "changed_files": changed,
         "message": strategy.summary(ctx),
@@ -292,11 +305,12 @@ def _clone(work_dir, owner, repo_name, token, base_branch="main", sparse_paths=N
 
 def _commit_and_open_pr(work_dir, ctx, token):
     """Create a branch, commit the changed files, push to the fork, open a PR."""
-    owner, repo_name = ctx["write_owner"], ctx["repo_name"]
+    write_owner, base_owner = ctx["write_owner"], ctx["base_owner"]
+    repo_name = ctx["repo_name"]
     branch_name, base_branch = ctx["branch_name"], ctx["base_branch"]
-    # No token in the URL — only the (non-secret) username; git gets the token
-    # from GIT_ASKPASS via _git_env below.
-    remote = f"https://x-access-token@github.com/{owner}/{repo_name}.git"
+    # Push the fix branch to the WRITE_OWNER fork (token via GIT_ASKPASS, not the
+    # URL — only the non-secret username appears here).
+    remote = f"https://x-access-token@github.com/{write_owner}/{repo_name}.git"
     env = _git_env(token)
 
     _run(["git", "-C", work_dir, "config", "user.name", GIT_USER_NAME],
@@ -314,13 +328,15 @@ def _commit_and_open_pr(work_dir, ctx, token):
     _run(["git", "-C", work_dir, "push", remote,
           f"HEAD:refs/heads/{branch_name}"], "git push", env=env)
 
-    # PR is opened WITHIN the fork (base = the fork's base_branch), so we never
-    # open a pull request on the live upstream repo. gh reads GH_TOKEN from env.
+    # Open the PR on the BASE_OWNER repo. The head is owner-qualified so this
+    # works both cross-fork (prod: WRITE_OWNER fork -> upstream) and same-repo
+    # (dev: base_owner == write_owner, i.e. a PR within the fork). gh reads
+    # GH_TOKEN from env.
     result = subprocess.run(
         ["gh", "pr", "create",
-         "--repo", f"{owner}/{repo_name}",
+         "--repo", f"{base_owner}/{repo_name}",
          "--base", base_branch,
-         "--head", branch_name,
+         "--head", f"{write_owner}:{branch_name}",
          "--title", ctx["pr_title"],
          "--body", ctx["pr_body"]],
         cwd=work_dir, capture_output=True, text=True, env=env,
