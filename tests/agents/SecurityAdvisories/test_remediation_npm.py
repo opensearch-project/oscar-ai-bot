@@ -13,6 +13,7 @@ against the live fork, not here.
 import importlib.util
 import json
 import os
+import subprocess
 from unittest.mock import patch
 
 import pytest
@@ -374,3 +375,15 @@ class TestEcsEntrypoint:
         with patch.object(rem, 'handle', return_value={'status': 'error', 'message': 'boom'}), \
                 patch.dict(os.environ, self._ENV, clear=False):
             assert main.main() == 1
+
+
+class TestRegenerateTimeout:
+    """A hung yarn must fail fast (Fargate has no max task duration)."""
+
+    def test_yarn_timeout_raises_remediation_error(self):
+        npm, rem = _load_npm()
+        with patch.object(npm.subprocess, 'run',
+                          side_effect=subprocess.TimeoutExpired(cmd='yarn', timeout=1)):
+            with pytest.raises(rem.RemediationError) as exc:
+                npm.regenerate('/tmp/does-not-matter', {'method': 'install'})
+        assert 'timed out' in str(exc.value)

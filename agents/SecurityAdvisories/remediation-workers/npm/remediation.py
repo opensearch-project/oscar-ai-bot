@@ -55,6 +55,14 @@ WORK_DIR = "/tmp/repo"
 WRITE_OWNER = os.environ.get("REMEDIATION_WRITE_OWNER", "")
 BASE_OWNER = os.environ.get("REMEDIATION_BASE_OWNER", "")
 
+# Per-subprocess timeouts (seconds). Fargate has no max task duration, so a hung
+# git or gh command would run (and bill) indefinitely — bound each so a stuck
+# command fails fast into a RemediationError. git clone of a large repo is the
+# slow case; gh pr create is a quick API call. (yarn has its own longer timeout
+# in the strategy, since installs are the long pole.)
+GIT_TIMEOUT = 300
+GH_TIMEOUT = 120
+
 
 class RemediationError(Exception):
     """Raised when the remediation cannot be completed."""
@@ -123,6 +131,7 @@ def _execute(event, strategy):
 
         pr_url = _commit_and_open_pr(WORK_DIR, ctx, token)
     except RemediationError as e:
+        logger.error("Remediation failed for %s: %s", ctx.get("cve_id"), e)
         return {"status": "error", "cve_id": ctx.get("cve_id"), "message": str(e)}
 
     return {
@@ -332,15 +341,19 @@ def _commit_and_open_pr(work_dir, ctx, token):
     # works both cross-fork (prod: WRITE_OWNER fork -> upstream) and same-repo
     # (dev: base_owner == write_owner, i.e. a PR within the fork). gh reads
     # GH_TOKEN from env.
-    result = subprocess.run(
-        ["gh", "pr", "create",
-         "--repo", f"{base_owner}/{repo_name}",
-         "--base", base_branch,
-         "--head", f"{write_owner}:{branch_name}",
-         "--title", ctx["pr_title"],
-         "--body", ctx["pr_body"]],
-        cwd=work_dir, capture_output=True, text=True, env=env,
-    )
+    try:
+        result = subprocess.run(
+            ["gh", "pr", "create",
+             "--repo", f"{base_owner}/{repo_name}",
+             "--base", base_branch,
+             "--head", f"{write_owner}:{branch_name}",
+             "--title", ctx["pr_title"],
+             "--body", ctx["pr_body"]],
+            cwd=work_dir, capture_output=True, text=True, env=env,
+            timeout=GH_TIMEOUT,
+        )
+    except subprocess.TimeoutExpired:
+        raise RemediationError(f"gh pr create timed out after {GH_TIMEOUT}s")
     if result.returncode != 0:
         logger.error("gh pr create failed: %s", result.stderr[-500:])
         raise RemediationError(f"gh pr create failed: {result.stderr[-300:]}")
@@ -350,21 +363,24 @@ def _commit_and_open_pr(work_dir, ctx, token):
 def _changed_files(work_dir):
     """Repo-relative paths added/modified/deleted in the working tree."""
     _run(["git", "-C", work_dir, "add", "-A"], "git add -A")
-    result = subprocess.run(
-        ["git", "-C", work_dir, "diff", "--cached", "--name-only"],
-        capture_output=True, text=True, check=True,
-    )
+    result = _run(["git", "-C", work_dir, "diff", "--cached", "--name-only"],
+                  "git diff")
     return [line.strip() for line in result.stdout.splitlines() if line.strip()]
 
 
-def _run(cmd, label, env=None):
-    """Run a subprocess, raising RemediationError on failure.
+def _run(cmd, label, env=None, timeout=GIT_TIMEOUT):
+    """Run a subprocess, raising RemediationError on failure or timeout.
 
     ``env`` is passed through for git network ops that need GIT_ASKPASS/GH_TOKEN.
     The token is never on the command line (it's supplied via GIT_ASKPASS), so
-    there's nothing to redact from the captured stderr.
+    there's nothing to redact from the captured stderr. ``timeout`` bounds a hung
+    command (Fargate won't stop it on its own).
     """
-    result = subprocess.run(cmd, capture_output=True, text=True, env=env)
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, env=env,
+                                timeout=timeout)
+    except subprocess.TimeoutExpired:
+        raise RemediationError(f"{label} timed out after {timeout}s")
     if result.returncode != 0:
         raise RemediationError(f"{label} failed: {result.stderr[-300:]}")
     return result
