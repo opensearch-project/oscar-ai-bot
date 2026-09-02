@@ -784,19 +784,19 @@ _GH_TOKEN_CACHE: Optional[str] = None
 def _resolve_github_token() -> str:
     """GitHub token for the read-side API calls (advisory + PR-dedup search).
 
-    Env ``GH_TOKEN`` (dev PAT) first, else Secrets Manager named by
-    ``GH_TOKEN_SECRET_NAME``. These calls only read PUBLIC data, so a scopeless
-    token suffices — it's used purely to raise the API rate limit above the
-    unauthenticated per-IP ceiling. Returns '' when none is configured (calls
-    then run unauthenticated). Cached per container.
+    From Secrets Manager, named by ``GH_TOKEN_SECRET_NAME`` (no raw-token env var,
+    which would be plaintext in the Lambda config). These calls only read PUBLIC
+    data, so a scopeless token suffices — it's used purely to raise the API rate
+    limit above the unauthenticated per-IP ceiling. Returns '' when none is
+    configured (calls then run unauthenticated). Cached per container.
     """
     global _GH_TOKEN_CACHE
     if _GH_TOKEN_CACHE is not None:
         return _GH_TOKEN_CACHE
 
-    token = os.environ.get('GH_TOKEN') or ''
+    token = ''
     secret_name = os.environ.get('GH_TOKEN_SECRET_NAME')
-    if not token and secret_name:
+    if secret_name:
         try:
             value = boto3.client('secretsmanager').get_secret_value(
                 SecretId=secret_name)['SecretString'].strip()
