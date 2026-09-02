@@ -241,8 +241,16 @@ class OscarLambdaStack(Stack):
         never both required). Kept as a helper so the container and task
         definition can't drift apart.
         """
+        # The fork remediation PRs are pushed to. Required — no default, so a
+        # deploy that omits it fails at synth.
+        write_owner = os.environ.get("REMEDIATION_WRITE_OWNER")
+        if not write_owner:
+            raise ValueError(
+                "REMEDIATION_WRITE_OWNER must be set (the fork remediation PRs "
+                "are pushed to). Set it in the deploy env / .env."
+            )
         env = {
-            "REMEDIATION_WRITE_OWNER": os.environ.get("REMEDIATION_WRITE_OWNER", "v-e-e-m-a"),
+            "REMEDIATION_WRITE_OWNER": write_owner,
             # Unbuffered stdout so logs reach CloudWatch: a short Fargate task
             # exits before block-buffered Python output flushes to the awslogs
             # driver, otherwise leaving an empty log stream.
@@ -280,6 +288,9 @@ class OscarLambdaStack(Stack):
         # already depends on permissions). Co-locating avoids it.
         task_role = iam.Role(
             self, "RemediationEcsTaskRole",
+            # Deterministic name so the SA lambda's iam:PassRole can be scoped to
+            # this exact ARN (see iam_policies.py) instead of "*".
+            role_name=f"oscar-remediation-ecs-task-{self.env_name}",
             assumed_by=iam.ServicePrincipal("ecs-tasks.amazonaws.com"),
             description="Task role for the OSCAR CVE remediation Fargate worker",
         )
@@ -292,6 +303,7 @@ class OscarLambdaStack(Stack):
         ))
         execution_role = iam.Role(
             self, "RemediationEcsExecutionRole",
+            role_name=f"oscar-remediation-ecs-exec-{self.env_name}",
             assumed_by=iam.ServicePrincipal("ecs-tasks.amazonaws.com"),
             managed_policies=[
                 iam.ManagedPolicy.from_aws_managed_policy_name(
@@ -306,8 +318,8 @@ class OscarLambdaStack(Stack):
             cpu=2048,                 # 2 vCPU
             memory_limit_mib=8192,    # 8 GB (OSD install peaked ~4 GB; headroom)
             ephemeral_storage_gib=50,  # clone + node_modules + yarn cache; up to 200 for core
-            # Match the image platform (arm64) — native Apple-Silicon builds,
-            # cheaper Graviton, and consistent with the npm worker Lambda.
+            # Match the image platform (arm64) — native Apple-Silicon builds and
+            # cheaper Graviton.
             runtime_platform=ecs.RuntimePlatform(
                 cpu_architecture=ecs.CpuArchitecture.ARM64,
                 operating_system_family=ecs.OperatingSystemFamily.LINUX,
