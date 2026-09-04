@@ -16,7 +16,9 @@ def get_policies(account_id: str, region: str, env: str) -> List[iam.PolicyState
             effect=iam.Effect.ALLOW,
             actions=["secretsmanager:GetSecretValue"],
             resources=[
-                f"arn:aws:secretsmanager:{region}:{account_id}:secret:oscar-security-advisories-*-{env}*"
+                f"arn:aws:secretsmanager:{region}:{account_id}:secret:oscar-security-advisories-*-{env}*",
+                # GitHub token for the remediation pre-flight (read-side API calls).
+                f"arn:aws:secretsmanager:{region}:{account_id}:secret:oscar-remediation-gh-token-{env}*",
             ],
         ),
         iam.PolicyStatement(

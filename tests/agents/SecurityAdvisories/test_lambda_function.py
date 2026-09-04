@@ -59,6 +59,7 @@ def _load_lambda_function(
     mock_proj_handler=None,
     mock_tickets_handler=None,
     mock_response_builder=None,
+    mock_remediation_handler=None,
 ):
     """Import lambda_function with mocked dependencies."""
     if mock_config is None:
@@ -81,6 +82,12 @@ def _load_lambda_function(
         mock_tickets_handler.handle_list_ticket_projects = MagicMock(
             return_value={'status': 'success', 'projects': []},
         )
+    if mock_remediation_handler is None:
+        mock_remediation_handler = MagicMock()
+        mock_remediation_handler.handle_remediate_cve = MagicMock(
+            return_value={'status': 'remediation_unavailable', 'cve_id': 'CVE-0000-0000',
+                          'repository': 'opensearch-project/repo'},
+        )
     if mock_response_builder is None:
         mock_response_builder = _make_mock_response_builder()
 
@@ -89,6 +96,7 @@ def _load_lambda_function(
         'vulnerabilities_handler': mock_vuln_handler,
         'projects_handler': mock_proj_handler,
         'tickets_handler': mock_tickets_handler,
+        'remediation_handler': mock_remediation_handler,
         'response_builder': mock_response_builder,
     }):
         spec = importlib.util.spec_from_file_location(
@@ -560,3 +568,111 @@ class TestTicketFunctionsInAvailableFunctions:
             response['response']['functionResponse']['responseBody']['TEXT']['body'],
         )
         assert 'list_ticket_projects' in body['available_functions']
+
+
+# ---------------------------------------------------------------------------
+# Routing tests for remediate_cve
+# ---------------------------------------------------------------------------
+
+
+class TestRoutingToRemediateCve:
+    """Test routing to the remediation handler."""
+
+    def test_routes_to_remediation_handler(self):
+        mock_rem = MagicMock()
+        mock_rem.handle_remediate_cve = MagicMock(
+            return_value={'status': 'remediation_unavailable'},
+        )
+        mod, _, _, _, _ = _load_lambda_function(mock_remediation_handler=mock_rem)
+
+        event = {
+            'function': 'remediate_cve',
+            'actionGroup': 'securityAdvisoriesActions',
+            'parameters': [
+                {'name': 'cve_id', 'value': 'CVE-2023-45857'},
+                {'name': 'repo_name', 'value': 'OpenSearch-Dashboards'},
+            ],
+        }
+        mod.lambda_handler(event, None)
+
+        mock_rem.handle_remediate_cve.assert_called_once()
+
+    def test_passes_parsed_params_to_handler(self):
+        mock_rem = MagicMock()
+        mock_rem.handle_remediate_cve = MagicMock(
+            return_value={'status': 'remediation_unavailable'},
+        )
+        mod, _, _, _, _ = _load_lambda_function(mock_remediation_handler=mock_rem)
+
+        event = {
+            'function': 'remediate_cve',
+            'actionGroup': 'securityAdvisoriesActions',
+            'parameters': [
+                {'name': 'cve_id', 'value': 'CVE-2023-45857'},
+                {'name': 'repo_name', 'value': 'OpenSearch-Dashboards'},
+            ],
+        }
+        mod.lambda_handler(event, None)
+
+        params = mock_rem.handle_remediate_cve.call_args[0][0]
+        assert params['cve_id'] == 'CVE-2023-45857'
+        assert params['repo_name'] == 'OpenSearch-Dashboards'
+
+    def test_remediate_cve_in_available_functions(self):
+        mod, _, _, _, _ = _load_lambda_function()
+
+        event = {
+            'function': 'nonexistent_function',
+            'actionGroup': 'securityAdvisoriesActions',
+            'parameters': [],
+        }
+        response = mod.lambda_handler(event, None)
+
+        body = json.loads(
+            response['response']['functionResponse']['responseBody']['TEXT']['body'],
+        )
+        assert 'remediate_cve' in body['available_functions']
+
+
+# ---------------------------------------------------------------------------
+# Routing tests for list_affected_repositories
+# ---------------------------------------------------------------------------
+
+
+class TestRoutingToListAffectedRepositories:
+    """Test routing to the list_affected_repositories handler."""
+
+    def test_routes_to_list_affected_handler(self):
+        mock_rem = MagicMock()
+        mock_rem.handle_list_affected_repositories = MagicMock(
+            return_value={'status': 'affected_repositories', 'repositories': []},
+        )
+        mod, _, _, _, _ = _load_lambda_function(mock_remediation_handler=mock_rem)
+
+        event = {
+            'function': 'list_affected_repositories',
+            'actionGroup': 'securityAdvisoriesActions',
+            'parameters': [
+                {'name': 'cve_id', 'value': 'CVE-2023-45857'},
+            ],
+        }
+        mod.lambda_handler(event, None)
+
+        mock_rem.handle_list_affected_repositories.assert_called_once()
+        params = mock_rem.handle_list_affected_repositories.call_args[0][0]
+        assert params['cve_id'] == 'CVE-2023-45857'
+
+    def test_list_affected_repositories_in_available_functions(self):
+        mod, _, _, _, _ = _load_lambda_function()
+
+        event = {
+            'function': 'nonexistent_function',
+            'actionGroup': 'securityAdvisoriesActions',
+            'parameters': [],
+        }
+        response = mod.lambda_handler(event, None)
+
+        body = json.loads(
+            response['response']['functionResponse']['responseBody']['TEXT']['body'],
+        )
+        assert 'list_affected_repositories' in body['available_functions']
