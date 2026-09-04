@@ -25,6 +25,9 @@ def template():
     """Synthesise the Lambda stack, skipping Docker bundling for speed."""
     os.environ["CDK_DEFAULT_ACCOUNT"] = "123456789012"
     os.environ["CDK_DEFAULT_REGION"] = "us-east-1"
+    # Required by the remediation Fargate worker env (fail-closed in _remediation_worker_env).
+    os.environ["REMEDIATION_WRITE_OWNER"] = "test-owner"
+    os.environ["REMEDIATION_BASE_OWNER"] = "test-owner"
 
     # Skip Docker bundling — CDK will use placeholder code assets
     app = App(context={"aws:cdk:bundling-stacks": []})
@@ -140,6 +143,9 @@ def template_with_identity():
     """Synthesise the Lambda stack with identity tables configured."""
     os.environ["CDK_DEFAULT_ACCOUNT"] = "123456789012"
     os.environ["CDK_DEFAULT_REGION"] = "us-east-1"
+    # Required by the remediation Fargate worker env (fail-closed in _remediation_worker_env).
+    os.environ["REMEDIATION_WRITE_OWNER"] = "test-owner"
+    os.environ["REMEDIATION_BASE_OWNER"] = "test-owner"
 
     app = App(context={"aws:cdk:bundling-stacks": []})
 

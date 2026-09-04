@@ -229,6 +229,9 @@ def stacks():
     """Synthesise the Lambda stack with all agents (no Docker bundling)."""
     os.environ["CDK_DEFAULT_ACCOUNT"] = "123456789012"
     os.environ["CDK_DEFAULT_REGION"] = "us-east-1"
+    # Required by the remediation Fargate worker env (fail-closed in _remediation_worker_env).
+    os.environ["REMEDIATION_WRITE_OWNER"] = "test-owner"
+    os.environ["REMEDIATION_BASE_OWNER"] = "test-owner"
 
     app = App(context={"aws:cdk:bundling-stacks": []})
 
@@ -586,6 +589,9 @@ def agents_template():
     """Synthesise the Bedrock agents stack with its own App."""
     os.environ["CDK_DEFAULT_ACCOUNT"] = "123456789012"
     os.environ["CDK_DEFAULT_REGION"] = "us-east-1"
+    # Required by the remediation Fargate worker env (fail-closed in _remediation_worker_env).
+    os.environ["REMEDIATION_WRITE_OWNER"] = "test-owner"
+    os.environ["REMEDIATION_BASE_OWNER"] = "test-owner"
 
     app = App(context={"aws:cdk:bundling-stacks": []})
 
