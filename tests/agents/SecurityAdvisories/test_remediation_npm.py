@@ -463,3 +463,227 @@ class TestRegenerateTimeout:
             with pytest.raises(rem.RemediationError) as exc:
                 npm.regenerate('/tmp/does-not-matter', {'method': 'install'})
         assert 'timed out' in str(exc.value)
+
+
+def _completed(returncode=0, stdout='', stderr=''):
+    import types
+    return types.SimpleNamespace(returncode=returncode, stdout=stdout, stderr=stderr)
+
+
+def _fake_boto3(secret_value=None, raises=False):
+    """A stand-in boto3 whose secretsmanager client returns/raises on demand."""
+    import types
+
+    class _Client:
+        def get_secret_value(self, SecretId):
+            if raises:
+                raise RuntimeError("secret boom")
+            return {"SecretString": secret_value}
+
+    return types.SimpleNamespace(client=lambda name: _Client())
+
+
+class TestExecuteFlow:
+    """_execute orchestration: guards, no_change, success, error mapping.
+
+    Mocks the git/GitHub side (previously only exercised against the live fork),
+    which is the bulk of remediation.py's uncovered lines."""
+
+    def _event(self):
+        return {'repo_name': 'alerting-dashboards-plugin', 'cve_id': 'CVE-2026-12143',
+                'package': 'form-data', 'patched_version': '4.0.6',
+                'installed_version': '4.0.4'}
+
+    def _patch_owners(self, rem):
+        return patch.multiple(rem, WRITE_OWNER='v-e-e-m-a', BASE_OWNER='v-e-e-m-a')
+
+    def test_success(self):
+        npm, rem = _load_npm()
+        with self._patch_owners(rem), \
+                patch.object(rem, '_resolve_token', return_value='tok'), \
+                patch.object(rem, '_clone'), \
+                patch.object(npm, 'apply_fix'), patch.object(npm, 'regenerate'), \
+                patch.object(rem, '_changed_files', return_value=['package.json']), \
+                patch.object(rem, '_commit_and_open_pr', return_value='https://gh/pr/9'):
+            result = rem._execute(self._event(), npm)
+        assert result['status'] == 'success'
+        assert result['pr_url'] == 'https://gh/pr/9'
+        assert result['repository'] == 'v-e-e-m-a/alerting-dashboards-plugin'
+        assert result['changed_files'] == ['package.json']
+
+    def test_no_change_when_nothing_changed(self):
+        npm, rem = _load_npm()
+        with self._patch_owners(rem), \
+                patch.object(rem, '_resolve_token', return_value='tok'), \
+                patch.object(rem, '_clone'), \
+                patch.object(npm, 'apply_fix'), patch.object(npm, 'regenerate'), \
+                patch.object(rem, '_changed_files', return_value=[]):
+            result = rem._execute(self._event(), npm)
+        assert result['status'] == 'no_change'
+
+    def test_no_token_returns_error(self):
+        npm, rem = _load_npm()
+        with patch.object(rem, '_resolve_token', return_value=''):
+            result = rem._execute(self._event(), npm)
+        assert result['status'] == 'error' and 'credential' in result['message'].lower()
+
+    def test_missing_write_owner_returns_error(self):
+        npm, rem = _load_npm()
+        with patch.multiple(rem, WRITE_OWNER='', BASE_OWNER='v-e-e-m-a'), \
+                patch.object(rem, '_resolve_token', return_value='tok'):
+            result = rem._execute(self._event(), npm)
+        assert result['status'] == 'error' and 'WRITE_OWNER' in result['message']
+
+    def test_missing_base_owner_returns_error(self):
+        npm, rem = _load_npm()
+        with patch.multiple(rem, WRITE_OWNER='v-e-e-m-a', BASE_OWNER=''), \
+                patch.object(rem, '_resolve_token', return_value='tok'):
+            result = rem._execute(self._event(), npm)
+        assert result['status'] == 'error' and 'BASE_OWNER' in result['message']
+
+    def test_build_context_error_returns_error(self):
+        npm, rem = _load_npm()
+        with self._patch_owners(rem), \
+                patch.object(rem, '_resolve_token', return_value='tok'), \
+                patch.object(npm, 'build_context',
+                             side_effect=rem.RemediationError('bad ctx')):
+            result = rem._execute(self._event(), npm)
+        assert result['status'] == 'error' and 'bad ctx' in result['message']
+
+    def test_commit_failure_maps_to_error(self):
+        npm, rem = _load_npm()
+        with self._patch_owners(rem), \
+                patch.object(rem, '_resolve_token', return_value='tok'), \
+                patch.object(rem, '_clone'), \
+                patch.object(npm, 'apply_fix'), patch.object(npm, 'regenerate'), \
+                patch.object(rem, '_changed_files', return_value=['package.json']), \
+                patch.object(rem, '_commit_and_open_pr',
+                             side_effect=rem.RemediationError('push blew up')):
+            result = rem._execute(self._event(), npm)
+        assert result['status'] == 'error' and 'push blew up' in result['message']
+
+
+class TestTokenResolvers:
+    """GitHub + Slack token resolution from Secrets Manager (SM-only)."""
+
+    def test_gh_token_none_when_no_secret_name(self):
+        _, rem = _load_npm()
+        with patch.dict(os.environ, {}, clear=True):
+            assert rem._resolve_token() == ''
+
+    def test_gh_token_raw(self):
+        _, rem = _load_npm()
+        with patch.dict(os.environ, {'GH_TOKEN_SECRET_NAME': 's'}, clear=False), \
+                patch.dict('sys.modules', {'boto3': _fake_boto3('ghp_raw')}):
+            assert rem._resolve_token() == 'ghp_raw'
+
+    def test_gh_token_json(self):
+        _, rem = _load_npm()
+        with patch.dict(os.environ, {'GH_TOKEN_SECRET_NAME': 's'}, clear=False), \
+                patch.dict('sys.modules', {'boto3': _fake_boto3('{"token": "ghp_json"}')}):
+            assert rem._resolve_token() == 'ghp_json'
+
+    def test_gh_token_sm_failure_returns_empty(self):
+        _, rem = _load_npm()
+        with patch.dict(os.environ, {'GH_TOKEN_SECRET_NAME': 's'}, clear=False), \
+                patch.dict('sys.modules', {'boto3': _fake_boto3(raises=True)}):
+            assert rem._resolve_token() == ''
+
+    def test_slack_token_none_and_raw_and_json(self):
+        _, rem = _load_npm()
+        with patch.dict(os.environ, {}, clear=True):
+            assert rem._resolve_slack_token() == ''
+        with patch.dict(os.environ, {'SLACK_BOT_TOKEN_SECRET_NAME': 's'}, clear=False), \
+                patch.dict('sys.modules', {'boto3': _fake_boto3('xoxb-raw')}):
+            assert rem._resolve_slack_token() == 'xoxb-raw'
+        with patch.dict(os.environ, {'SLACK_BOT_TOKEN_SECRET_NAME': 's'}, clear=False), \
+                patch.dict('sys.modules', {'boto3': _fake_boto3('{"token": "xoxb-json"}')}):
+            assert rem._resolve_slack_token() == 'xoxb-json'
+
+    def test_slack_token_sm_failure_returns_empty(self):
+        _, rem = _load_npm()
+        with patch.dict(os.environ, {'SLACK_BOT_TOKEN_SECRET_NAME': 's'}, clear=False), \
+                patch.dict('sys.modules', {'boto3': _fake_boto3(raises=True)}):
+            assert rem._resolve_slack_token() == ''
+
+
+class TestPostSlackMessage:
+    """The real chat.postMessage POST (TestSlackNotification mocks this helper)."""
+
+    def _fake_urlopen(self, payload):
+        import json as _json
+
+        class _Resp:
+            def __enter__(self_): return self_
+            def __exit__(self_, *a): return False
+            def read(self_): return _json.dumps(payload).encode()
+        return lambda req, timeout=None: _Resp()
+
+    def test_ok_response_does_not_raise(self):
+        _, rem = _load_npm()
+        with patch('urllib.request.urlopen', self._fake_urlopen({'ok': True})):
+            rem._post_slack_message('xoxb', 'C1', '1.2', 'hi')  # no raise
+
+    def test_not_ok_raises(self):
+        _, rem = _load_npm()
+        with patch('urllib.request.urlopen', self._fake_urlopen({'ok': False, 'error': 'bad'})):
+            with pytest.raises(RuntimeError):
+                rem._post_slack_message('xoxb', 'C1', '1.2', 'hi')
+
+
+class TestCloneAndCommit:
+    """git clone / commit / gh pr create, with subprocess mocked."""
+
+    def _ctx(self):
+        return {'write_owner': 'v-e-e-m-a', 'base_owner': 'v-e-e-m-a',
+                'repo_name': 'r', 'branch_name': 'oscar/cve-x-p', 'base_branch': 'main',
+                'pr_title': 'Bump p to 2', 'pr_body': 'CVE-x', 'commit_message': 'Bump p to 2'}
+
+    def test_clone_nonsparse_runs_git_clone(self):
+        _, rem = _load_npm()
+        calls = []
+        with patch.object(rem, '_run', side_effect=lambda cmd, *a, **k: calls.append(cmd)), \
+                patch.object(rem.shutil, 'rmtree'):
+            rem._clone('/w', 'owner', 'repo', 'tok', base_branch='main')
+        assert any(c[:2] == ['git', 'clone'] and '--branch' in c and 'main' in c
+                   for c in calls)
+        assert not any('--sparse' in c for c in calls)
+
+    def test_clone_sparse_sets_sparse_checkout(self):
+        _, rem = _load_npm()
+        calls = []
+        with patch.object(rem, '_run', side_effect=lambda cmd, *a, **k: calls.append(cmd)), \
+                patch.object(rem.shutil, 'rmtree'):
+            rem._clone('/w', 'owner', 'repo', 'tok', sparse_paths=['/gradle/'])
+        assert any('--sparse' in c for c in calls)
+        assert any('sparse-checkout' in c for c in calls)
+
+    def test_commit_and_open_pr_success_returns_pr_url(self):
+        _, rem = _load_npm()
+        with patch.object(rem, '_run'), patch.object(rem, '_push_branch'), \
+                patch.object(rem.subprocess, 'run',
+                             return_value=_completed(0, stdout='https://gh/pr/9\n')):
+            url = rem._commit_and_open_pr('/w', self._ctx(), 'tok')
+        assert url == 'https://gh/pr/9'
+
+    def test_commit_and_open_pr_gh_failure_raises(self):
+        _, rem = _load_npm()
+        with patch.object(rem, '_run'), patch.object(rem, '_push_branch'), \
+                patch.object(rem.subprocess, 'run',
+                             return_value=_completed(1, stderr='gh: not allowed')):
+            with pytest.raises(rem.RemediationError):
+                rem._commit_and_open_pr('/w', self._ctx(), 'tok')
+
+    def test_commit_and_open_pr_gh_timeout_raises(self):
+        _, rem = _load_npm()
+        with patch.object(rem, '_run'), patch.object(rem, '_push_branch'), \
+                patch.object(rem.subprocess, 'run',
+                             side_effect=subprocess.TimeoutExpired(cmd='gh', timeout=1)):
+            with pytest.raises(rem.RemediationError):
+                rem._commit_and_open_pr('/w', self._ctx(), 'tok')
+
+    def test_run_raises_on_nonzero(self):
+        _, rem = _load_npm()
+        with patch.object(rem.subprocess, 'run', return_value=_completed(1, stderr='boom')):
+            with pytest.raises(rem.RemediationError):
+                rem._run(['git', 'status'], 'git status')
