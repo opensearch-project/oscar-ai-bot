@@ -20,7 +20,7 @@ def _privileged_action_group(
     """Action group for privileged users — full vulnerability querying."""
     return bedrock.CfnAgent.AgentActionGroupProperty(
         action_group_name="securityAdvisoriesActions",
-        description="Query CVEs and security vulnerabilities for OpenSearch project components",
+        description="Query CVEs and security vulnerabilities for OpenSearch project components, and remediate a CVE by opening a fix pull request",
         action_group_state="ENABLED",
         action_group_executor=bedrock.CfnAgent.ActionGroupExecutorProperty(lambda_=lambda_arn),
         function_schema=bedrock.CfnAgent.FunctionSchemaProperty(
@@ -129,6 +129,56 @@ def _privileged_action_group(
                         "List projects that currently have assigned SIM tickets."
                     ),
                     parameters={},
+                ),
+                bedrock.CfnAgent.FunctionProperty(
+                    name="list_affected_repositories",
+                    description=(
+                        "List the OpenSearch project repositories that a specific CVE "
+                        "affects on the main branch. Call this FIRST when the user asks "
+                        "to remediate a CVE: use the returned list to resolve which "
+                        "repository the user means before calling remediate_cve. Do NOT "
+                        "guess or hardcode repository names."
+                    ),
+                    parameters={
+                        "cve_id": bedrock.CfnAgent.ParameterDetailProperty(
+                            type="string",
+                            description=(
+                                "The CVE identifier to look up (e.g., 'CVE-2026-1225')."
+                            ),
+                            required=True,
+                        ),
+                    },
+                ),
+                bedrock.CfnAgent.FunctionProperty(
+                    name="remediate_cve",
+                    description=(
+                        "Remediate a specific CVE on a specific OpenSearch project "
+                        "repository by opening a pull request that bumps the vulnerable "
+                        "dependency. Call list_affected_repositories first to get the "
+                        "exact repository name. Before doing any work it checks whether "
+                        "an open PR already fixes this CVE (e.g. from Dependabot, Mend, "
+                        "or a maintainer) and, if so, returns that existing PR instead "
+                        "of opening a duplicate."
+                    ),
+                    parameters={
+                        "cve_id": bedrock.CfnAgent.ParameterDetailProperty(
+                            type="string",
+                            description=(
+                                "The CVE identifier to remediate (e.g., 'CVE-2026-1225')."
+                            ),
+                            required=True,
+                        ),
+                        "repo_name": bedrock.CfnAgent.ParameterDetailProperty(
+                            type="string",
+                            description=(
+                                "The exact repository to remediate, as returned by "
+                                "list_affected_repositories (e.g., "
+                                "'alerting-dashboards-plugin'). Must be one of the "
+                                "repositories that CVE affects."
+                            ),
+                            required=True,
+                        ),
+                    },
                 ),
             ]
         ),

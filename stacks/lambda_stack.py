@@ -14,11 +14,14 @@ import logging
 import os
 from typing import Any, Dict, List, Optional
 
-from aws_cdk import Duration, Stack
+from aws_cdk import Duration, RemovalPolicy, Stack
+from aws_cdk import aws_ecr_assets as ecr_assets
+from aws_cdk import aws_ecs as ecs
 from aws_cdk import aws_events as events
 from aws_cdk import aws_events_targets as targets
 from aws_cdk import aws_iam as iam
 from aws_cdk import aws_lambda
+from aws_cdk import aws_logs as logs
 from aws_cdk.aws_lambda_python_alpha import PythonFunction
 from constructs import Construct
 
@@ -85,9 +88,20 @@ class OscarLambdaStack(Stack):
         if storage_stack.identity_table:
             self._create_identity_lambda()
 
+        # The CVE remediation worker runs as a Fargate task (below), not a
+        # Lambda — large repos (core, and defensively all repos) exceed Lambda's
+        # 15-min / disk / memory limits. The SecurityAdvisories handler dispatches
+        # to it via ecs.run_task.
+        self.remediation_cluster: Optional[ecs.Cluster] = None
+        self.remediation_npm_task_def: Optional[ecs.FargateTaskDefinition] = None
+        self._create_remediation_ecs()
+
         # Agent lambdas
         if agents:
             self._create_agent_lambdas(agents)
+
+        # Let the SecurityAdvisories agent Lambda dispatch to the worker.
+        self._wire_remediation_dispatch()
 
     # ------------------------------------------------------------------ core
     def _create_supervisor_agent_lambda(self) -> None:
@@ -217,6 +231,169 @@ class OscarLambdaStack(Stack):
             layers=[self.shared_layer],
         )
         self.lambda_functions[fn_name] = function
+
+    # ------------------------------------------------- remediation worker
+    def _remediation_worker_env(self) -> Dict[str, str]:
+        """Environment for the remediation worker (the Fargate task).
+
+        The write-target fork plus whichever GitHub + Slack credential source is
+        set (a dev PAT via *_TOKEN, or a Secrets Manager name via *_SECRET_NAME —
+        never both required). Kept as a helper so the container and task
+        definition can't drift apart.
+        """
+        # WRITE_OWNER = fork the fix branch is pushed to; BASE_OWNER = repo cloned
+        # from and the PR opened against. Both required — no default, so a deploy
+        # that omits either fails at synth. Dev sets both to the personal fork;
+        # prod sets BASE_OWNER to the upstream org and WRITE_OWNER to the bot fork.
+        write_owner = os.environ.get("REMEDIATION_WRITE_OWNER")
+        base_owner = os.environ.get("REMEDIATION_BASE_OWNER")
+        if not write_owner or not base_owner:
+            raise ValueError(
+                "REMEDIATION_WRITE_OWNER (push-target fork) and "
+                "REMEDIATION_BASE_OWNER (clone/PR-target repo) must both be set. "
+                "Set them in the deploy env / .env."
+            )
+        env = {
+            "REMEDIATION_WRITE_OWNER": write_owner,
+            "REMEDIATION_BASE_OWNER": base_owner,
+            # Unbuffered stdout so logs reach CloudWatch: a short Fargate task
+            # exits before block-buffered Python output flushes to the awslogs
+            # driver, otherwise leaving an empty log stream.
+            "PYTHONUNBUFFERED": "1",
+        }
+        # Only the Secrets Manager NAMES — never raw token VALUES, which would be
+        # stored in plaintext in the task definition (visible via
+        # ecs:DescribeTaskDefinition). The worker fetches the values at runtime.
+        for key in ("GH_TOKEN_SECRET_NAME", "SLACK_BOT_TOKEN_SECRET_NAME"):
+            if os.environ.get(key):
+                env[key] = os.environ[key]
+        return env
+
+    def _create_remediation_ecs(self) -> None:
+        """Fargate cluster + npm task definition for the remediation worker.
+
+        Fargate runs the clone/build/PR work that exceeds Lambda's limits. The
+        image is built from the npm worker Dockerfile (a Lambda base image), so
+        the container command is overridden to run ``main.py``, bypassing the
+        Lambda runtime client.
+        """
+        if not self.vpc_stack:
+            logger.warning("No VPC stack; skipping remediation Fargate cluster")
+            return
+
+        self.remediation_cluster = ecs.Cluster(
+            self, "RemediationCluster",
+            cluster_name=f"oscar-remediation-{self.env_name}",
+            vpc=self.vpc_stack.vpc,
+            container_insights=True,
+        )
+
+        # The task + execution roles live HERE, not permissions_stack, alongside
+        # the task def and log group: the log driver auto-grants the execution
+        # role write access to the log group, and a role in permissions_stack
+        # would make that grant a permissions->lambda edge and cycle (lambda
+        # already depends on permissions). Co-locating avoids it.
+        task_role = iam.Role(
+            self, "RemediationEcsTaskRole",
+            # Deterministic name so the SA lambda's iam:PassRole can be scoped to
+            # this exact ARN (see iam_policies.py) instead of "*".
+            role_name=f"oscar-remediation-ecs-task-{self.env_name}",
+            assumed_by=iam.ServicePrincipal("ecs-tasks.amazonaws.com"),
+            description="Task role for the OSCAR CVE remediation Fargate worker",
+        )
+        # Read the GitHub + Slack tokens under the oscar-remediation-* prefix.
+        task_role.add_to_policy(iam.PolicyStatement(
+            actions=["secretsmanager:GetSecretValue"],
+            resources=[
+                f"arn:aws:secretsmanager:{self.region}:{self.account}:secret:oscar-remediation-*"
+            ],
+        ))
+        execution_role = iam.Role(
+            self, "RemediationEcsExecutionRole",
+            role_name=f"oscar-remediation-ecs-exec-{self.env_name}",
+            assumed_by=iam.ServicePrincipal("ecs-tasks.amazonaws.com"),
+            managed_policies=[
+                iam.ManagedPolicy.from_aws_managed_policy_name(
+                    "service-role/AmazonECSTaskExecutionRolePolicy")
+            ],
+            description="Execution role for the OSCAR CVE remediation Fargate task",
+        )
+
+        task_def = ecs.FargateTaskDefinition(
+            self, "RemediationNpmTaskDef",
+            family=f"oscar-remediation-npm-{self.env_name}",
+            cpu=2048,                 # 2 vCPU
+            memory_limit_mib=8192,    # 8 GB (OSD install peaked ~4 GB; headroom)
+            ephemeral_storage_gib=50,  # clone + node_modules + yarn cache; up to 200 for core
+            # Match the image platform (arm64) — native Apple-Silicon builds and
+            # cheaper Graviton.
+            runtime_platform=ecs.RuntimePlatform(
+                cpu_architecture=ecs.CpuArchitecture.ARM64,
+                operating_system_family=ecs.OperatingSystemFamily.LINUX,
+            ),
+            task_role=task_role,
+            execution_role=execution_role,
+        )
+
+        task_def.add_container(
+            "worker",
+            container_name="worker",
+            image=ecs.ContainerImage.from_asset(
+                directory="agents/SecurityAdvisories/remediation-workers/npm",
+                platform=ecr_assets.Platform.LINUX_ARM64,
+            ),
+            # Bypass the Lambda runtime client baked into the base image and run
+            # the env-driven Fargate entrypoint directly. Files are under
+            # /var/task (LAMBDA_TASK_ROOT); python is the base image's runtime.
+            entry_point=["/var/lang/bin/python"],
+            command=["/var/task/main.py"],
+            environment=self._remediation_worker_env(),
+            logging=ecs.LogDriver.aws_logs(
+                stream_prefix="npm",
+                log_group=logs.LogGroup(
+                    self, "RemediationNpmLogGroup",
+                    log_group_name=f"/ecs/oscar-remediation-npm-{self.env_name}",
+                    retention=logs.RetentionDays.TWO_WEEKS,
+                    removal_policy=RemovalPolicy.DESTROY,
+                ),
+            ),
+        )
+        self.remediation_npm_task_def = task_def
+
+    def _wire_remediation_dispatch(self) -> None:
+        """Point the SecurityAdvisories agent Lambda at the Fargate worker.
+
+        Injects the ECS cluster, per-ecosystem task definition ARN, and the
+        network config (public subnets + security group) so the remediation
+        handler's dispatch step can ``run_task``. The RunTask/PassRole
+        PERMISSIONS are granted as identity policies on the SA role (see
+        iam_policies.py) using deterministic ARNs — granting them here via
+        construct refs would add a lambda-stack ARN to the permissions-stack role
+        and create a cyclic permissions<->lambda stack dependency.
+        """
+        if not (self.remediation_npm_task_def and self.remediation_cluster
+                and self.vpc_stack):
+            return
+        sa_fn = self.lambda_functions.get("SecurityAdvisories")
+        if not sa_fn:
+            logger.warning(
+                "SecurityAdvisories Lambda not found; remediation dispatch not wired"
+            )
+            return
+        sa_fn.add_environment(
+            "NPM_REMEDIATION_TASKDEF", self.remediation_npm_task_def.task_definition_arn
+        )
+        sa_fn.add_environment(
+            "REMEDIATION_ECS_CLUSTER", self.remediation_cluster.cluster_name
+        )
+        sa_fn.add_environment(
+            "REMEDIATION_ECS_SUBNETS",
+            ",".join(s.subnet_id for s in self.vpc_stack.vpc.public_subnets),
+        )
+        sa_fn.add_environment(
+            "REMEDIATION_ECS_SECURITY_GROUP",
+            self.vpc_stack.lambda_security_group.security_group_id,
+        )
 
     # ------------------------------------------------------------ agents
     def _create_agent_lambdas(self, agents) -> None:
