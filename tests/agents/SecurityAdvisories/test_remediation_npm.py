@@ -614,9 +614,14 @@ class TestPostSlackMessage:
         import json as _json
 
         class _Resp:
-            def __enter__(self_): return self_
-            def __exit__(self_, *a): return False
-            def read(self_): return _json.dumps(payload).encode()
+            def __enter__(self_):
+                return self_
+
+            def __exit__(self_, *a):
+                return False
+
+            def read(self_):
+                return _json.dumps(payload).encode()
         return lambda req, timeout=None: _Resp()
 
     def test_ok_response_does_not_raise(self):
