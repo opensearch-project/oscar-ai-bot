@@ -77,9 +77,11 @@ class TestBuildContext:
         assert ctx['pr_title'] == 'Bump form-data to 4.0.6'
         assert 'CVE-2026-12143' not in ctx['pr_title']
         assert 'CVE-2026-12143' not in ctx['commit_message']
-        # CVE recorded in body + branch
+        # CVE recorded in body + branch. Branch is deterministic (no random
+        # suffix) so a concurrent worker derives the same ref — see the push
+        # concurrency guard.
         assert 'CVE-2026-12143' in ctx['pr_body']
-        assert ctx['branch_name'].startswith('oscar/cve-2026-12143-form-data-')
+        assert ctx['branch_name'] == 'oscar/cve-2026-12143-form-data'
 
     def test_missing_required_field_raises(self):
         npm, rem = _load_npm()
@@ -230,6 +232,80 @@ class TestSlackNotification:
             {'status': 'error', 'cve_id': 'CVE-2026-3', 'message': 'yarn blew up'})
         assert 'already ok' in nc
         assert 'yarn blew up' in err and 'failed' in err.lower()
+
+    def test_format_message_remediation_in_progress(self):
+        _, rem = _load_npm()
+        msg = rem._format_slack_message(
+            {'status': 'remediation_in_progress', 'cve_id': 'CVE-2026-4'})
+        assert 'CVE-2026-4' in msg and 'in progress' in msg.lower()
+        assert 'failed' not in msg.lower()  # not an error
+
+
+class TestPushConcurrencyGuard:
+    """The branch name is deterministic, so a concurrent worker (or a leftover
+    branch from a closed PR) makes the push non-fast-forward. That must surface
+    as `remediation_in_progress`, not a hard error, so we never open a dup PR."""
+
+    def _fake_push(self, rem, returncode, stderr):
+        import types
+        return patch.object(
+            rem.subprocess, 'run',
+            return_value=types.SimpleNamespace(
+                returncode=returncode, stdout='', stderr=stderr))
+
+    def test_deterministic_branch_name_no_random_suffix(self):
+        _, rem = _load_npm()
+        # Same inputs -> same branch (that is what makes it a concurrency guard).
+        a = rem.new_branch_name('CVE-2026-12143', 'form-data')
+        b = rem.new_branch_name('CVE-2026-12143', 'form-data')
+        assert a == b == 'oscar/cve-2026-12143-form-data'
+
+    def test_push_success_returns_cleanly(self):
+        _, rem = _load_npm()
+        with self._fake_push(rem, 0, ''):
+            rem._push_branch('/w', 'https://remote', 'oscar/x', env={})  # no raise
+
+    # Both wordings git emits for "ref already exists", seen live in one 3-way
+    # race: [rejected]/fetch-first (local behind) and [remote rejected]/reference
+    # already exists (concurrent server-side create). Both must be in_progress.
+    @pytest.mark.parametrize('stderr', [
+        ' ! [rejected]        oscar/x -> oscar/x (fetch first)\n'
+        'error: failed to push some refs',
+        ' ! [remote rejected] HEAD -> oscar/x '
+        "(cannot lock ref 'refs/heads/oscar/x': reference already exists)",
+    ])
+    def test_rejected_push_raises_in_progress(self, stderr):
+        _, rem = _load_npm()
+        with self._fake_push(rem, 1, stderr):
+            with pytest.raises(rem.RemediationInProgress):
+                rem._push_branch('/w', 'https://remote', 'oscar/x', env={})
+
+    def test_other_push_failure_stays_error(self):
+        _, rem = _load_npm()
+        # Auth failure: real error, must NOT be misread as "in progress".
+        with self._fake_push(rem, 1, 'fatal: Authentication failed'):
+            with pytest.raises(rem.RemediationError) as exc:
+                rem._push_branch('/w', 'https://remote', 'oscar/x', env={})
+        assert not isinstance(exc.value, rem.RemediationInProgress)
+
+    def test_execute_maps_in_progress_to_status(self):
+        # A rejected push in the commit step -> _execute returns the in_progress
+        # status (not error), so the Slack reply says "already in progress".
+        npm, rem = _load_npm()
+        with patch.object(rem, '_resolve_token', return_value='tok'), \
+                patch.object(rem, 'WRITE_OWNER', 'v-e-e-m-a'), \
+                patch.object(rem, 'BASE_OWNER', 'v-e-e-m-a'), \
+                patch.object(rem, '_clone'), \
+                patch.object(npm, 'apply_fix'), \
+                patch.object(npm, 'regenerate'), \
+                patch.object(rem, '_changed_files', return_value=['package.json']), \
+                patch.object(rem, '_commit_and_open_pr',
+                             side_effect=rem.RemediationInProgress('already going')):
+            result = rem._execute(
+                {'repo_name': 'r', 'cve_id': 'CVE-2026-9', 'package': 'p',
+                 'patched_version': '1.0.0'}, npm)
+        assert result['status'] == 'remediation_in_progress'
+        assert result['cve_id'] == 'CVE-2026-9'
 
     def test_notify_posts_when_thread_context_present(self):
         _, rem = _load_npm()

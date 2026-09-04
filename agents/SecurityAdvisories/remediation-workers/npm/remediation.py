@@ -30,7 +30,6 @@ import logging
 import os
 import shutil
 import subprocess
-import uuid
 
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
@@ -66,6 +65,15 @@ GH_TIMEOUT = 120
 
 class RemediationError(Exception):
     """Raised when the remediation cannot be completed."""
+
+
+class RemediationInProgress(RemediationError):
+    """Raised when the fix branch already exists on the remote.
+
+    Because the branch name is deterministic, this means another worker is
+    concurrently remediating the same CVE (or a branch from a previously closed
+    PR was left behind). Either way we stop rather than open a duplicate PR.
+    """
 
 
 def handle(event, strategy):
@@ -130,6 +138,13 @@ def _execute(event, strategy):
         logger.info("Changed files: %s", changed)
 
         pr_url = _commit_and_open_pr(WORK_DIR, ctx, token)
+    except RemediationInProgress as e:
+        # Deterministic branch already on the remote: another worker is handling
+        # this CVE (or a leftover branch from a closed PR). Not an error.
+        logger.info("Remediation already in progress for %s: %s",
+                    ctx.get("cve_id"), e)
+        return {"status": "remediation_in_progress", "cve_id": ctx.get("cve_id"),
+                "message": str(e)}
     except RemediationError as e:
         logger.error("Remediation failed for %s: %s", ctx.get("cve_id"), e)
         return {"status": "error", "cve_id": ctx.get("cve_id"), "message": str(e)}
@@ -214,6 +229,9 @@ def _format_slack_message(result):
         )
     if status == "no_change":
         return f":information_source: *{cve}*: {result.get('message', 'no change needed.')}"
+    if status == "remediation_in_progress":
+        return (f":hourglass_flowing_sand: A remediation for *{cve}* is already in "
+                f"progress; not opening a duplicate.")
     return f":x: Remediation for *{cve}* failed: {result.get('message', 'unknown error.')}"
 
 
@@ -334,8 +352,7 @@ def _commit_and_open_pr(work_dir, ctx, token):
     # OpenSearch's DCO check requires on every commit.
     _run(["git", "-C", work_dir, "commit", "-s", "-m", ctx["commit_message"]],
          "git commit")
-    _run(["git", "-C", work_dir, "push", remote,
-          f"HEAD:refs/heads/{branch_name}"], "git push", env=env)
+    _push_branch(work_dir, remote, branch_name, env)
 
     # Open the PR on the BASE_OWNER repo. The head is owner-qualified so this
     # works both cross-fork (prod: WRITE_OWNER fork -> upstream) and same-repo
@@ -358,6 +375,35 @@ def _commit_and_open_pr(work_dir, ctx, token):
         logger.error("gh pr create failed: %s", result.stderr[-500:])
         raise RemediationError(f"gh pr create failed: {result.stderr[-300:]}")
     return result.stdout.strip()
+
+
+def _push_branch(work_dir, remote, branch_name, env):
+    """Push the fix branch, mapping a "ref already exists" rejection to
+    ``RemediationInProgress`` (a losing racer, not a failure) so only one worker
+    opens the PR. git words this collision several ways depending on timing, so we
+    match every variant below — narrowing it drops a losing racer to a false
+    ``error`` (seen live). Other push failures (auth, network) stay a real
+    ``RemediationError``."""
+    try:
+        result = subprocess.run(
+            ["git", "-C", work_dir, "push", remote, f"HEAD:refs/heads/{branch_name}"],
+            capture_output=True, text=True, env=env, timeout=GIT_TIMEOUT,
+        )
+    except subprocess.TimeoutExpired:
+        raise RemediationError(f"git push timed out after {GIT_TIMEOUT}s")
+    if result.returncode == 0:
+        return
+    stderr = result.stderr or ""
+    ref_exists_markers = (
+        "[rejected]", "[remote rejected]", "reference already exists",
+        "cannot lock ref", "fetch first", "non-fast-forward",
+    )
+    if any(marker in stderr for marker in ref_exists_markers):
+        raise RemediationInProgress(
+            "A remediation for this CVE is already in progress "
+            "(the fix branch already exists)."
+        )
+    raise RemediationError(f"git push failed: {stderr[-300:]}")
 
 
 def _changed_files(work_dir):
@@ -387,6 +433,7 @@ def _run(cmd, label, env=None, timeout=GIT_TIMEOUT):
 
 
 def new_branch_name(cve_id, package_name):
-    """A collision-resistant branch name (CVE in the branch is allowed)."""
+    """Deterministic branch name (no random suffix) so racing workers collide on
+    the same ref — the push-rejection concurrency guard in ``_push_branch``."""
     slug = "".join(c if c.isalnum() else "-" for c in package_name.lower()).strip("-")
-    return f"oscar/{cve_id.lower()}-{slug}-{uuid.uuid4().hex[:8]}"
+    return f"oscar/{cve_id.lower()}-{slug}"
