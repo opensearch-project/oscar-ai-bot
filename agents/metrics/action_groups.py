@@ -38,6 +38,49 @@ def get_action_groups(lambda_arn: str) -> List[bedrock.CfnAgent.AgentActionGroup
                             ),
                         },
                     ),
+                    bedrock.CfnAgent.FunctionProperty(
+                        name="get_release_status",
+                        description="Get the authoritative release-readiness verdict (red/yellow/green) for a version, computed deterministically from the latest indexed state of every release criterion. Use this whenever the user asks whether a release is ready, a go/no-go, on track, or what its overall status is.",
+                        parameters={
+                            "version": bedrock.CfnAgent.ParameterDetailProperty(
+                                type="string",
+                                description="Release version to check, e.g. '3.9.0'",
+                                required=True,
+                            ),
+                        },
+                    ),
+                    bedrock.CfnAgent.FunctionProperty(
+                        name="get_release_window",
+                        description="Get the release schedule for a version: RC date, release date, days remaining to each, release manager, and the current cadence phase. Use this for any question about release timing, deadlines, or dates.",
+                        parameters={
+                            "version": bedrock.CfnAgent.ParameterDetailProperty(
+                                type="string",
+                                description="Release version to look up, e.g. '3.9.0'",
+                                required=True,
+                            ),
+                        },
+                    ),
+                    bedrock.CfnAgent.FunctionProperty(
+                        name="query_release_state",
+                        description="Ask a free-form question about release-readiness criteria or the release schedule using natural language, e.g. 'which components are blocking 3.9.0', 'which criteria changed in the last day', 'which releases are active'. Use get_release_status for the overall verdict and get_release_window for dates instead of this.",
+                        parameters={
+                            "query": bedrock.CfnAgent.ParameterDetailProperty(
+                                type="string",
+                                description="Natural language question about release criteria or schedule",
+                                required=True,
+                            ),
+                            "version": bedrock.CfnAgent.ParameterDetailProperty(
+                                type="string",
+                                description="Release version to scope the question to, e.g. '3.9.0'",
+                                required=False,
+                            ),
+                            "scope": bedrock.CfnAgent.ParameterDetailProperty(
+                                type="string",
+                                description="Which index to query: 'state' (default) for per-criterion readiness data, 'schedule' for release dates and registration data",
+                                required=False,
+                            ),
+                        },
+                    ),
                 ]
             ),
         )

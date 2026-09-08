@@ -143,6 +143,14 @@ def handle_metrics_query(params: Dict[str, Any], request_id: Optional[str] = Non
             results = extract_test_results(opensearch_results)
             summary = generate_integration_summary(results)
             data_source = 'opensearch-integration-test-results'
+        elif first_hit_index in ('opensearch_release_state', 'opensearch_release_schedule'):
+            # The conversational agent can route here via ListIndexTool, but these indices
+            # do not fit extract_release_results (opensearch_release_metrics schema, which
+            # the 'release' branch below would apply). Release-state questions belong to
+            # the dedicated release functions.
+            results = [hit.get('_source', {}) for hit in raw_hits]
+            summary = {}
+            data_source = first_hit_index
         elif 'distribution-build' in first_hit_index:
             results = extract_build_results(opensearch_results)
             summary = generate_build_summary(results)

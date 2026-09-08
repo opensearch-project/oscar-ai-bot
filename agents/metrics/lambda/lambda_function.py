@@ -27,6 +27,9 @@ from config import config
 # from helper_functions import (handle_component_resolution,
 #                               handle_rc_build_mapping)
 from metrics_handler import handle_metrics_query
+from release_handler import (handle_get_release_status,
+                             handle_get_release_window,
+                             handle_query_release_state)
 from response_builder import create_response
 
 logger = logging.getLogger(__name__)
@@ -94,7 +97,19 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         #     logger.info(f"LAMBDA_HANDLER [{request_id}]: Routing to handle_rc_build_mapping")
         #     result = handle_rc_build_mapping(params)
 
-        if function_name == 'query_metrics' or function_name == '' or function_name is None:
+        if function_name == 'get_release_status':
+            logger.info(f"LAMBDA_HANDLER [{request_id}]: Routing to handle_get_release_status")
+            result = handle_get_release_status(params, request_id)
+
+        elif function_name == 'get_release_window':
+            logger.info(f"LAMBDA_HANDLER [{request_id}]: Routing to handle_get_release_window")
+            result = handle_get_release_window(params, request_id)
+
+        elif function_name == 'query_release_state':
+            logger.info(f"LAMBDA_HANDLER [{request_id}]: Routing to handle_query_release_state (agentic search)")
+            result = handle_query_release_state(params, request_id)
+
+        elif function_name == 'query_metrics' or function_name == '' or function_name is None:
             # Unified metrics query handler - routes all metrics queries through agentic search
             logger.info(f"LAMBDA_HANDLER [{request_id}]: Routing to handle_metrics_query (agentic search)")
             result = handle_metrics_query(params, request_id)
