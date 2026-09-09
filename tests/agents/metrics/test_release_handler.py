@@ -247,6 +247,41 @@ class TestCadencePhase:
         assert phase(-15, -1) == 'released'
         assert phase(None, None) == 'not_scheduled'
 
+    def test_cancelled_status_wins_over_a_passed_release_date(self):
+        # Dates cannot distinguish shipped from cancelled, so the phase must not
+        # contradict the status field reported beside it.
+        handler, _, _ = _load_handler()
+        assert handler._cadence_phase(-30, -5, 'cancelled') == 'cancelled'
+        assert handler._cadence_phase(10, 20, 'cancelled') == 'cancelled'
+
+    def test_released_status_wins_over_future_dates(self):
+        handler, _, _ = _load_handler()
+        assert handler._cadence_phase(10, 20, 'released') == 'released'
+
+    def test_active_release_past_its_date_is_overdue_not_released(self):
+        handler, _, _ = _load_handler()
+        assert handler._cadence_phase(-20, -3, 'active') == 'overdue'
+
+    def test_passed_date_without_status_still_reads_as_released(self):
+        handler, _, _ = _load_handler()
+        assert handler._cadence_phase(-20, -3) == 'released'
+
+    def test_status_is_case_and_whitespace_insensitive(self):
+        handler, _, _ = _load_handler()
+        assert handler._cadence_phase(-30, -5, ' Cancelled ') == 'cancelled'
+
+    def test_window_phase_reflects_schedule_status(self):
+        response = {'hits': {'total': {'value': 1}, 'hits': [{'_source': {
+            'version': '3.7.0',
+            'status': 'cancelled',
+            'rc_date': '2026-06-01',
+            'release_date': '2026-06-15',
+        }}]}}
+        handler, _, _ = _load_handler(opensearch_response=response)
+        result = handler.handle_get_release_window({'version': '3.7.0'})
+        assert result['status'] == 'cancelled'
+        assert result['cadence_phase'] == 'cancelled'
+
     def test_rc_cut_without_a_release_date_is_post_rc(self):
         # RC has passed and no release date is registered: post-RC, not unscheduled.
         handler, _, _ = _load_handler()

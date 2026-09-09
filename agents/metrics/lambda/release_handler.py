@@ -180,26 +180,42 @@ def handle_get_release_window(params: Dict[str, Any], request_id: str = 'unknown
         'release_date': source.get('release_date'),
         'days_to_rc': days_to_rc,
         'days_to_release': days_to_release,
-        'cadence_phase': _cadence_phase(days_to_rc, days_to_release),
+        'cadence_phase': _cadence_phase(days_to_rc, days_to_release, source.get('status')),
         'release_manager': source.get('release_manager'),
         'release_issue': source.get('release_issue'),
     }
 
 
-def _cadence_phase(days_to_rc: Optional[int], days_to_release: Optional[int]) -> str:
-    """Classify the schedule phase from days-to-RC and days-to-release.
+def _cadence_phase(
+    days_to_rc: Optional[int],
+    days_to_release: Optional[int],
+    status: Optional[str] = None,
+) -> str:
+    """Classify the schedule phase from the release status and its dates.
+
+    The schedule status wins wherever it disagrees with the dates: dates alone cannot tell
+    a shipped release from a cancelled or a late one, so inferring the lifecycle from them
+    would contradict the status field reported alongside this phase.
 
     Phases follow the escalating notification cadence in the proposal:
+      cancelled:        schedule status is cancelled, whatever the dates say
+      released:         schedule status is released, or the date passed with no status
+      overdue:          still active but the release date has passed
       out_of_window:    more than 14 days before RC
       pre_rc_daily:     14 to 8 days before RC
       pre_rc_frequent:  7 to 0 days before RC
       rc_to_release:    RC cut, more than 2 days before release
       final_push:       final 2 days before release
-      released:         release date has passed
       not_scheduled:    no usable dates
     """
-    if days_to_release is not None and days_to_release < 0:
+    lifecycle = (status or '').strip().lower()
+    if lifecycle == 'cancelled':
+        return 'cancelled'
+    if lifecycle == 'released':
         return 'released'
+
+    if days_to_release is not None and days_to_release < 0:
+        return 'overdue' if lifecycle == 'active' else 'released'
 
     if days_to_rc is not None:
         if days_to_rc > 14:
