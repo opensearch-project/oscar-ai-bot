@@ -38,7 +38,7 @@ import release_rubric
 from agentic_search import AgenticSearchError, agentic_search
 from aws_utils import opensearch_request
 from config import config
-from data_processors import extract_release_state_results
+from data_processors import extract_release_state_results, parse_timestamp
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -59,26 +59,6 @@ def _require_version(params: Dict[str, Any]) -> Optional[str]:
     if isinstance(version, str):
         version = version.strip()
     return version or None
-
-
-def _parse_date(value: Optional[str]) -> Optional[datetime]:
-    """Parse 'YYYY-MM-DD' or full ISO 8601 (trailing 'Z' allowed) into aware datetime."""
-    if not value:
-        return None
-    text = str(value).strip()
-    if text.endswith('Z'):
-        text = text[:-1] + '+00:00'
-    try:
-        parsed = datetime.fromisoformat(text)
-    except ValueError:
-        try:
-            parsed = datetime.strptime(text, '%Y-%m-%d')
-        except ValueError:
-            logger.warning(f"Could not parse date value: {value!r}")
-            return None
-    if parsed.tzinfo is None:
-        parsed = parsed.replace(tzinfo=timezone.utc)
-    return parsed
 
 
 def _now() -> datetime:
@@ -162,7 +142,7 @@ def handle_get_release_window(params: Dict[str, Any], request_id: str = 'unknown
     query = {
         'size': 1,
         'query': {'bool': {'filter': [{'term': {'version.keyword': version}}]}},
-        'sort': [{'registered_at': {'order': 'desc'}}],
+        'sort': [{'registered_at': {'order': 'desc', 'unmapped_type': 'date'}}],
     }
 
     try:
@@ -184,8 +164,8 @@ def handle_get_release_window(params: Dict[str, Any], request_id: str = 'unknown
         }
 
     source = hits[0].get('_source', {})
-    rc_date = _parse_date(source.get('rc_date'))
-    release_date = _parse_date(source.get('release_date'))
+    rc_date = parse_timestamp(source.get('rc_date'))
+    release_date = parse_timestamp(source.get('release_date'))
     today = _now().date()
 
     days_to_rc = (rc_date.date() - today).days if rc_date else None
@@ -228,6 +208,9 @@ def _cadence_phase(days_to_rc: Optional[int], days_to_release: Optional[int]) ->
             return 'pre_rc_daily'
         if 0 <= days_to_rc <= 7:
             return 'pre_rc_frequent'
+        if days_to_release is None:
+            # RC is cut but no release date is registered: still post-RC, not unscheduled.
+            return 'rc_to_release'
 
     if days_to_release is not None:
         if days_to_release <= 2:

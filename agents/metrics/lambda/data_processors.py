@@ -24,10 +24,36 @@ Functions:
 """
 
 import logging
-from typing import Any, Dict, List
+from datetime import datetime, timezone
+from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
+
+
+def parse_timestamp(value: Optional[str]) -> Optional[datetime]:
+    """Parse 'YYYY-MM-DD' or ISO 8601 (trailing 'Z' allowed) into an aware datetime.
+
+    Returned values are safe to compare with each other. Comparing the raw strings is
+    not: 'Z' and '+00:00' offsets, and differing fractional-second precision, sort
+    lexicographically in the wrong order even though they denote the same instant.
+    """
+    if not value:
+        return None
+    text = str(value).strip()
+    if text.endswith('Z'):
+        text = text[:-1] + '+00:00'
+    try:
+        parsed = datetime.fromisoformat(text)
+    except ValueError:
+        try:
+            parsed = datetime.strptime(text, '%Y-%m-%d')
+        except ValueError:
+            logger.warning(f"Could not parse timestamp value: {value!r}")
+            return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed
 
 
 def deduplicate_by_highest_build_number(results: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -213,10 +239,13 @@ def deduplicate_release_state_results(results: List[Dict[str, Any]]) -> List[Dic
             key = (str(version), str(product), criterion_name)
             if key not in groups:
                 groups[key] = result
-            elif last_checked:
-                existing = groups[key].get('last_checked')
-                if not existing or last_checked > existing:
-                    groups[key] = result
+                continue
+            candidate = parse_timestamp(last_checked)
+            if candidate is None:
+                continue
+            existing = parse_timestamp(groups[key].get('last_checked'))
+            if existing is None or candidate > existing:
+                groups[key] = result
         else:
             ungrouped.append(result)
 

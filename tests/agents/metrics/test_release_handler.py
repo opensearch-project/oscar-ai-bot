@@ -148,6 +148,28 @@ class TestGetReleaseStatusReduction:
         assert result['verdict'] == 'red'
         assert result['blocking_failures'] == ['all_integration_tests_passing']
 
+    def test_newest_wins_across_mixed_timestamp_formats(self):
+        # Same instant written as 'Z' and '+00:00', plus differing fractional precision:
+        # comparing the raw strings would order these wrongly and pick a stale status.
+        response = {'hits': {'total': {'value': 3}, 'hits': [
+            _state_hit('release_notes_ready', 'not_met', '2026-09-01T06:30:00+00:00'),
+            _state_hit('release_notes_ready', 'met', '2026-09-01T18:30:00.123Z'),
+            _state_hit('release_notes_ready', 'not_met', '2026-09-01T12:30:00Z'),
+        ]}}
+        handler, _, _ = _load_handler(opensearch_response=response)
+        result = handler.handle_get_release_status({'version': '3.9.0'})
+        assert result['counts']['total'] == 1
+        assert result['verdict'] == 'green'
+
+    def test_unparseable_timestamp_does_not_displace_a_valid_one(self):
+        response = {'hits': {'total': {'value': 2}, 'hits': [
+            _state_hit('release_notes_ready', 'met', '2026-09-01T18:30:00Z'),
+            _state_hit('release_notes_ready', 'not_met', 'not-a-timestamp'),
+        ]}}
+        handler, _, _ = _load_handler(opensearch_response=response)
+        result = handler.handle_get_release_status({'version': '3.9.0'})
+        assert result['verdict'] == 'green'
+
     def test_release_issue_surfaced(self):
         response = {'hits': {'total': {'value': 1}, 'hits': [
             _state_hit('release_notes_ready', 'met', '2026-09-01T18:30:00Z',
@@ -181,7 +203,11 @@ class TestGetReleaseWindow:
         assert path == '/opensearch_release_schedule/_search'
         assert query['size'] == 1
         assert {'term': {'version.keyword': '3.9.0'}} in query['query']['bool']['filter']
-        assert query['sort'] == [{'registered_at': {'order': 'desc'}}]
+        # unmapped_type keeps the sort from erroring on a schedule index that has no
+        # registered_at mapping yet, e.g. a freshly created environment.
+        assert query['sort'] == [
+            {'registered_at': {'order': 'desc', 'unmapped_type': 'date'}}
+        ]
 
     def test_days_remaining_computed_from_today(self):
         handler, _, _ = _load_handler(opensearch_response=self._schedule_response())
@@ -220,6 +246,16 @@ class TestCadencePhase:
         assert phase(-12, 2) == 'final_push'
         assert phase(-15, -1) == 'released'
         assert phase(None, None) == 'not_scheduled'
+
+    def test_rc_cut_without_a_release_date_is_post_rc(self):
+        # RC has passed and no release date is registered: post-RC, not unscheduled.
+        handler, _, _ = _load_handler()
+        assert handler._cadence_phase(-3, None) == 'rc_to_release'
+
+    def test_only_a_release_date_still_classifies(self):
+        handler, _, _ = _load_handler()
+        assert handler._cadence_phase(None, 10) == 'rc_to_release'
+        assert handler._cadence_phase(None, 1) == 'final_push'
 
 
 class TestQueryReleaseState:
