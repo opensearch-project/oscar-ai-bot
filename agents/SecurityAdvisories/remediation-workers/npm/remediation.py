@@ -238,22 +238,20 @@ def _format_slack_message(result):
 
 
 def _resolve_slack_token():
-    """Slack bot token from Secrets Manager, named by ``SLACK_BOT_TOKEN_SECRET_NAME``.
+    """Slack bot token from the central OSCAR secret (``CENTRAL_SECRET_NAME``).
 
-    Secrets Manager only (mirrors ``_resolve_token``) — no raw-token env var. The
-    value may be the raw token or a JSON blob with a ``token`` field.
+    Reuses the same ``SLACK_BOT_TOKEN`` field the rest of OSCAR reads from the
+    central env secret (a JSON blob) rather than a remediation-specific secret.
     """
-    secret_name = os.environ.get("SLACK_BOT_TOKEN_SECRET_NAME")
+    secret_name = os.environ.get("CENTRAL_SECRET_NAME")
     if not secret_name:
         return ""
     try:
         client = boto3.client("secretsmanager")
-        value = client.get_secret_value(SecretId=secret_name)["SecretString"].strip()
-        if value.startswith("{"):
-            return (json.loads(value).get("token") or "").strip()
-        return value
+        value = client.get_secret_value(SecretId=secret_name)["SecretString"]
+        return (json.loads(value).get("SLACK_BOT_TOKEN") or "").strip()
     except Exception as e:  # noqa: BLE001 — never leak the underlying error
-        logger.error("Failed to read Slack token from Secrets Manager: %s", e)
+        logger.error("Failed to read Slack token from the central secret: %s", e)
         return ""
 
 
