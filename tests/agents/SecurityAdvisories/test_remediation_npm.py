@@ -574,36 +574,33 @@ class TestTokenResolvers:
     def test_gh_token_raw(self):
         _, rem = _load_npm()
         with patch.dict(os.environ, {'GH_TOKEN_SECRET_NAME': 's'}, clear=False), \
-                patch.dict('sys.modules', {'boto3': _fake_boto3('ghp_raw')}):
+                patch.object(rem, 'boto3', _fake_boto3('ghp_raw')):
             assert rem._resolve_token() == 'ghp_raw'
 
     def test_gh_token_json(self):
         _, rem = _load_npm()
         with patch.dict(os.environ, {'GH_TOKEN_SECRET_NAME': 's'}, clear=False), \
-                patch.dict('sys.modules', {'boto3': _fake_boto3('{"token": "ghp_json"}')}):
+                patch.object(rem, 'boto3', _fake_boto3('{"token": "ghp_json"}')):
             assert rem._resolve_token() == 'ghp_json'
 
     def test_gh_token_sm_failure_returns_empty(self):
         _, rem = _load_npm()
         with patch.dict(os.environ, {'GH_TOKEN_SECRET_NAME': 's'}, clear=False), \
-                patch.dict('sys.modules', {'boto3': _fake_boto3(raises=True)}):
+                patch.object(rem, 'boto3', _fake_boto3(raises=True)):
             assert rem._resolve_token() == ''
 
-    def test_slack_token_none_and_raw_and_json(self):
+    def test_slack_token_none_and_from_central_secret(self):
         _, rem = _load_npm()
         with patch.dict(os.environ, {}, clear=True):
             assert rem._resolve_slack_token() == ''
-        with patch.dict(os.environ, {'SLACK_BOT_TOKEN_SECRET_NAME': 's'}, clear=False), \
-                patch.dict('sys.modules', {'boto3': _fake_boto3('xoxb-raw')}):
-            assert rem._resolve_slack_token() == 'xoxb-raw'
-        with patch.dict(os.environ, {'SLACK_BOT_TOKEN_SECRET_NAME': 's'}, clear=False), \
-                patch.dict('sys.modules', {'boto3': _fake_boto3('{"token": "xoxb-json"}')}):
-            assert rem._resolve_slack_token() == 'xoxb-json'
+        with patch.dict(os.environ, {'CENTRAL_SECRET_NAME': 's'}, clear=False), \
+                patch.object(rem, 'boto3', _fake_boto3('{"SLACK_BOT_TOKEN": "xoxb-central"}')):
+            assert rem._resolve_slack_token() == 'xoxb-central'
 
     def test_slack_token_sm_failure_returns_empty(self):
         _, rem = _load_npm()
-        with patch.dict(os.environ, {'SLACK_BOT_TOKEN_SECRET_NAME': 's'}, clear=False), \
-                patch.dict('sys.modules', {'boto3': _fake_boto3(raises=True)}):
+        with patch.dict(os.environ, {'CENTRAL_SECRET_NAME': 's'}, clear=False), \
+                patch.object(rem, 'boto3', _fake_boto3(raises=True)):
             assert rem._resolve_slack_token() == ''
 
 
