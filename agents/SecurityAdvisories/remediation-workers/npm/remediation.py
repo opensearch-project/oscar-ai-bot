@@ -26,10 +26,14 @@ never depends on the fork being in sync with upstream. We never push a branch to
 the live upstream repo — only the PR is opened there.
 """
 
+import json
 import logging
 import os
 import shutil
 import subprocess
+import urllib.request
+
+import boto3
 
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
@@ -175,13 +179,11 @@ def _resolve_token():
     if not secret_name:
         return ""
     try:
-        import boto3
         client = boto3.client("secretsmanager")
         value = client.get_secret_value(SecretId=secret_name)["SecretString"]
         # The secret may be the raw token or a JSON blob with a "token" field.
         value = value.strip()
         if value.startswith("{"):
-            import json
             return (json.loads(value).get("token") or "").strip()
         return value
     except Exception as e:  # noqa: BLE001 — never leak the underlying error
@@ -245,11 +247,9 @@ def _resolve_slack_token():
     if not secret_name:
         return ""
     try:
-        import boto3
         client = boto3.client("secretsmanager")
         value = client.get_secret_value(SecretId=secret_name)["SecretString"].strip()
         if value.startswith("{"):
-            import json
             return (json.loads(value).get("token") or "").strip()
         return value
     except Exception as e:  # noqa: BLE001 — never leak the underlying error
@@ -259,9 +259,6 @@ def _resolve_slack_token():
 
 def _post_slack_message(token, channel, thread_ts, text):
     """POST chat.postMessage to reply in a thread (stdlib only, no requests dep)."""
-    import json
-    import urllib.request
-
     body = json.dumps({
         "channel": channel,
         "thread_ts": thread_ts,
