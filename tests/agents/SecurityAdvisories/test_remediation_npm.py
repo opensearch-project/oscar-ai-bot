@@ -149,6 +149,26 @@ class TestApplyFix:
         assert data['resolutions']['other'] == '1.0.0'   # existing kept
         assert ctx['method'] == 'install'
 
+    def test_undeclared_scoped_transitive_adds_resolution(self, tmp_path):
+        # Scoped packages are quoted in yarn.lock ("@scope/pkg@range":). _in_lockfile
+        # must match the quoted header, else a scoped transitive is wrongly reported
+        # as "not a dependency". Uses an existing resolutions block to isolate the
+        # scoped-detection path from the block-creation case below.
+        npm, _ = _load_npm()
+        _write_pkg(tmp_path, {'name': 'x',
+                              'dependencies': {'react': '^18.0.0'},
+                              'resolutions': {'other': '1.0.0'}})
+        (tmp_path / 'yarn.lock').write_text(
+            '"@babel/traverse@^7.0.0", "@babel/traverse@^7.10.4":\n'
+            '  version "7.10.4"\n'
+        )
+        ctx = {'package_name': '@babel/traverse', 'patched_version': '7.23.2'}
+        npm.apply_fix(str(tmp_path), ctx)
+        data = _read_pkg(tmp_path)
+        assert data['resolutions']['@babel/traverse'] == '7.23.2'
+        assert data['resolutions']['other'] == '1.0.0'   # existing kept
+        assert ctx['method'] == 'install'
+
     def test_undeclared_adds_resolutions_block_when_missing(self, tmp_path):
         # No resolutions block at all -> create one (still valid JSON).
         npm, _ = _load_npm()
