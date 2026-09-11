@@ -380,6 +380,15 @@ class OscarLambdaStack(Stack):
             gh_secret.grant_read(task_role)
         if self.secrets_stack:
             self.secrets_stack.grant_read_access(task_role)
+        # Invoke the LLM edit-planner (Bedrock). Cross-region inference profiles
+        # route to foundation models in several regions, so allow both.
+        task_role.add_to_policy(iam.PolicyStatement(
+            actions=["bedrock:InvokeModel"],
+            resources=[
+                f"arn:aws:bedrock:*:{self.account}:inference-profile/*",
+                "arn:aws:bedrock:*::foundation-model/anthropic.claude-*",
+            ],
+        ))
         execution_role = iam.Role(
             self, "RemediationEcsExecutionRole",
             role_name=f"oscar-remediation-ecs-exec-{self.env_name}",

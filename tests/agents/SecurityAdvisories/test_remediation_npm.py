@@ -14,6 +14,7 @@ import importlib.util
 import json
 import os
 import subprocess
+import sys
 from unittest.mock import patch
 
 import pytest
@@ -22,6 +23,20 @@ _NPM_PATH = os.path.join(
     os.path.dirname(__file__), '..', '..', '..',
     'agents', 'SecurityAdvisories', 'remediation-workers', 'npm',
 )
+
+# Put the worker dir on sys.path so npm.py's ``import llm_planner`` resolves to a
+# single stable module we can patch.
+if _NPM_PATH not in sys.path:
+    sys.path.insert(0, _NPM_PATH)
+import llm_planner  # noqa: E402
+
+
+@pytest.fixture(autouse=True)
+def _llm_off_by_default():
+    """Default the LLM planner OFF so tests exercise the deterministic router.
+    LLM-path tests override ``plan_edit`` with their own return value."""
+    with patch.object(llm_planner, 'plan_edit', return_value=None):
+        yield
 
 
 def _load_npm():
@@ -709,3 +724,101 @@ class TestCloneAndCommit:
         with patch.object(rem.subprocess, 'run', return_value=_completed(1, stderr='boom')):
             with pytest.raises(rem.RemediationError):
                 rem._run(['git', 'status'], 'git status')
+
+
+# ---------------------------------------------------------------------------
+# LLM planner: output validation (offline, no Bedrock) + apply_fix routing
+# ---------------------------------------------------------------------------
+
+
+class TestLlmPlannerValidate:
+    def test_valid_actions(self):
+        assert llm_planner._validate('{"action": "upgrade_dep", "sections": []}') == \
+            {"action": "upgrade_dep", "sections": [], "reason": ""}
+        assert llm_planner._validate(
+            '{"action": "edit_and_install", "sections": ["resolutions"]}'
+        ) == {"action": "edit_and_install", "sections": ["resolutions"], "reason": ""}
+        assert llm_planner._validate('{"action": "none", "sections": []}')["action"] == "none"
+
+    def test_preserves_reason(self):
+        plan = llm_planner._validate(
+            '{"action": "upgrade_dep", "sections": [], "reason": "direct dep, no resolution"}'
+        )
+        assert plan["reason"] == "direct dep, no resolution"
+
+    def test_strips_code_fences(self):
+        assert llm_planner._validate(
+            '```json\n{"action": "none", "sections": []}\n```'
+        ) == {"action": "none", "sections": [], "reason": ""}
+
+    def test_rejects_unknown_action(self):
+        assert llm_planner._validate('{"action": "delete_repo", "sections": []}') is None
+
+    def test_rejects_bad_section(self):
+        assert llm_planner._validate(
+            '{"action": "edit_and_install", "sections": ["scripts"]}'
+        ) is None
+
+    def test_rejects_edit_without_sections(self):
+        assert llm_planner._validate('{"action": "edit_and_install", "sections": []}') is None
+
+    def test_rejects_sections_on_non_edit_action(self):
+        assert llm_planner._validate('{"action": "none", "sections": ["resolutions"]}') is None
+
+    def test_rejects_non_json(self):
+        assert llm_planner._validate('sorry, I cannot help with that') is None
+
+
+class TestApplyFixViaLlmPlan:
+    """apply_fix applies the LLM plan via the shared primitives (plan_edit patched)."""
+
+    def _plan(self, **kw):
+        return patch.object(llm_planner, 'plan_edit', return_value=kw)
+
+    def test_add_resolution(self, tmp_path):
+        npm, _ = _load_npm()
+        _write_pkg(tmp_path, {'name': 'x', 'dependencies': {'lodash': '^4.17.20'}})
+        _write_lock(tmp_path, ('form-data', '4.0.4'))
+        ctx = {'package_name': 'form-data', 'patched_version': '4.0.6'}
+        with self._plan(action='add_resolution', sections=[]):
+            npm.apply_fix(str(tmp_path), ctx)
+        assert _read_pkg(tmp_path)['resolutions']['form-data'] == '4.0.6'
+        assert ctx['method'] == 'install'
+
+    def test_upgrade_dep_leaves_package_json_untouched(self, tmp_path):
+        npm, _ = _load_npm()
+        _write_pkg(tmp_path, {'name': 'x', 'dependencies': {'lodash': '^4.17.20'}})
+        before = (tmp_path / 'package.json').read_text()
+        ctx = {'package_name': 'lodash', 'patched_version': '4.17.21'}
+        with self._plan(action='upgrade_dep', sections=[]):
+            npm.apply_fix(str(tmp_path), ctx)
+        assert ctx['method'] == 'upgrade'
+        assert (tmp_path / 'package.json').read_text() == before
+
+    def test_edit_and_install(self, tmp_path):
+        npm, _ = _load_npm()
+        _write_pkg(tmp_path, {'name': 'x', 'resolutions': {'form-data': '4.0.4'}})
+        ctx = {'package_name': 'form-data', 'patched_version': '4.0.6'}
+        with self._plan(action='edit_and_install', sections=['resolutions']):
+            npm.apply_fix(str(tmp_path), ctx)
+        assert _read_pkg(tmp_path)['resolutions']['form-data'] == '4.0.6'
+        assert ctx['method'] == 'install'
+
+    def test_none_leaves_package_json_untouched(self, tmp_path):
+        npm, _ = _load_npm()
+        _write_pkg(tmp_path, {'name': 'x', 'dependencies': {'form-data': '4.0.6'}})
+        before = (tmp_path / 'package.json').read_text()
+        ctx = {'package_name': 'form-data', 'patched_version': '4.0.6'}
+        with self._plan(action='none', sections=[]):
+            npm.apply_fix(str(tmp_path), ctx)
+        assert ctx['method'] == 'none'
+        assert (tmp_path / 'package.json').read_text() == before
+
+    def test_falls_back_to_router_when_no_plan(self, tmp_path):
+        # plan_edit returns None (autouse default) -> deterministic router runs.
+        npm, _ = _load_npm()
+        _write_pkg(tmp_path, {'name': 'x', 'resolutions': {'form-data': '4.0.4'}})
+        ctx = {'package_name': 'form-data', 'patched_version': '4.0.6'}
+        npm.apply_fix(str(tmp_path), ctx)
+        assert _read_pkg(tmp_path)['resolutions']['form-data'] == '4.0.6'
+        assert ctx['method'] == 'install'

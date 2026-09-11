@@ -24,6 +24,7 @@ import os
 import re
 import subprocess
 
+import llm_planner
 from remediation import RemediationError, new_branch_name
 
 logger = logging.getLogger()
@@ -79,18 +80,67 @@ def build_context(event, write_owner, base_owner):
 
 
 def apply_fix(work_dir, ctx):
-    """Make the package.json edit and set ``ctx['method']`` for regenerate, per
-    the routing in the module docstring. The resolution and undeclared-transitive
-    cases edit package.json here; the direct-dep case makes no edit and defers to
-    ``yarn upgrade`` in regenerate. Edits use minimal-diff text replacement (never
-    a JSON round-trip, which would reformat the whole file) and are validated as
-    JSON before writing.
+    """Decide the package.json edit (LLM-first) and set ``ctx['method']``.
+
+    Asks the LLM planner how to route the bump; on any failure or invalid plan it
+    falls back to the deterministic router (``_apply_fix_deterministic``), which
+    is the original hand-written logic. Either way the actual file edit is done by
+    the same validated primitives — the model never emits file contents.
     """
     pkg_path = os.path.join(work_dir, "package.json")
     with open(pkg_path) as f:
         content = f.read()
-
     manifest = json.loads(content)
+
+    in_lockfile = _in_lockfile(work_dir, ctx["package_name"])
+    plan = llm_planner.plan_edit(ctx, content, in_lockfile)
+    if plan is not None:
+        logger.info("Applying LLM edit plan: %s", plan)
+        _apply_plan(pkg_path, content, manifest, ctx, plan)
+    else:
+        logger.info("No LLM plan; using deterministic router.")
+        _apply_fix_deterministic(pkg_path, content, manifest, ctx, in_lockfile)
+
+
+def _apply_plan(pkg_path, content, manifest, ctx, plan):
+    """Apply an LLM edit plan using the same primitives as the router.
+
+    ``plan`` = ``{"action", "sections"}``; package/version come from ``ctx`` (the
+    model does not supply them). Unknown/failed plans never reach here — the
+    caller falls back to ``_apply_fix_deterministic`` instead.
+    """
+    package_name = ctx["package_name"]
+    patched = ctx["patched_version"]
+    action = plan["action"]
+
+    if action == "none":
+        ctx["method"] = "none"
+        ctx["bumped_sections"] = []
+    elif action == "upgrade_dep":
+        # Direct dependency, no resolution -> regenerate runs `yarn upgrade`, which
+        # edits package.json itself (no pre-edit here).
+        ctx["method"] = "upgrade"
+        ctx["bumped_sections"] = ["dependencies"]
+    elif action == "edit_and_install":
+        declarations = [
+            (sec, str(manifest.get(sec, {}).get(package_name, "")))
+            for sec in plan["sections"]
+        ]
+        edited, bumped = _edit_versions(content, package_name, patched, declarations)
+        _write_if_valid(pkg_path, content, edited)
+        ctx["method"] = "install" if bumped else "none"
+        ctx["bumped_sections"] = bumped
+    else:  # add_resolution
+        edited = _add_resolution(content, manifest, package_name, patched)
+        _write_if_valid(pkg_path, content, edited)
+        ctx["method"] = "install"
+        ctx["bumped_sections"] = ["resolutions (added)"]
+
+
+def _apply_fix_deterministic(pkg_path, content, manifest, ctx, in_lockfile):
+    """Original hand-written routing, kept as the fallback when the LLM planner
+    is unavailable or returns an invalid plan. Routes by where the package is
+    declared (see the module docstring)."""
     package_name = ctx["package_name"]
     patched = ctx["patched_version"]
 
@@ -122,7 +172,7 @@ def apply_fix(work_dir, ctx):
         # this repo (present in yarn.lock). Otherwise it isn't in the tree at all
         # (stale scan / wrong resolve / removed dep), and adding a resolution
         # would be a dead pin that fixes nothing.
-        if not _in_lockfile(work_dir, package_name):
+        if not in_lockfile:
             raise RemediationError(
                 f"{package_name} is not a dependency of this repository — it is "
                 f"not declared in package.json and not present in yarn.lock, so "
