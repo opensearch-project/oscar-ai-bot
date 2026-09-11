@@ -261,13 +261,15 @@ class OscarLambdaStack(Stack):
             # driver, otherwise leaving an empty log stream.
             "PYTHONUNBUFFERED": "1",
         }
+        # Secrets Manager NAMES only — never raw token VALUES (which would sit in
+        # plaintext in the task definition, visible via ecs:DescribeTaskDefinition).
+        # The worker fetches the values at runtime. Both are CDK-managed: the
+        # central secret and the agent-declared GitHub token secret.
         if self.secrets_stack:
             env["CENTRAL_SECRET_NAME"] = self.secrets_stack.central_env_secret.secret_name
-        # Only the Secrets Manager NAME — never the raw token VALUE, which would be
-        # stored in plaintext in the task definition (visible via
-        # ecs:DescribeTaskDefinition). The worker fetches the value at runtime.
-        if os.environ.get("GH_TOKEN_SECRET_NAME"):
-            env["GH_TOKEN_SECRET_NAME"] = os.environ["GH_TOKEN_SECRET_NAME"]
+            gh_secret = self.secrets_stack.get_agent_secret("SecurityAdvisories", "gh-token")
+            if gh_secret:
+                env["GH_TOKEN_SECRET_NAME"] = gh_secret.secret_name
         return env
 
     def _create_remediation_ecs(self) -> None:
@@ -302,13 +304,12 @@ class OscarLambdaStack(Stack):
             assumed_by=iam.ServicePrincipal("ecs-tasks.amazonaws.com"),
             description="Task role for the OSCAR CVE remediation Fargate worker",
         )
-        # Read the GitHub token under the oscar-remediation-* prefix.
-        task_role.add_to_policy(iam.PolicyStatement(
-            actions=["secretsmanager:GetSecretValue"],
-            resources=[
-                f"arn:aws:secretsmanager:{self.region}:{self.account}:secret:oscar-remediation-*"
-            ],
-        ))
+        # Read the CDK-managed GitHub token secret (declared via the agent's
+        # get_secrets(); the SA Lambda is granted it separately by the agent loop).
+        gh_secret = (self.secrets_stack.get_agent_secret("SecurityAdvisories", "gh-token")
+                     if self.secrets_stack else None)
+        if gh_secret:
+            gh_secret.grant_read(task_role)
         if self.secrets_stack:
             self.secrets_stack.grant_read_access(task_role)
         execution_role = iam.Role(
