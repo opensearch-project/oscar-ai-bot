@@ -319,8 +319,13 @@ def _replace_version(content, package_name, current, new_value):
     pattern = (
         re.escape(f'"{package_name}"') + r"(\s*:\s*)" + re.escape(f'"{current}"')
     )
-    replacement = f'"{package_name}"' + r"\1" + f'"{new_value}"'
-    return re.subn(pattern, replacement, content)
+    # Callable replacement so package_name/new_value are inserted literally — a
+    # string replacement would interpret \1/\g<>/\\ in them as regex backreferences.
+    return re.subn(
+        pattern,
+        lambda m: f'"{package_name}"' + m.group(1) + f'"{new_value}"',
+        content,
+    )
 
 
 def _at_or_above(version_spec, patched):
