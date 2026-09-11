@@ -286,8 +286,11 @@ def _add_resolution(content, manifest, package_name, patched):
         return content[:m.end()] + f"{entry},\n{indent}" + content[m.end():]
 
     if isinstance(res, dict):  # empty {}
+        # Function replacement so entry is inserted literally (a string replacement
+        # would interpret \1/\g<>/\\ in the version as regex backreferences).
         return re.sub(r'"resolutions"\s*:\s*\{\s*\}',
-                      '"resolutions": {\n    ' + entry + '\n  }', content, count=1)
+                      lambda _m: '"resolutions": {\n    ' + entry + '\n  }',
+                      content, count=1)
 
     # No resolutions block — add one before the final top-level closing brace.
     m = re.search(r'\n([ \t]*)\}\s*$', content)
