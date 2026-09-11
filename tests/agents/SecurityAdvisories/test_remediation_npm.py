@@ -30,6 +30,10 @@ if _NPM_PATH not in sys.path:
     sys.path.insert(0, _NPM_PATH)
 import llm_planner  # noqa: E402
 
+# Captured before the autouse fixture stubs plan_edit, so tests can exercise the
+# real function (its internal _runtime lookup still honours patch.object below).
+_REAL_PLAN_EDIT = llm_planner.plan_edit
+
 
 @pytest.fixture(autouse=True)
 def _llm_off_by_default():
@@ -767,6 +771,51 @@ class TestLlmPlannerValidate:
 
     def test_rejects_non_json(self):
         assert llm_planner._validate('sorry, I cannot help with that') is None
+
+
+class TestPlanEditBedrockCall:
+    """The real plan_edit: Bedrock request + response parsing (client mocked)."""
+
+    _CTX = {'package_name': 'form-data', 'patched_version': '4.0.6',
+            'installed_version': '4.0.4'}
+
+    def _runtime(self, text=None, raises=False):
+        """A fake _runtime() -> client whose invoke_model returns an Anthropic
+        Messages response wrapping ``text`` (or raises)."""
+        class _Body:
+            def read(self_):
+                return json.dumps({
+                    "content": [{"type": "text", "text": text}],
+                    "usage": {"input_tokens": 10, "output_tokens": 5},
+                }).encode("utf-8")
+
+        class _Client:
+            def invoke_model(self_, **kwargs):
+                if raises:
+                    raise RuntimeError("bedrock boom")
+                return {"body": _Body()}
+
+        return lambda: _Client()
+
+    def test_parses_model_response_into_plan(self):
+        with patch.object(llm_planner, '_runtime',
+                          self._runtime('{"action": "edit_and_install", "sections": ["resolutions"]}')):
+            plan = _REAL_PLAN_EDIT(self._CTX, '{"resolutions": {"form-data": "4.0.4"}}', False)
+        assert plan == {"action": "edit_and_install", "sections": ["resolutions"], "reason": ""}
+
+    def test_handles_fenced_json_response(self):
+        with patch.object(llm_planner, '_runtime',
+                          self._runtime('```json\n{"action": "none", "sections": []}\n```')):
+            plan = _REAL_PLAN_EDIT(self._CTX, '{}', False)
+        assert plan == {"action": "none", "sections": [], "reason": ""}
+
+    def test_invalid_model_output_falls_back_to_none(self):
+        with patch.object(llm_planner, '_runtime', self._runtime('not a plan')):
+            assert _REAL_PLAN_EDIT(self._CTX, '{}', False) is None
+
+    def test_bedrock_error_returns_none(self):
+        with patch.object(llm_planner, '_runtime', self._runtime(raises=True)):
+            assert _REAL_PLAN_EDIT(self._CTX, '{}', False) is None
 
 
 class TestApplyFixViaLlmPlan:
