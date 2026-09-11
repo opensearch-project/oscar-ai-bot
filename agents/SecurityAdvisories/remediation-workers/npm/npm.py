@@ -165,6 +165,8 @@ def regenerate(work_dir, ctx):
     else:
         cmd = ["yarn", "install", *common]
 
+    logger.info("Toolchain: node %s, yarn %s", _tool_version("node", env),
+                _tool_version("yarn", env))
     logger.info("Running: %s", " ".join(cmd))
     try:
         result = subprocess.run(cmd, cwd=work_dir, capture_output=True, text=True,
@@ -175,6 +177,16 @@ def regenerate(work_dir, ctx):
     if result.returncode != 0:
         logger.error("%s failed: %s", cmd[1], result.stderr[-500:])
         raise RemediationError(f"yarn {cmd[1]} failed: {result.stderr[-300:]}")
+
+
+def _tool_version(tool, env):
+    """Best-effort ``<tool> --version`` for logging; never raises."""
+    try:
+        out = subprocess.run([tool, "--version"], capture_output=True, text=True,
+                             env=env, timeout=10)
+        return out.stdout.strip() or "unknown"
+    except Exception:  # noqa: BLE001 — logging only
+        return "unknown"
 
 
 def summary(ctx):

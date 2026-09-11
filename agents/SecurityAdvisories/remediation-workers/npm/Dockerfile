@@ -7,31 +7,31 @@
 FROM public.ecr.aws/lambda/python:3.12
 
 # The python:3.12 base is Amazon Linux 2023 (glibc >= 2.28, dnf), which Node 22
-# requires. Toolchain matches what OpenSearch-Dashboards builds with on main:
-# Node 22 (OSD pins 22.22.0) and yarn 1.22.x classic. Dynamic per-repo toolchain
-# detection is a deferred follow-up.
-#
-# Node is installed from the official pinned tarball and verified against a
-# committed SHA256 — no `curl | bash`, so the build fails unless the download
-# matches the reviewed hash. To bump Node, update BOTH values below from
-# https://nodejs.org/dist/v<version>/SHASUMS256.txt (linux-arm64 .tar.gz — the
-# task runs on arm64/Graviton). yarn is a pinned global install using the npm
-# that ships inside that verified Node tarball.
+# requires. Node is installed via nvm with multiple versions, mirroring the
+# OpenSearch-Dashboards CI build image, so the toolchain tracks OSD instead of a
+# single hardcoded pin. NODE_VERSION_LIST is installed; NODE_VERSION is the
+# default on PATH (the current OSD .node-version). 22.22.0 is kept as the version
+# the worker was tested with. yarn 1.22.x classic is installed per node version.
 #
 # gh CLI comes from GitHub's rpm repo (GPG-verified): the base image's microdnf
 # lacks the config-manager plugin, so we write the repo file directly.
-ARG NODE_VERSION=22.22.0
-ARG NODE_SHA256=25ba95dfb96871fa2ef977f11f95ea90818c8fa15c0f2110771db08d4ba423be
-RUN dnf install -y git tar gzip findutils && \
-    curl -fsSLo /tmp/node.tar.gz "https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-linux-arm64.tar.gz" && \
-    echo "${NODE_SHA256}  /tmp/node.tar.gz" | sha256sum -c - && \
-    tar -xzf /tmp/node.tar.gz -C /usr/local --strip-components=1 && \
-    rm /tmp/node.tar.gz && \
-    npm install -g yarn@1.22.22 && \
+ENV NVM_DIR=/usr/local/nvm
+ENV NODE_VERSION=22.23.0
+ARG NODE_VERSION_LIST="22.22.0 22.23.0"
+
+RUN dnf install -y git tar gzip findutils bash
+SHELL ["/bin/bash", "-o", "pipefail", "-c"]
+RUN mkdir -p "$NVM_DIR" && \
+    curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.1/install.sh | bash && \
+    source "$NVM_DIR/nvm.sh" && \
+    for v in $NODE_VERSION_LIST; do nvm install "$v" && nvm use "$v" && npm install -g yarn@1.22.22; done && \
+    nvm alias default "$NODE_VERSION" && \
     printf '[gh-cli]\nname=packages for the GitHub CLI\nbaseurl=https://cli.github.com/packages/rpm\nenabled=1\ngpgcheck=1\ngpgkey=https://cli.github.com/packages/githubcli-archive-keyring.asc\n' > /etc/yum.repos.d/gh-cli.repo && \
     dnf install -y gh && \
     dnf clean all && \
+    source "$NVM_DIR/nvm.sh" && nvm use default && \
     node --version && yarn --version && gh --version
+ENV PATH=$NVM_DIR/versions/node/v$NODE_VERSION/bin:$PATH
 
 # main.py is the entrypoint: it reads the remediation payload from env vars and
 # calls remediation.handle. We override the Lambda base image's runtime-client
