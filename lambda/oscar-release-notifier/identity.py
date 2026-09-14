@@ -88,8 +88,8 @@ def load_handle_map() -> Dict[str, str]:
 def render_release_manager(handle: Optional[str], handle_map: Optional[Dict[str, str]] = None) -> str:
     """Render the release manager as a Slack mention, falling back to their profile link.
 
-    The fallback is the normal case outside beta and prod, and applies in them too until the
-    release manager has run /oscar-link-github.
+    The fallback applies until the release manager has run /oscar-link-github, and in any
+    deployment that has no identity table.
     """
     normalized = normalize_handle(handle)
     if not normalized:

@@ -89,15 +89,12 @@ def main() -> None:
     )
 
     # 3. Storage (DynamoDB tables + identity tables)
-    # Slack-GitHub identity mapping only runs in the shared environments. Everything about it
-    # hangs off workspace_id, so leaving it unset in dev skips the identity table, the OAuth
-    # Lambda and the /oauth/callback endpoint.
-    if environment in ("beta", "prod"):
-        workspace_id = os.environ.get("SLACK_WORKSPACE_ID", "").strip()
-        if not workspace_id:
-            raise ValueError("SLACK_WORKSPACE_ID environment variable is required for beta and prod deployments")
-    else:
-        workspace_id = None
+    # Required in every environment: the deployed environments do not all use distinct
+    # ENVIRONMENT names, so gating the identity table on the name would drop the live table
+    # out of a deployment that already has one.
+    workspace_id = os.environ.get("SLACK_WORKSPACE_ID", "").strip()
+    if not workspace_id:
+        raise ValueError("SLACK_WORKSPACE_ID environment variable is required for deployment")
     storage_stack = OscarStorageStack(
         app, f"OscarStorageStack-{environment}",
         env=env,

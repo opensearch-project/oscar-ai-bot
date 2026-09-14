@@ -267,7 +267,7 @@ class TestReleaseManagerMention:
         assert '<@U111>' in harness.slack.chat_postMessage.call_args.kwargs['text']
 
     def test_falls_back_to_a_profile_link_without_identity_mapping(self, harness):
-        """No IDENTITY_TABLE_NAME in this env - the same as any deployment outside beta/prod."""
+        """No IDENTITY_TABLE_NAME here - the same as a deployment with no identity table."""
         harness.module.lambda_handler({}, None)
         text = harness.slack.chat_postMessage.call_args.kwargs['text']
         assert '<https://github.com/someone|@someone>' in text

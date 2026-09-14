@@ -352,9 +352,7 @@ class MessageProcessor:
                 say(text=e.user_message, thread_ts=thread_ts)
                 return
 
-            # The identity table is only deployed in beta/prod (see app.py). Without it there is
-            # nothing to look the user up in, so no GitHub link is demanded.
-            if os.environ.get("IDENTITY_TABLE_NAME") and not self._has_identity_mapping(user_id):
+            if not self._has_identity_mapping(user_id):
                 self._handle_link_github_via_dm(user_id, channel, thread_ts, reaction_ts, say)
                 return
 

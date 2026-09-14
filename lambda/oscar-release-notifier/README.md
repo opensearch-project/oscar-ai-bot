@@ -67,10 +67,9 @@ by hand into a Jenkins parameter, while the table stores the casing GitHub repor
 When the handle cannot be resolved the message falls back to a link to the GitHub profile,
 `<https://github.com/handle|@handle>`. That is the normal case in two situations:
 
-- **Outside beta and prod**, where the identity table is not deployed at all and
-  `IDENTITY_TABLE_NAME` is unset.
-- **In beta and prod for anyone who has not run `/oscar-link-github`**, since linking is
-  voluntary.
+- **For anyone who has not run `/oscar-link-github`**, since linking is voluntary.
+- **In a deployment with no identity table**, where `IDENTITY_TABLE_NAME` is unset because
+  no Slack workspace id was configured.
 
 A failed or forbidden scan degrades the same way: a mention is a convenience, so it must
 never cost the release manager the notification itself. Note also that a Slack mention only

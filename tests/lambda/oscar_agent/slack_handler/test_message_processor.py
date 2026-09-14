@@ -514,19 +514,8 @@ class TestProcessMessageIdentityGate:
     def test_unlinked_user_triggers_link_flow(self):
         mp = self._setup_with_identity(has_mapping=False)
         say = Mock()
-        with patch.dict(os.environ, {'IDENTITY_TABLE_NAME': 'oscar-identity-T1-prod'}):
-            mp.process_message('C_ALLOWED', 'tts', 'U_ADMIN', '<@BOT> hello', say, message_ts='mts')
+        mp.process_message('C_ALLOWED', 'tts', 'U_ADMIN', '<@BOT> hello', say, message_ts='mts')
         mp._handle_link_github_via_dm.assert_called_once_with('U_ADMIN', 'C_ALLOWED', 'tts', 'mts', say)
-
-    def test_no_link_demanded_when_identity_table_not_deployed(self):
-        """Identity mapping is beta/prod only - elsewhere the query goes straight through."""
-        mp = self._setup_with_identity(has_mapping=False)
-        say = Mock()
-        env = {k: v for k, v in os.environ.items() if k != 'IDENTITY_TABLE_NAME'}
-        with patch.dict(os.environ, env, clear=True):
-            mp.process_message('C_ALLOWED', 'tts', 'U_ADMIN', '<@BOT> hello', say, message_ts='mts')
-        mp._handle_link_github_via_dm.assert_not_called()
-        mp.timeout_handler.query_agent_with_timeout.assert_called_once()
 
     def test_linked_user_proceeds_to_agent(self):
         mp = self._setup_with_identity(has_mapping=True)

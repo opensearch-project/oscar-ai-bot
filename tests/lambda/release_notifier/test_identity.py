@@ -93,7 +93,7 @@ class TestLoadHandleMap:
         assert kwargs['ExpressionAttributeNames'] == {'#s': 'status'}
 
     def test_no_table_configured_returns_empty_without_calling_dynamodb(self, identity, monkeypatch):
-        """Identity mapping is deployed in beta and prod only."""
+        """A deployment with no identity table must not pay for a lookup it cannot do."""
         monkeypatch.delenv('IDENTITY_TABLE_NAME', raising=False)
         with patch.object(identity.boto3, 'resource') as resource:
             assert identity.load_handle_map() == {}

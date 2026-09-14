@@ -279,7 +279,7 @@ class TestReleaseNotifierLambda:
         assert "VpcConfig" not in next(iter(functions.values()))["Properties"]
 
     def test_identity_table_not_injected_without_identity_mapping(self, template):
-        """Identity mapping is beta/prod only - the notifier must not expect the table."""
+        """Without a workspace id there is no table, so the notifier must not expect one."""
         functions = template.find_resources(
             "AWS::Lambda::Function",
             {"Properties": {"FunctionName": "oscar-release-notifier-dev"}},

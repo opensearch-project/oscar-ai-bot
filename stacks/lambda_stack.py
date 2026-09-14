@@ -222,8 +222,9 @@ class OscarLambdaStack(Stack):
             "RELEASE_NOTIFY_TABLE_NAME": self.storage_stack.release_notify_table.table_name,
         }
         # Lets the notifier mention the release manager by resolving the GitHub handle on the
-        # schedule to a Slack user. Only beta and prod deploy the table; elsewhere the
-        # notifier falls back to naming the manager with a link to their GitHub profile.
+        # schedule to a Slack user. Guarded because the storage stack builds the table only
+        # when a workspace id is configured; without it the notifier falls back to naming the
+        # manager with a link to their GitHub profile.
         if self.storage_stack.identity_table:
             env["IDENTITY_TABLE_NAME"] = self.storage_stack.identity_table.table_name
 
