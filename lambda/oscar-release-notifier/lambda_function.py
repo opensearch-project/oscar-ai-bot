@@ -21,7 +21,8 @@ from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 import boto3
-from cadence import PHASE_INTERVAL_HOURS, diff_gaps, gap_signature, should_notify
+from cadence import (PHASE_INTERVAL_HOURS, diff_gaps, gap_signature,
+                     should_notify)
 from message_builder import build_message
 from slack_sdk import WebClient
 from slack_sdk.errors import SlackApiError
