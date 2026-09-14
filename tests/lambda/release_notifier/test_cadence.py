@@ -119,6 +119,23 @@ class TestShouldNotify:
         assert notify is False
         assert reason == 'nothing changed since the last post'
 
+    def test_unreadable_last_post_time_still_requires_a_change(self, cadence):
+        """An unparseable last_posted_at costs the interval check, nothing more.
+
+        The timestamp is written by this Lambda, so an unreadable one means a manual edit or
+        a schema change. Discarding the whole record instead would take the change detection
+        with it and post unconditionally; keeping it means the only way to a post is that
+        something actually moved.
+        """
+        last = {'verdict': 'red', **self.GAPS}
+        notify, reason = cadence.should_notify('pre_rc_frequent', 'red', self.GAPS, last, None)
+        assert notify is False
+        assert reason == 'nothing changed since the last post'
+
+        notify, reason = cadence.should_notify('pre_rc_frequent', 'green', self.GAPS, last, None)
+        assert notify is True
+        assert 'verdict changed' in reason
+
     def test_silent_phase_wins_over_a_changed_verdict(self, cadence):
         last = {'verdict': 'red', **self.GAPS}
         notify, reason = cadence.should_notify('released', 'green', {}, last, 100.0)

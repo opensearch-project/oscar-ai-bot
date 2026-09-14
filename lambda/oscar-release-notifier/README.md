@@ -62,7 +62,8 @@ index for it would buy little, because the table holds one small item per person
 linked an account and one scan per run serves every release in that run. A scan also matches
 handles case-insensitively, which a case-sensitive index key could not — the handle is typed
 by hand into a Jenkins parameter, while the table stores the casing GitHub reported. Only
-`active` mappings are used; an expired mapping's Slack user may have left the workspace.
+`active` mappings are used — the scan filters on `status` server-side, so an expired mapping,
+whose Slack user may have left the workspace, never reaches the Lambda.
 
 When the handle cannot be resolved the message falls back to a link to the GitHub profile,
 `<https://github.com/handle|@handle>`. That is the normal case in two situations:

@@ -92,6 +92,23 @@ class TestLoadHandleMap:
         assert kwargs['ProjectionExpression'] == 'github_handle, slack_user_id, #s'
         assert kwargs['ExpressionAttributeNames'] == {'#s': 'status'}
 
+    def test_scan_asks_dynamodb_to_drop_expired_mappings(self, identity, dynamodb, table):
+        """Filtering server-side keeps the response and the page count proportional to
+        the people who can actually be mentioned, however large the table grows."""
+        table.scan.return_value = {'Items': []}
+        identity.load_handle_map()
+        kwargs = table.scan.call_args.kwargs
+        assert kwargs['FilterExpression'] == '#s = :active'
+        assert kwargs['ExpressionAttributeValues'] == {':active': 'active'}
+
+    def test_pagination_survives_a_page_filtered_down_to_nothing(self, identity, dynamodb, table):
+        # A filtered scan can return an empty page and still have more to walk.
+        table.scan.side_effect = [
+            {'Items': [], 'LastEvaluatedKey': {'github_id': 1}},
+            {'Items': [item('later', 'U111')]},
+        ]
+        assert identity.load_handle_map() == {'later': 'U111'}
+
     def test_no_table_configured_returns_empty_without_calling_dynamodb(self, identity, monkeypatch):
         """A deployment with no identity table must not pay for a lookup it cannot do."""
         monkeypatch.delenv('IDENTITY_TABLE_NAME', raising=False)

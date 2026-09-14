@@ -58,16 +58,22 @@ def load_handle_map() -> Dict[str, str]:
     table = resource.Table(table_name)
 
     mapping: Dict[str, str] = {}
+    # The filter does not reduce what DynamoDB charges for - it is applied after the scan -
+    # but it keeps expired mappings out of the response, so the payload and the pages this
+    # loop walks stay proportional to the people who can actually be mentioned.
     scan_kwargs = {
         'ProjectionExpression': 'github_handle, slack_user_id, #s',
+        'FilterExpression': '#s = :active',
         'ExpressionAttributeNames': {'#s': 'status'},
+        'ExpressionAttributeValues': {':active': 'active'},
     }
 
     try:
         while True:
             response = table.scan(**scan_kwargs)
             for item in response.get('Items', []):
-                # An expired mapping's Slack user may have left the workspace already.
+                # Belt and braces with the filter above: an expired mapping's Slack user may
+                # have left the workspace already.
                 if item.get('status') != 'active':
                     continue
                 handle = item.get('github_handle')
