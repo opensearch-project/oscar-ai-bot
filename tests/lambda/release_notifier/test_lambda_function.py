@@ -9,6 +9,7 @@ silence the others, and that nothing is recorded as posted when Slack rejected i
 """
 
 import json
+import logging
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -146,6 +147,7 @@ class TestPosting:
             'posted': True,
             'reason': 'first post for this release',
             'channels_delivered': 2,
+            'channels_total': 2,
             'verdict': 'red',
         }]}
         assert [c.kwargs['channel'] for c in harness.slack.chat_postMessage.call_args_list] == \
@@ -186,6 +188,33 @@ class TestPosting:
         # Recording a post that never arrived would suppress the next real one.
         assert result['results'][0]['posted'] is False
         harness.table.put_item.assert_not_called()
+
+    def test_partial_delivery_is_recorded_and_logged(self, harness, caplog):
+        """A post that reached some channels must not be resent to those channels.
+
+        Re-posting on the next run to make one broken channel whole would duplicate the
+        message in every healthy channel, every run, until it recovers. The state is
+        recorded instead and the shortfall is logged loudly enough to alarm on.
+        """
+        from slack_sdk.errors import SlackApiError
+        harness.slack.chat_postMessage.side_effect = [
+            None,
+            SlackApiError('nope', MagicMock(**{'get.return_value': 'channel_not_found'})),
+        ]
+
+        with caplog.at_level(logging.ERROR):
+            result = harness.module.lambda_handler({}, None)
+
+        assert result['results'][0]['posted'] is True
+        assert result['results'][0]['channels_delivered'] == 1
+        assert result['results'][0]['channels_total'] == 2
+        harness.table.put_item.assert_called_once()
+        assert 'RELEASE_NOTIFY_PARTIAL_DELIVERY' in caplog.text
+
+    def test_full_delivery_is_not_logged_as_partial(self, harness, caplog):
+        with caplog.at_level(logging.ERROR):
+            harness.module.lambda_handler({}, None)
+        assert 'RELEASE_NOTIFY_PARTIAL_DELIVERY' not in caplog.text
 
     def test_unchanged_release_inside_the_interval_stays_quiet(self, harness):
         harness.table.get_item.return_value = {'Item': {
@@ -228,6 +257,29 @@ class TestPosting:
         assert result['statusCode'] == 200
         assert result['results'][0]['error'] == 'boom'
         assert result['results'][1]['posted'] is True
+
+
+class TestReleaseManagerMention:
+
+    def test_linked_manager_is_tagged_in_the_post(self, harness):
+        with patch.object(harness.module, 'load_handle_map', return_value={'someone': 'U111'}):
+            harness.module.lambda_handler({}, None)
+        assert '<@U111>' in harness.slack.chat_postMessage.call_args.kwargs['text']
+
+    def test_falls_back_to_a_profile_link_without_identity_mapping(self, harness):
+        """No IDENTITY_TABLE_NAME in this env - the same as any deployment outside beta/prod."""
+        harness.module.lambda_handler({}, None)
+        text = harness.slack.chat_postMessage.call_args.kwargs['text']
+        assert '<https://github.com/someone|@someone>' in text
+
+    def test_table_is_read_once_per_run_not_once_per_release(self, harness):
+        harness.responses['list_active_releases'] = {'releases': [
+            {**ACTIVE_RELEASE, 'version': '3.9.0'},
+            {**ACTIVE_RELEASE, 'version': '4.0.0'},
+        ]}
+        with patch.object(harness.module, 'load_handle_map', return_value={}) as load:
+            harness.module.lambda_handler({}, None)
+        load.assert_called_once()
 
 
 class TestConfiguration:

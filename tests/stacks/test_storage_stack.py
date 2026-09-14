@@ -96,8 +96,8 @@ class TestStorageStack:
         })
 
     def test_cloudwatch_alarms_created(self, template):
-        """Five CloudWatch alarms should be created for monitoring."""
-        template.resource_count_is("AWS::CloudWatch::Alarm", 5)
+        """Three alarms each for the context and release-notify tables."""
+        template.resource_count_is("AWS::CloudWatch::Alarm", 10)
 
     def test_read_throttle_alarm(self, template):
         """Read throttle alarm exists with correct metric."""
@@ -141,6 +141,13 @@ class TestReleaseNotifyStateTable:
             "AttributeDefinitions": [{"AttributeName": "version", "AttributeType": "S"}],
             "BillingMode": "PAY_PER_REQUEST",
         })
+
+    def test_table_is_monitored(self, template):
+        """Throttling here silently drops duplicate suppression, so it must alarm."""
+        for name in ("oscar-releasenotify-read-throttles-dev",
+                     "oscar-releasenotify-write-throttles-dev",
+                     "oscar-releasenotify-errors-dev"):
+            template.has_resource_properties("AWS::CloudWatch::Alarm", {"AlarmName": name})
 
     def test_table_is_exposed_to_other_stacks(self):
         """The Lambda stack reads the table name off the stack to set an env var."""

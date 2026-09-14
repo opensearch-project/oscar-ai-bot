@@ -81,7 +81,7 @@ class OscarStorageStack(Stack):
         # Last-posted state for the release notifier
         self.release_notify_table = self._create_release_notify_table(removal_policy)
 
-        # Create monitoring and alerting for context table only
+        # Create monitoring and alerting for every table this stack owns
         self._create_context_monitoring(environment)
 
     def _create_context_table(
@@ -158,7 +158,7 @@ class OscarStorageStack(Stack):
 
     def _create_context_monitoring(self, environment: str) -> None:
         """
-        Create CloudWatch monitoring and alerting for the context table only.
+        Create CloudWatch monitoring and alerting for the tables this stack owns.
         This method creates CloudWatch alarms for monitoring table usage,
         throttling, and error rates with appropriate thresholds.
         """
@@ -185,6 +185,14 @@ class OscarStorageStack(Stack):
                 alert_topic=self.alert_topic,
                 environment=environment
             )
+
+        # Release notify state monitoring
+        self._create_table_alarms(
+            table=self.release_notify_table,
+            table_type="ReleaseNotify",
+            alert_topic=self.alert_topic,
+            environment=environment
+        )
 
     def _create_table_alarms(
         self,

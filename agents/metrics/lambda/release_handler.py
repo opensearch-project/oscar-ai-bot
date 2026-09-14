@@ -56,6 +56,22 @@ ACTIVE_RELEASES_FETCH_SIZE = 100
 SCOPE_STATE = 'state'
 SCOPE_SCHEDULE = 'schedule'
 
+# Which criteria the verdict is judged against in each phase: entrance criteria gate the RC,
+# exit criteria gate GA, so the verdict tracks whichever milestone is still ahead. A phase
+# with no milestone ahead (shipped, cancelled, undated) is judged against everything, as is
+# a version whose schedule cannot be read - guessing a scope there would quietly drop gates.
+CRITERIA_FOCUS_BY_PHASE = {
+    'out_of_window': release_rubric.ENTRANCE,
+    'pre_rc_daily': release_rubric.ENTRANCE,
+    'pre_rc_frequent': release_rubric.ENTRANCE,
+    'rc_to_release': release_rubric.EXIT,
+    'final_push': release_rubric.EXIT,
+    'overdue': release_rubric.EXIT,
+    'released': None,
+    'cancelled': None,
+    'not_scheduled': None,
+}
+
 
 def _require_version(params: Dict[str, Any]) -> Optional[str]:
     """Return the trimmed version string, or None when missing or blank."""
@@ -67,6 +83,27 @@ def _require_version(params: Dict[str, Any]) -> Optional[str]:
 
 def _now() -> datetime:
     return datetime.now(timezone.utc)
+
+
+def _criteria_focus(version: str, request_id: str) -> Optional[str]:
+    """Decide which criteria the verdict is judged against, from the release's phase.
+
+    Read here rather than accepted as a parameter so that every caller gets the same
+    verdict: an RM asking OSCAR and the scheduled notifier must never disagree about
+    whether a release is a go, and only one of them knows the phase already.
+    """
+    window = handle_get_release_window({'version': version}, request_id)
+    if window.get('error') or not window.get('found'):
+        logger.warning(
+            f"RELEASE_STATUS_SCOPE [{request_id}]: no schedule for {version}, "
+            f"judging every criterion"
+        )
+        return None
+
+    phase = window.get('cadence_phase') or 'not_scheduled'
+    focus = CRITERIA_FOCUS_BY_PHASE.get(phase)
+    logger.info(f"RELEASE_STATUS_SCOPE [{request_id}]: phase {phase} -> criteria {focus or 'all'}")
+    return focus
 
 
 def handle_get_release_status(params: Dict[str, Any], request_id: str = 'unknown') -> Dict[str, Any]:
@@ -113,7 +150,7 @@ def handle_get_release_status(params: Dict[str, Any], request_id: str = 'unknown
         f"{len(criteria)} current criteria for {version}"
     )
 
-    verdict = release_rubric.compute_verdict(criteria)
+    verdict = release_rubric.compute_verdict(criteria, focus=_criteria_focus(version, request_id))
     release_issue = next(
         (c.get('release_issue') for c in criteria if c.get('release_issue')), None
     )
@@ -123,11 +160,13 @@ def handle_get_release_status(params: Dict[str, Any], request_id: str = 'unknown
         'found': True,
         'data_source': index,
         'verdict': verdict['verdict'],
+        'criteria_scope': verdict['criteria_scope'],
         'blocking_failures': verdict['blocking_failures'],
         'blocking_in_progress': verdict['blocking_in_progress'],
         'blocking_unknowns': verdict['blocking_unknowns'],
         'non_blocking_gaps': verdict['non_blocking_gaps'],
         'not_applicable': verdict['not_applicable'],
+        'out_of_scope': verdict['out_of_scope'],
         'counts': verdict['counts'],
         'criteria': verdict['criteria'],
     }

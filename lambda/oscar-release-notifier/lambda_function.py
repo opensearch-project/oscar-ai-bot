@@ -23,6 +23,7 @@ from typing import Any, Dict, List, Optional
 import boto3
 from cadence import (PHASE_INTERVAL_HOURS, diff_gaps, gap_signature,
                      should_notify)
+from identity import load_handle_map
 from message_builder import build_message
 from slack_sdk import WebClient
 from slack_sdk.errors import SlackApiError
@@ -125,7 +126,13 @@ def _post_to_slack(client: WebClient, channels: List[str], text: str) -> int:
     return delivered
 
 
-def _process_release(release: Dict[str, Any], table, slack: WebClient, channels: List[str]) -> Dict[str, Any]:
+def _process_release(
+    release: Dict[str, Any],
+    table,
+    slack: WebClient,
+    channels: List[str],
+    handle_map: Optional[Dict[str, str]] = None,
+) -> Dict[str, Any]:
     """Evaluate one release and post if it is due. Returns a summary for the response."""
     version = release.get('version')
     phase = release.get('cadence_phase', 'not_scheduled')
@@ -150,8 +157,17 @@ def _process_release(release: Dict[str, Any], table, slack: WebClient, channels:
         return {'version': version, 'posted': False, 'reason': reason}
 
     delta = diff_gaps(record, gaps)
-    text = build_message(version, release, status, delta)
+    text = build_message(version, release, status, delta, handle_map)
     delivered = _post_to_slack(slack, channels, text)
+
+    if 0 < delivered < len(channels):
+        # State is still recorded below, so the channels that did get the post are not
+        # spammed with it again on the next run - which means the ones that failed miss
+        # this update entirely. Loud enough to alarm on.
+        logger.error(
+            f'RELEASE_NOTIFY_PARTIAL_DELIVERY [{version}]: {delivered}/{len(channels)} '
+            f'channel(s) received the post; the rest will not see this update'
+        )
 
     if delivered:
         table.put_item(Item={
@@ -167,6 +183,7 @@ def _process_release(release: Dict[str, Any], table, slack: WebClient, channels:
         'posted': bool(delivered),
         'reason': reason,
         'channels_delivered': delivered,
+        'channels_total': len(channels),
         'verdict': status['verdict'],
     }
 
@@ -203,11 +220,16 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
 
     slack = WebClient(token=slack_config['token'])
     table = _state_table()
+    # Loaded once for the whole run rather than per release, since every release resolves
+    # its manager against the same table.
+    handle_map = load_handle_map()
 
     results = []
     for release in releases:
         try:
-            results.append(_process_release(release, table, slack, slack_config['channels']))
+            results.append(
+                _process_release(release, table, slack, slack_config['channels'], handle_map)
+            )
         except Exception as e:
             # One broken release must not stop the others from being reported.
             logger.error(f"RELEASE_NOTIFY_FAILED [{release.get('version')}]: {e}")

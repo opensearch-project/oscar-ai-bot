@@ -38,6 +38,11 @@ def cadence():
 
 
 @pytest.fixture(scope='module')
+def identity():
+    return load('identity')
+
+
+@pytest.fixture(scope='module')
 def message_builder():
     return load('message_builder')
 

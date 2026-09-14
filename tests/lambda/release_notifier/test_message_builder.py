@@ -77,10 +77,12 @@ class TestPhaseFocus:
             criterion('security_reviews_complete', criterion_type='entrance'),
             criterion('release_blog_ready', criterion_type='exit'),
         ]))
-        blocking, also_open = text.split('Also open')
+        blocking, leftover = text.split('Left open at RC')
         assert 'Blocking release (exit criteria):' in blocking
         assert 'release_blog_ready' in blocking
-        assert 'security_reviews_complete' in also_open
+        # Past the gate it belonged to, so it is not "not yet due" - it was left behind.
+        assert 'security_reviews_complete' in leftover
+        assert 'not yet due' not in text
 
     def test_overdue_release_is_judged_on_exit_criteria(self, message_builder):
         window = {**WINDOW, 'cadence_phase': 'overdue', 'days_to_rc': -20,
@@ -92,10 +94,25 @@ class TestPhaseFocus:
         assert 'past its release date' in text
 
     def test_nothing_due_in_this_phase_is_stated_explicitly(self, message_builder):
-        text = message_builder.build_message('3.9.0', WINDOW, status(criteria=[
-            criterion('release_blog_ready', criterion_type='exit'),
-        ]))
+        text = message_builder.build_message('3.9.0', WINDOW, status(
+            verdict='green',
+            criteria=[criterion('release_blog_ready', criterion_type='exit')],
+        ))
         assert 'Nothing outstanding for RC.' in text
+
+    def test_a_non_green_verdict_never_reads_as_nothing_outstanding(self, message_builder):
+        """The verdict wins over the focused list when the two disagree.
+
+        They are computed from the same criteria in different places, so a notifier running
+        ahead of an older metrics Lambda can be handed a verdict scoped differently from the
+        message. "Nothing outstanding" under a RED headline would be worse than noisy.
+        """
+        text = message_builder.build_message('3.9.0', WINDOW, status(
+            verdict='red',
+            criteria=[criterion('release_blog_ready', criterion_type='exit')],
+        ))
+        assert 'Nothing outstanding' not in text
+        assert 'yet the verdict is RED' in text
 
     def test_phase_without_a_focus_lists_everything_together(self, message_builder):
         window = {**WINDOW, 'cadence_phase': 'not_scheduled'}
@@ -173,8 +190,19 @@ class TestDeltaAndFooter:
 
     def test_manager_and_issue_included(self, message_builder):
         text = message_builder.build_message('3.9.0', WINDOW, status())
-        assert 'Release manager: someone' in text
+        assert 'Release manager: <https://github.com/someone|@someone>' in text
         assert 'issues/6426' in text
+
+    def test_linked_manager_is_tagged(self, message_builder):
+        """The one person who has to act on this gets a real Slack ping."""
+        text = message_builder.build_message(
+            '3.9.0', WINDOW, status(), None, {'someone': 'U111'})
+        assert 'Release manager: <@U111>' in text
+
+    def test_unknown_manager_is_omitted(self, message_builder):
+        window = {k: v for k, v in WINDOW.items() if k != 'release_manager'}
+        text = message_builder.build_message('3.9.0', window, status())
+        assert 'Release manager' not in text
 
     def test_release_issue_falls_back_to_the_state_index(self, message_builder):
         window = {k: v for k, v in WINDOW.items() if k != 'release_issue'}

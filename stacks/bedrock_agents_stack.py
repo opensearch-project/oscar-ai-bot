@@ -235,9 +235,6 @@ class OscarAgentsStack(Stack):
             - For Jenkins job requests → delegate to the Jenkins Specialist.
             - For metrics, build status, test results → delegate to the Metrics Specialist.
             - For release readiness of a specific version ("what is the status of 3.9.0", "is 3.9.0 ready/a go", "what is blocking 3.9.0", readiness criteria or verdict), release timing (RC/release dates, days remaining, release manager), and whether a version has shipped ("was 3.8.0 released", "has 3.8.0 shipped", "when was 3.8.0 released") → delegate to the Metrics Specialist.
-
-            - For release readiness of a specific version ("what is the status of 3.9.0", "is 3.9.0 ready/a go", "what is blocking 3.9.0", readiness criteria or verdict), release timing (RC/release dates, days remaining, release manager), and whether a version has shipped ("was 3.8.0 released", "has 3.8.0 shipped", "when was 3.8.0 released") → delegate to the Metrics Specialist.
-
             - For security vulnerabilities, CVEs, security advisories, and vulnerability scans → delegate to the Security Advisories Specialist.
             - For GitHub operations (repos, PRs, issues, labels, commits, branches, code search, Actions, code scanning) → delegate to the GitHub Specialist.
             - For OpenSearch configuration, installation instructions, APIs, commands & information to build and test, release process questions as well as Best practices, troubleshooting guides, release workflows, and release manager duties. → query the knowledge base.

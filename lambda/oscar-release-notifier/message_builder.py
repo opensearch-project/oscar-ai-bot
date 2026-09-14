@@ -14,19 +14,32 @@ still reported, just as supporting detail.
 
 from typing import Any, Dict, List, Optional
 
+from identity import render_release_manager
+
 VERDICT_EMOJI = {
     'red': ':red_circle:',
     'yellow': ':large_yellow_circle:',
     'green': ':large_green_circle:',
 }
 
-# Which criterion type gates the milestone the release is currently working towards.
+# Which criterion type gates the milestone the release is currently working towards. Used
+# only when the verdict does not report its own scope, which the metrics Lambda now always
+# does - kept as a fallback so an older metrics deployment still renders sensibly.
 PHASE_FOCUS = {
     'pre_rc_daily': 'entrance',
     'pre_rc_frequent': 'entrance',
     'rc_to_release': 'exit',
     'final_push': 'exit',
     'overdue': 'exit',
+}
+
+# How the criteria that are outside the verdict's scope are introduced. Before the RC the
+# exit criteria simply are not due yet; after it, an unmet entrance criterion is not pending
+# work but something that was waived or left behind at the gate, and saying "not yet due"
+# about it would be plainly wrong.
+LEFTOVER_LABEL = {
+    'entrance': '_Also open, not yet due (exit criteria):_',
+    'exit': '_Left open at RC (entrance criteria):_',
 }
 
 PHASE_LABEL = {
@@ -92,8 +105,13 @@ def build_message(
     window: Dict[str, Any],
     status: Dict[str, Any],
     delta: Optional[Dict[str, List[str]]] = None,
+    handle_map: Optional[Dict[str, str]] = None,
 ) -> str:
-    """Build the Slack message for one release."""
+    """Build the Slack message for one release.
+
+    handle_map resolves the release manager's GitHub handle to a Slack user so they are
+    mentioned rather than merely named; see identity.render_release_manager.
+    """
     phase = window.get('cadence_phase', 'not_scheduled')
     verdict = status.get('verdict', 'unknown')
     emoji = VERDICT_EMOJI.get(verdict, ':white_circle:')
@@ -103,22 +121,33 @@ def build_message(
     ]
 
     outstanding = _outstanding(status)
-    focus = PHASE_FOCUS.get(phase)
+    # The verdict reports the criteria it was judged against, so the message groups them the
+    # same way it was decided rather than re-deriving it from the phase.
+    scope = status.get('criteria_scope')
+    focus = None if scope == 'all' else scope or PHASE_FOCUS.get(phase)
 
     if focus:
         due_now = [c for c in outstanding if c.get('criterion_type') == focus]
         later = [c for c in outstanding if c.get('criterion_type') != focus]
+        milestone = 'RC' if focus == 'entrance' else 'release'
         if due_now:
-            milestone = 'RC' if focus == 'entrance' else 'release'
             lines.append(f"\n*Blocking {milestone} ({focus} criteria):*")
             lines.extend(_criterion_line(c) for c in due_now)
-        else:
-            milestone = 'RC' if focus == 'entrance' else 'release'
+        elif verdict == 'green':
             lines.append(f"\nNothing outstanding for {milestone}.")
+        else:
+            # The verdict and this list are computed from the same criteria, so they should
+            # agree - but they are computed in different places, and a notifier running
+            # ahead of an older metrics Lambda gets a verdict scoped differently from the
+            # message. Never let that render as "nothing outstanding" under a RED headline.
+            lines.append(
+                f"\nNo {focus} criteria are outstanding, yet the verdict is "
+                f"{verdict.upper()} — treat the verdict as authoritative and check "
+                f"the criteria below."
+            )
         if later:
             names = ', '.join(f"`{c.get('criterion_name')}`" for c in later)
-            label = 'exit' if focus == 'entrance' else 'entrance'
-            lines.append(f"\n_Also open, not yet due ({label} criteria):_ {names}")
+            lines.append(f"\n{LEFTOVER_LABEL[focus]} {names}")
     elif outstanding:
         lines.append('\n*Outstanding:*')
         lines.extend(_criterion_line(c) for c in outstanding)
@@ -133,7 +162,7 @@ def build_message(
             parts.append('newly raised: ' + ', '.join(f'`{n}`' for n in delta['raised']))
         lines.append('\n*Since last update* — ' + '; '.join(parts))
 
-    manager = window.get('release_manager')
+    manager = render_release_manager(window.get('release_manager'), handle_map)
     if manager:
         lines.append(f"\nRelease manager: {manager}")
 

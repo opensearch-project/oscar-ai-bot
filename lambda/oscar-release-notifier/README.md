@@ -21,6 +21,11 @@ EventBridge invokes the Lambda every six hours. Per run:
 5. `message_builder.build_message` renders it and the Lambda posts to every configured
    channel, then records what it posted.
 
+The release manager is tagged rather than merely named. The schedule records them as a
+GitHub handle, which means nothing to Slack, so `identity.load_handle_map` reads the
+Slack-GitHub identity table once per run and the message renders `<@U…>` for them. See
+[Tagging the release manager](#tagging-the-release-manager).
+
 **The verdict is not computed here.** It comes from the metrics Lambda, which owns the
 rubric, so the number an RM reads in Slack is the same number they get by asking OSCAR
 directly. That is also why this function needs no cluster access, no VPC attachment and no
@@ -43,6 +48,35 @@ RC, exit criteria gate GA. Before RC an unfinished exit criterion is expected ra
 news, so presenting it as blocking would train readers to ignore the alert. Criteria that
 are open but not yet due are still listed, just separately.
 
+## Tagging the release manager
+
+Every post tags the release manager, since they are the one person who has to act on it.
+The path from schedule to mention is:
+
+`release_manager` (GitHub handle, from `registerReleaseSchedule`) → identity table →
+`slack_user_id` → `<@U…>`
+
+The lookup is a **scan**, not an indexed query. The identity table is keyed on the GitHub
+numeric id with a secondary index on `slack_user_id`, so a handle is a non-key attribute; an
+index for it would buy little, because the table holds one small item per person who has
+linked an account and one scan per run serves every release in that run. A scan also matches
+handles case-insensitively, which a case-sensitive index key could not — the handle is typed
+by hand into a Jenkins parameter, while the table stores the casing GitHub reported. Only
+`active` mappings are used; an expired mapping's Slack user may have left the workspace.
+
+When the handle cannot be resolved the message falls back to a link to the GitHub profile,
+`<https://github.com/handle|@handle>`. That is the normal case in two situations:
+
+- **Outside beta and prod**, where the identity table is not deployed at all and
+  `IDENTITY_TABLE_NAME` is unset.
+- **In beta and prod for anyone who has not run `/oscar-link-github`**, since linking is
+  voluntary.
+
+A failed or forbidden scan degrades the same way: a mention is a convenience, so it must
+never cost the release manager the notification itself. Note also that a Slack mention only
+notifies someone who is a member of the channel — if the RM is not in a `RELEASE_CHANNELS`
+channel, the tag renders but does not reach them.
+
 ## Configuration
 
 | Source | Key | Purpose |
@@ -52,6 +86,7 @@ are open but not yet due are still listed, just separately.
 | Lambda env (CDK) | `METRICS_FUNCTION_NAME` | The metrics Lambda to invoke |
 | Lambda env (CDK) | `RELEASE_NOTIFY_TABLE_NAME` | Where the last post per version is recorded |
 | Lambda env (CDK) | `CENTRAL_SECRET_NAME` | Where to read the two secret values |
+| Lambda env (CDK) | `IDENTITY_TABLE_NAME` | Slack-GitHub mappings, for tagging the RM. Only set where identity mapping is deployed (beta, prod) |
 
 Point `RELEASE_CHANNELS` at a test channel first — the cadence only becomes visible over
 several days of a real release.

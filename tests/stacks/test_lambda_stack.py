@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """Tests for OSCAR Lambda stack."""
 
+import json
 import os
 
 import pytest
@@ -135,9 +136,12 @@ class TestLambdaStack:
         })
 
 
-@pytest.fixture
-def template_with_identity():
-    """Synthesise the Lambda stack with identity tables configured."""
+def _synth_with_identity():
+    """Synthesise with identity tables configured, returning (lambda, permissions) templates.
+
+    Grants made in the Lambda stack against a role owned by the permissions stack land in the
+    permissions stack's template, so assertions about them need both.
+    """
     os.environ["CDK_DEFAULT_ACCOUNT"] = "123456789012"
     os.environ["CDK_DEFAULT_REGION"] = "us-east-1"
 
@@ -166,7 +170,19 @@ def template_with_identity():
         agents=AGENTS,
         env=ENV,
     )
-    return Template.from_stack(stack)
+    return Template.from_stack(stack), Template.from_stack(permissions)
+
+
+@pytest.fixture
+def template_with_identity():
+    """The Lambda stack template, with identity tables configured."""
+    return _synth_with_identity()[0]
+
+
+@pytest.fixture
+def permissions_template_with_identity():
+    """The permissions stack template, which holds grants made against its roles."""
+    return _synth_with_identity()[1]
 
 
 class TestIdentityLambda:
@@ -261,6 +277,45 @@ class TestReleaseNotifierLambda:
         )
         assert len(functions) == 1
         assert "VpcConfig" not in next(iter(functions.values()))["Properties"]
+
+    def test_identity_table_not_injected_without_identity_mapping(self, template):
+        """Identity mapping is beta/prod only - the notifier must not expect the table."""
+        functions = template.find_resources(
+            "AWS::Lambda::Function",
+            {"Properties": {"FunctionName": "oscar-release-notifier-dev"}},
+        )
+        env = next(iter(functions.values()))["Properties"]["Environment"]["Variables"]
+        assert "IDENTITY_TABLE_NAME" not in env
+
+    def test_identity_table_injected_when_deployed(self, template_with_identity):
+        """With the table deployed the notifier can tag the release manager."""
+        template_with_identity.has_resource_properties("AWS::Lambda::Function", {
+            "FunctionName": "oscar-release-notifier-dev",
+            "Environment": {
+                "Variables": Match.object_like({
+                    "IDENTITY_TABLE_NAME": Match.any_value(),
+                }),
+            },
+        })
+
+    def test_notifier_gets_read_only_access_to_the_identity_table(
+        self, permissions_template_with_identity,
+    ):
+        """Resolving a handle is a read - the notifier must never be able to alter a mapping."""
+        policies = permissions_template_with_identity.find_resources("AWS::IAM::Policy")
+        notifier_policy = next(
+            p for name, p in policies.items() if name.startswith("ReleaseNotifierRole")
+        )
+
+        actions = set()
+        for statement in notifier_policy["Properties"]["PolicyDocument"]["Statement"]:
+            if "IdentityTable" not in json.dumps(statement.get("Resource")):
+                continue
+            declared = statement["Action"]
+            actions.update(declared if isinstance(declared, list) else [declared])
+
+        assert "dynamodb:Scan" in actions
+        assert not {"dynamodb:PutItem", "dynamodb:UpdateItem", "dynamodb:DeleteItem"} & actions
 
     def test_no_notifier_without_the_metrics_agent(self):
         """The verdict lives in the metrics Lambda, so the notifier is pointless without it."""

@@ -411,3 +411,98 @@ class TestQueryReleaseState:
         assert result['type'] == 'agentic_search_error'
         assert result['retryable'] is False
         assert result['status_code'] == 400
+
+
+class TestCriteriaScoping:
+    """get_release_status judges only the criteria that gate the milestone still ahead.
+
+    The scope is decided here rather than by the caller so an RM asking OSCAR and the
+    scheduled notifier can never disagree about whether a release is a go. Every test
+    therefore drives it through the schedule the handler reads for itself: the state query
+    lands first, the schedule query second.
+    """
+
+    _MIXED_STATE = {'hits': {'total': {'value': 2}, 'hits': [
+        _state_hit('security_reviews_complete', 'not_met', '2026-09-01T18:30:00Z',
+                   criterion_type='entrance'),
+        _state_hit('release_blog_ready', 'met', '2026-09-01T18:30:00Z',
+                   criterion_type='exit'),
+    ]}}
+
+    @staticmethod
+    def _schedule(rc_date, release_date, status='active'):
+        return {'hits': {'total': {'value': 1}, 'hits': [{'_source': {
+            'version': '3.9.0',
+            'rc_date': rc_date,
+            'release_date': release_date,
+            'status': status,
+        }}]}}
+
+    def _status(self, schedule, state=None, now=datetime(2026, 9, 20, 12, 0, tzinfo=timezone.utc)):
+        handler, mock_aws, _ = _load_handler()
+        mock_aws.opensearch_request.side_effect = [state or self._MIXED_STATE, schedule]
+        with patch.object(handler, '_now', return_value=now):
+            return handler.handle_get_release_status({'version': '3.9.0'})
+
+    def test_post_rc_judges_exit_criteria_only(self):
+        # RC cut on the 15th, release on the 29th: the entrance gate is behind us.
+        result = self._status(self._schedule('2026-09-15', '2026-09-29'))
+        assert result['criteria_scope'] == 'exit'
+        assert result['verdict'] == 'green'
+        assert result['out_of_scope'] == ['security_reviews_complete']
+
+    def test_pre_rc_judges_entrance_criteria_only(self):
+        result = self._status(
+            self._schedule('2026-09-25', '2026-10-09'),
+            state={'hits': {'total': {'value': 2}, 'hits': [
+                _state_hit('security_reviews_complete', 'met', '2026-09-01T18:30:00Z',
+                           criterion_type='entrance'),
+                _state_hit('performance_tests_posted', 'not_met', '2026-09-01T18:30:00Z',
+                           criterion_type='exit'),
+            ]}},
+        )
+        assert result['criteria_scope'] == 'entrance'
+        # An unfinished exit criterion before the RC is expected, not a blocker.
+        assert result['verdict'] == 'green'
+        assert result['out_of_scope'] == ['performance_tests_posted']
+
+    def test_shipped_release_is_judged_against_everything(self):
+        result = self._status(self._schedule('2026-08-15', '2026-08-29', status='released'))
+        assert result['criteria_scope'] == 'all'
+        assert result['verdict'] == 'red'
+
+    def test_unregistered_schedule_judges_everything(self):
+        # Guessing a scope with no schedule to read would quietly drop gates.
+        empty = {'hits': {'total': {'value': 0}, 'hits': []}}
+        result = self._status(empty)
+        assert result['criteria_scope'] == 'all'
+        assert result['verdict'] == 'red'
+
+    def test_schedule_query_failure_judges_everything(self):
+        handler, mock_aws, _ = _load_handler()
+        mock_aws.opensearch_request.side_effect = [self._MIXED_STATE, Exception('boom')]
+        result = handler.handle_get_release_status({'version': '3.9.0'})
+        assert result['criteria_scope'] == 'all'
+        assert result['verdict'] == 'red'
+
+    def test_no_criteria_in_scope_falls_back_to_everything(self):
+        result = self._status(
+            self._schedule('2026-09-15', '2026-09-29'),
+            state={'hits': {'total': {'value': 1}, 'hits': [
+                _state_hit('security_reviews_complete', 'not_met', '2026-09-01T18:30:00Z',
+                           criterion_type='entrance'),
+            ]}},
+        )
+        assert result['criteria_scope'] == 'all'
+        assert result['verdict'] == 'red'
+
+    def test_every_cadence_phase_has_a_scope_decision(self):
+        # A phase missing from the map would silently be judged against everything.
+        handler, _, _ = _load_handler()
+        phases = {
+            handler._cadence_phase(rc, rel, status)
+            for rc in (None, -5, 0, 5, 10, 20)
+            for rel in (None, -3, 1, 5, 20)
+            for status in (None, 'active', 'released', 'cancelled')
+        }
+        assert phases <= set(handler.CRITERIA_FOCUS_BY_PHASE)

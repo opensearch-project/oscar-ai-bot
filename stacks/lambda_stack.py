@@ -215,6 +215,18 @@ class OscarLambdaStack(Stack):
 
         role = self.permissions_stack.release_notifier_role
 
+        env = {
+            "ENVIRONMENT": self.env_name,
+            "CENTRAL_SECRET_NAME": self.secrets_stack.central_env_secret.secret_name,
+            "METRICS_FUNCTION_NAME": metrics_function.function_name,
+            "RELEASE_NOTIFY_TABLE_NAME": self.storage_stack.release_notify_table.table_name,
+        }
+        # Lets the notifier mention the release manager by resolving the GitHub handle on the
+        # schedule to a Slack user. Only beta and prod deploy the table; elsewhere the
+        # notifier falls back to naming the manager with a link to their GitHub profile.
+        if self.storage_stack.identity_table:
+            env["IDENTITY_TABLE_NAME"] = self.storage_stack.identity_table.table_name
+
         function = PythonFunction(
             self, "ReleaseNotifierLambda",
             function_name=f"oscar-release-notifier-{self.env_name}",
@@ -224,12 +236,7 @@ class OscarLambdaStack(Stack):
             index="lambda_function.py",
             timeout=Duration.seconds(300),
             memory_size=256,
-            environment={
-                "ENVIRONMENT": self.env_name,
-                "CENTRAL_SECRET_NAME": self.secrets_stack.central_env_secret.secret_name,
-                "METRICS_FUNCTION_NAME": metrics_function.function_name,
-                "RELEASE_NOTIFY_TABLE_NAME": self.storage_stack.release_notify_table.table_name,
-            },
+            environment=env,
             role=role,
             description="Scheduled release readiness notifications for release managers",
             reserved_concurrent_executions=2,
@@ -237,6 +244,8 @@ class OscarLambdaStack(Stack):
 
         self.storage_stack.release_notify_table.grant_read_write_data(role)
         self.secrets_stack.grant_read_access(role)
+        if self.storage_stack.identity_table:
+            self.storage_stack.identity_table.grant_read_data(role)
         # Invoke on the metrics Lambda is granted in the permissions stack - see
         # _create_release_notifier_role for why it cannot be granted from here.
 
