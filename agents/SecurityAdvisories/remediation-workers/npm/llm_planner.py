@@ -69,7 +69,7 @@ Target version (already verified — do not change it): {patched_version}
 Currently installed: {installed_version}
 Appears in yarn.lock (a resolved transitive dependency): {in_lockfile}
 
-package.json:
+package.json dependency sections (dependencies / devDependencies / resolutions):
 {package_json}
 
 Choose exactly one action and return JSON of the form:

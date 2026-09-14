@@ -871,3 +871,28 @@ class TestApplyFixViaLlmPlan:
         npm.apply_fix(str(tmp_path), ctx)
         assert _read_pkg(tmp_path)['resolutions']['form-data'] == '4.0.6'
         assert ctx['method'] == 'install'
+
+    def test_planner_receives_only_dependency_sections(self, tmp_path):
+        # Only the dependency sections are sent to the planner — scripts/config
+        # (which bloat large manifests like OSD) are stripped.
+        npm, _ = _load_npm()
+        _write_pkg(tmp_path, {
+            'name': 'x',
+            'scripts': {'build': 'webpack --config big', 'test': 'jest'},
+            'jest': {'setupFiles': ['a', 'b']},
+            'dependencies': {'react': '^18.0.0'},
+            'resolutions': {'form-data': '4.0.4'},
+        })
+        captured = {}
+
+        def _spy(ctx, sections, in_lockfile):
+            captured['sections'] = sections
+            return None   # fall back to the deterministic router
+
+        ctx = {'package_name': 'form-data', 'patched_version': '4.0.6'}
+        with patch.object(llm_planner, 'plan_edit', _spy):
+            npm.apply_fix(str(tmp_path), ctx)
+        sent = captured['sections']
+        assert 'dependencies' in sent and 'resolutions' in sent
+        assert 'scripts' not in sent and 'jest' not in sent
+        assert 'webpack' not in sent   # scripts content not leaked into the prompt

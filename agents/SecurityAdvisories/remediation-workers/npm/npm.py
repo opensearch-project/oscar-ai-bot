@@ -93,7 +93,13 @@ def apply_fix(work_dir, ctx):
     manifest = json.loads(content)
 
     in_lockfile = _in_lockfile(work_dir, ctx["package_name"])
-    plan = llm_planner.plan_edit(ctx, content, in_lockfile)
+    # Send only the dependency sections to the model (not the whole file) — routing
+    # only needs these, and a large manifest (e.g. OSD) would otherwise waste tokens
+    # on scripts/config/metadata. The deterministic apply below still uses the full
+    # content.
+    sections = json.dumps(
+        {k: manifest[k] for k in _MANIFEST_SECTIONS if k in manifest}, indent=2)
+    plan = llm_planner.plan_edit(ctx, sections, in_lockfile)
     if plan is not None:
         logger.info("Applying LLM edit plan: %s", plan)
         _apply_plan(pkg_path, content, manifest, ctx, plan)
