@@ -41,8 +41,8 @@ logger.setLevel(logging.INFO)
 # Commit author/committer identity. OpenSearch repos enforce DCO, so we always
 # commit with -s; git derives the Signed-off-by trailer from these, which DCO
 # requires to match the author. Overridable via env so prod can set the real bot
-# account (e.g. opensearch-ci-bot or the Oscar GitHub App) — matching the push
-# token — without a code change; dev uses the placeholder below.
+# account (e.g. opensearch-ci-bot) — matching the push token — without a code
+# change; dev uses the placeholder below.
 GIT_USER_NAME = os.environ.get("REMEDIATION_GIT_NAME", "OSCAR AI Bot")
 GIT_USER_EMAIL = os.environ.get(
     "REMEDIATION_GIT_EMAIL", "oscar-ai-bot@users.noreply.github.com"
