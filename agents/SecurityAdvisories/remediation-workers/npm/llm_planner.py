@@ -28,6 +28,7 @@ import boto3
 from botocore.config import Config as BotoConfig
 
 logger = logging.getLogger()
+logger.setLevel(logging.INFO)
 
 # Cross-region inference profile ("us." prefix). Overridable so the model can be
 # bumped without a code change; default matches what OSCAR already runs elsewhere.
