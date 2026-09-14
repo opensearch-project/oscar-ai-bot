@@ -387,9 +387,9 @@ def handle_remediate_cve(
         'package': package,
         'patched_version': patched_version,
         'message': (
-            f"No open PR was found for {cve_id} on {repo_owner}/{repo_name}. "
-            f"Resolved fix: bump {package} to {patched_version} ({ecosystem}). "
-            f"Automated remediation for the {ecosystem} ecosystem is not yet enabled."
+            f"No open PR was found for {cve_id} on {repo_owner}/{repo_name}, and "
+            f"automated remediation isn't available for the {ecosystem} ecosystem yet. "
+            f"To fix it manually, bump {package} to {patched_version}."
         ),
     }
 
