@@ -40,7 +40,7 @@ def get_action_groups(lambda_arn: str) -> List[bedrock.CfnAgent.AgentActionGroup
                     ),
                     bedrock.CfnAgent.FunctionProperty(
                         name="get_release_status",
-                        description="Get the authoritative release-readiness verdict (red/yellow/green) for a version, computed deterministically from the latest indexed state of every release criterion. Use this whenever the user asks whether a release is ready, a go/no-go, on track, or what its overall status is.",
+                        description="Get the authoritative release-readiness verdict (red/yellow/green) for a version, computed deterministically from the latest indexed state of the release criteria that gate the milestone still ahead - entrance criteria before the RC is cut, exit criteria after it. Use this whenever the user asks whether a release is ready, a go/no-go, on track, or what its overall status is. The criteria_scope field says which set the verdict covers, and out_of_scope lists unmet criteria that belong to the other milestone and hold nothing up.",
                         parameters={
                             "version": bedrock.CfnAgent.ParameterDetailProperty(
                                 type="string",
@@ -59,6 +59,11 @@ def get_action_groups(lambda_arn: str) -> List[bedrock.CfnAgent.AgentActionGroup
                                 required=True,
                             ),
                         },
+                    ),
+                    bedrock.CfnAgent.FunctionProperty(
+                        name="list_active_releases",
+                        description="List every release currently in flight, soonest first, with RC and release dates, days remaining, cadence phase, and release manager. Use this when the user asks which releases are active, in flight, or upcoming, without naming a version.",
+                        parameters={},
                     ),
                     bedrock.CfnAgent.FunctionProperty(
                         name="query_release_state",

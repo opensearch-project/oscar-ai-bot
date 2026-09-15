@@ -47,6 +47,9 @@ class OscarPermissionsStack(Stack):
         # GitHub webhook handler role
         self.github_webhook_role = self._create_github_webhook_role()
 
+        # Release notifier role
+        self.release_notifier_role = self._create_release_notifier_role()
+
         # Create agent roles
         self.agent_roles: Dict[str, iam.Role] = {}
         if agents:
@@ -136,6 +139,32 @@ class OscarPermissionsStack(Stack):
         )
         for stmt in self.policy_definitions.get_github_webhook_handler_policies():
             role.add_to_policy(stmt)
+        return role
+
+    def _create_release_notifier_role(self) -> iam.Role:
+        """Create the execution role for the scheduled release notifier Lambda.
+
+        The notifier reads the central secret and the notify-state table, which the stacks
+        owning those resources grant. Invoking the metrics Lambda is granted here instead,
+        against the deterministic function name: granting it from the Lambda stack would make
+        this stack depend on a Lambda ARN produced by a stack that already depends on this
+        one, which CloudFormation rejects as a cyclic reference.
+        """
+        role = iam.Role(
+            self, "ReleaseNotifierRole",
+            assumed_by=iam.ServicePrincipal("lambda.amazonaws.com"),
+            managed_policies=[
+                iam.ManagedPolicy.from_aws_managed_policy_name("service-role/AWSLambdaBasicExecutionRole")
+            ],
+            description="Execution role for OSCAR release notifier Lambda",
+        )
+        role.add_to_policy(iam.PolicyStatement(
+            sid="InvokeMetricsLambda",
+            actions=["lambda:InvokeFunction"],
+            resources=[
+                f"arn:aws:lambda:{self.aws_region}:{self.account_id}:function:oscar-metrics-{self.env_name}"
+            ],
+        ))
         return role
 
     def _create_api_gateway_role(self) -> iam.Role:

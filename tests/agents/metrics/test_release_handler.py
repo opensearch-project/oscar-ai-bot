@@ -232,6 +232,80 @@ class TestGetReleaseWindow:
         assert result['found'] is False
 
 
+class TestListActiveReleases:
+
+    @staticmethod
+    def _schedule_hit(version, release_date, rc_date, registered_at, status='active'):
+        return {'_source': {
+            'version': version,
+            'status': status,
+            'rc_date': rc_date,
+            'release_date': release_date,
+            'registered_at': registered_at,
+            'release_manager': 'someone',
+        }}
+
+    def test_query_filters_on_active_status(self):
+        handler, mock_aws, _ = _load_handler()
+        handler.handle_list_active_releases({})
+
+        _, path, query = mock_aws.opensearch_request.call_args[0]
+        assert path == '/opensearch_release_schedule/_search'
+        assert {'term': {'status.keyword': 'active'}} in query['query']['bool']['filter']
+        assert query['sort'] == [{'release_date': {'order': 'asc', 'unmapped_type': 'date'}}]
+
+    def test_returns_soonest_release_first(self):
+        response = {'hits': {'hits': [
+            self._schedule_hit('4.0.0', '2026-12-01', '2026-11-15', '2026-08-01T00:00:00Z'),
+            self._schedule_hit('3.9.0', '2026-09-29', '2026-09-15', '2026-08-01T00:00:00Z'),
+        ]}}
+        handler, _, _ = _load_handler(opensearch_response=response)
+        result = handler.handle_list_active_releases({})
+        assert [r['version'] for r in result['releases']] == ['3.9.0', '4.0.0']
+        assert result['total_results'] == 2
+
+    def test_reduces_reregistered_versions_to_newest(self):
+        response = {'hits': {'hits': [
+            self._schedule_hit('3.9.0', '2026-09-29', '2026-09-15', '2026-08-01T00:00:00Z'),
+            self._schedule_hit('3.9.0', '2026-10-06', '2026-09-22', '2026-09-05T00:00:00Z'),
+        ]}}
+        handler, _, _ = _load_handler(opensearch_response=response)
+        result = handler.handle_list_active_releases({})
+        assert result['total_results'] == 1
+        assert result['releases'][0]['release_date'] == '2026-10-06'
+
+    def test_days_and_phase_computed(self):
+        response = {'hits': {'hits': [
+            self._schedule_hit('3.9.0', '2026-09-29', '2026-09-15', '2026-08-01T00:00:00Z'),
+        ]}}
+        handler, _, _ = _load_handler(opensearch_response=response)
+        fake_now = datetime(2026, 9, 1, 12, 0, tzinfo=timezone.utc)
+        with patch.object(handler, '_now', return_value=fake_now):
+            release = handler.handle_list_active_releases({})['releases'][0]
+        assert release['days_to_rc'] == 14
+        assert release['days_to_release'] == 28
+        assert release['cadence_phase'] == 'pre_rc_daily'
+
+    def test_no_active_releases(self):
+        handler, _, _ = _load_handler()
+        result = handler.handle_list_active_releases({})
+        assert result['total_results'] == 0
+        assert result['releases'] == []
+
+    def test_releases_without_dates_sort_last(self):
+        response = {'hits': {'hits': [
+            self._schedule_hit('4.0.0', None, None, '2026-08-01T00:00:00Z'),
+            self._schedule_hit('3.9.0', '2026-09-29', '2026-09-15', '2026-08-01T00:00:00Z'),
+        ]}}
+        handler, _, _ = _load_handler(opensearch_response=response)
+        result = handler.handle_list_active_releases({})
+        assert [r['version'] for r in result['releases']] == ['3.9.0', '4.0.0']
+
+    def test_query_failure_surfaces_error(self):
+        handler, _, _ = _load_handler(opensearch_error=Exception('boom'))
+        assert handler.handle_list_active_releases({})['type'] == 'query_error'
+
+
 class TestCadencePhase:
 
     def test_phases(self):
@@ -337,3 +411,98 @@ class TestQueryReleaseState:
         assert result['type'] == 'agentic_search_error'
         assert result['retryable'] is False
         assert result['status_code'] == 400
+
+
+class TestCriteriaScoping:
+    """get_release_status judges only the criteria that gate the milestone still ahead.
+
+    The scope is decided here rather than by the caller so an RM asking OSCAR and the
+    scheduled notifier can never disagree about whether a release is a go. Every test
+    therefore drives it through the schedule the handler reads for itself: the state query
+    lands first, the schedule query second.
+    """
+
+    _MIXED_STATE = {'hits': {'total': {'value': 2}, 'hits': [
+        _state_hit('security_reviews_complete', 'not_met', '2026-09-01T18:30:00Z',
+                   criterion_type='entrance'),
+        _state_hit('release_blog_ready', 'met', '2026-09-01T18:30:00Z',
+                   criterion_type='exit'),
+    ]}}
+
+    @staticmethod
+    def _schedule(rc_date, release_date, status='active'):
+        return {'hits': {'total': {'value': 1}, 'hits': [{'_source': {
+            'version': '3.9.0',
+            'rc_date': rc_date,
+            'release_date': release_date,
+            'status': status,
+        }}]}}
+
+    def _status(self, schedule, state=None, now=datetime(2026, 9, 20, 12, 0, tzinfo=timezone.utc)):
+        handler, mock_aws, _ = _load_handler()
+        mock_aws.opensearch_request.side_effect = [state or self._MIXED_STATE, schedule]
+        with patch.object(handler, '_now', return_value=now):
+            return handler.handle_get_release_status({'version': '3.9.0'})
+
+    def test_post_rc_judges_exit_criteria_only(self):
+        # RC cut on the 15th, release on the 29th: the entrance gate is behind us.
+        result = self._status(self._schedule('2026-09-15', '2026-09-29'))
+        assert result['criteria_scope'] == 'exit'
+        assert result['verdict'] == 'green'
+        assert result['out_of_scope'] == ['security_reviews_complete']
+
+    def test_pre_rc_judges_entrance_criteria_only(self):
+        result = self._status(
+            self._schedule('2026-09-25', '2026-10-09'),
+            state={'hits': {'total': {'value': 2}, 'hits': [
+                _state_hit('security_reviews_complete', 'met', '2026-09-01T18:30:00Z',
+                           criterion_type='entrance'),
+                _state_hit('performance_tests_posted', 'not_met', '2026-09-01T18:30:00Z',
+                           criterion_type='exit'),
+            ]}},
+        )
+        assert result['criteria_scope'] == 'entrance'
+        # An unfinished exit criterion before the RC is expected, not a blocker.
+        assert result['verdict'] == 'green'
+        assert result['out_of_scope'] == ['performance_tests_posted']
+
+    def test_shipped_release_is_judged_against_everything(self):
+        result = self._status(self._schedule('2026-08-15', '2026-08-29', status='released'))
+        assert result['criteria_scope'] == 'all'
+        assert result['verdict'] == 'red'
+
+    def test_unregistered_schedule_judges_everything(self):
+        # Guessing a scope with no schedule to read would quietly drop gates.
+        empty = {'hits': {'total': {'value': 0}, 'hits': []}}
+        result = self._status(empty)
+        assert result['criteria_scope'] == 'all'
+        assert result['verdict'] == 'red'
+
+    def test_schedule_query_failure_judges_everything(self):
+        handler, mock_aws, _ = _load_handler()
+        mock_aws.opensearch_request.side_effect = [self._MIXED_STATE, Exception('boom')]
+        result = handler.handle_get_release_status({'version': '3.9.0'})
+        assert result['criteria_scope'] == 'all'
+        assert result['verdict'] == 'red'
+
+    def test_no_criteria_in_scope_falls_back_to_everything(self):
+        result = self._status(
+            self._schedule('2026-09-15', '2026-09-29'),
+            state={'hits': {'total': {'value': 1}, 'hits': [
+                _state_hit('security_reviews_complete', 'not_met', '2026-09-01T18:30:00Z',
+                           criterion_type='entrance'),
+            ]}},
+        )
+        assert result['criteria_scope'] == 'all'
+        assert result['verdict'] == 'red'
+
+    def test_every_cadence_phase_has_a_scope_decision(self):
+        # A phase missing from the map would silently be judged against everything.
+        handler, _, _ = _load_handler()
+        phases = {
+            handler._cadence_phase(rc, rel, status)
+            for rc in (None, -5, 0, 5, 10, 20)
+            for rel in (None, -3, 1, 5, 20)
+            for status in (None, 'active', 'released', 'cancelled')
+        }
+        assert phases <= set(handler.CRITERIA_FOCUS_BY_PHASE)

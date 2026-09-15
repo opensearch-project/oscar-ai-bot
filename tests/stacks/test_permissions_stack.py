@@ -87,6 +87,33 @@ class TestOscarPermissionsStack:
             },
         })
 
+    def test_release_notifier_role_creation(self, template):
+        """Test that the release notifier gets its own execution role."""
+        template.has_resource_properties("AWS::IAM::Role", {
+            "AssumeRolePolicyDocument": {
+                "Statement": [{
+                    "Effect": "Allow",
+                    "Principal": {"Service": "lambda.amazonaws.com"},
+                    "Action": "sts:AssumeRole",
+                }],
+            },
+            "Description": "Execution role for OSCAR release notifier Lambda",
+        })
+
+    def test_release_notifier_may_invoke_only_the_metrics_lambda(self, template):
+        """The notifier delegates the verdict, so invoke is scoped to that one function."""
+        policies = template.find_resources("AWS::IAM::Policy")
+        statements = [
+            statement
+            for policy in policies.values()
+            for statement in policy["Properties"]["PolicyDocument"]["Statement"]
+            if statement.get("Sid") == "InvokeMetricsLambda"
+        ]
+        assert len(statements) == 1
+        assert statements[0]["Action"] == "lambda:InvokeFunction"
+        assert statements[0]["Resource"] == \
+            "arn:aws:lambda:us-east-1:123456789012:function:oscar-metrics-dev"
+
     def test_least_privilege_policies(self, template):
         """Test that no sensitive actions use wildcard resources."""
         template_dict = template.to_json()

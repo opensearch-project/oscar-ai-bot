@@ -29,6 +29,7 @@ from config import config
 from metrics_handler import handle_metrics_query
 from release_handler import (handle_get_release_status,
                              handle_get_release_window,
+                             handle_list_active_releases,
                              handle_query_release_state)
 from response_builder import create_response
 
@@ -104,6 +105,10 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         elif function_name == 'get_release_window':
             logger.info(f"LAMBDA_HANDLER [{request_id}]: Routing to handle_get_release_window")
             result = handle_get_release_window(params, request_id)
+
+        elif function_name == 'list_active_releases':
+            logger.info(f"LAMBDA_HANDLER [{request_id}]: Routing to handle_list_active_releases")
+            result = handle_list_active_releases(params, request_id)
 
         elif function_name == 'query_release_state':
             logger.info(f"LAMBDA_HANDLER [{request_id}]: Routing to handle_query_release_state (agentic search)")

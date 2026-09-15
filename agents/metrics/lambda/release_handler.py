@@ -49,8 +49,28 @@ logger.setLevel(logging.INFO)
 # criterion falls inside it.
 RELEASE_STATE_FETCH_SIZE = 1000
 
+# Active releases are few (usually one), but a version can be re-registered, so fetch
+# enough documents to reduce to the newest registration per version.
+ACTIVE_RELEASES_FETCH_SIZE = 100
+
 SCOPE_STATE = 'state'
 SCOPE_SCHEDULE = 'schedule'
+
+# Which criteria the verdict is judged against in each phase: entrance criteria gate the RC,
+# exit criteria gate GA, so the verdict tracks whichever milestone is still ahead. A phase
+# with no milestone ahead (shipped, cancelled, undated) is judged against everything, as is
+# a version whose schedule cannot be read - guessing a scope there would quietly drop gates.
+CRITERIA_FOCUS_BY_PHASE = {
+    'out_of_window': release_rubric.ENTRANCE,
+    'pre_rc_daily': release_rubric.ENTRANCE,
+    'pre_rc_frequent': release_rubric.ENTRANCE,
+    'rc_to_release': release_rubric.EXIT,
+    'final_push': release_rubric.EXIT,
+    'overdue': release_rubric.EXIT,
+    'released': None,
+    'cancelled': None,
+    'not_scheduled': None,
+}
 
 
 def _require_version(params: Dict[str, Any]) -> Optional[str]:
@@ -63,6 +83,27 @@ def _require_version(params: Dict[str, Any]) -> Optional[str]:
 
 def _now() -> datetime:
     return datetime.now(timezone.utc)
+
+
+def _criteria_focus(version: str, request_id: str) -> Optional[str]:
+    """Decide which criteria the verdict is judged against, from the release's phase.
+
+    Read here rather than accepted as a parameter so that every caller gets the same
+    verdict: an RM asking OSCAR and the scheduled notifier must never disagree about
+    whether a release is a go, and only one of them knows the phase already.
+    """
+    window = handle_get_release_window({'version': version}, request_id)
+    if window.get('error') or not window.get('found'):
+        logger.warning(
+            f"RELEASE_STATUS_SCOPE [{request_id}]: no schedule for {version}, "
+            f"judging every criterion"
+        )
+        return None
+
+    phase = window.get('cadence_phase') or 'not_scheduled'
+    focus = CRITERIA_FOCUS_BY_PHASE.get(phase)
+    logger.info(f"RELEASE_STATUS_SCOPE [{request_id}]: phase {phase} -> criteria {focus or 'all'}")
+    return focus
 
 
 def handle_get_release_status(params: Dict[str, Any], request_id: str = 'unknown') -> Dict[str, Any]:
@@ -109,7 +150,7 @@ def handle_get_release_status(params: Dict[str, Any], request_id: str = 'unknown
         f"{len(criteria)} current criteria for {version}"
     )
 
-    verdict = release_rubric.compute_verdict(criteria)
+    verdict = release_rubric.compute_verdict(criteria, focus=_criteria_focus(version, request_id))
     release_issue = next(
         (c.get('release_issue') for c in criteria if c.get('release_issue')), None
     )
@@ -119,17 +160,81 @@ def handle_get_release_status(params: Dict[str, Any], request_id: str = 'unknown
         'found': True,
         'data_source': index,
         'verdict': verdict['verdict'],
+        'criteria_scope': verdict['criteria_scope'],
         'blocking_failures': verdict['blocking_failures'],
         'blocking_in_progress': verdict['blocking_in_progress'],
         'blocking_unknowns': verdict['blocking_unknowns'],
         'non_blocking_gaps': verdict['non_blocking_gaps'],
         'not_applicable': verdict['not_applicable'],
+        'out_of_scope': verdict['out_of_scope'],
         'counts': verdict['counts'],
         'criteria': verdict['criteria'],
     }
     if release_issue:
         result['release_issue'] = release_issue
     return result
+
+
+def handle_list_active_releases(params: Dict[str, Any], request_id: str = 'unknown') -> Dict[str, Any]:
+    """List every release whose schedule status is active, soonest release date first.
+
+    A fixed projection, so it uses its own DSL rather than the agentic pipeline. The
+    release notifier depends on it to decide which versions to report on.
+    """
+    index = config.release_schedule_index
+    query = {
+        'size': ACTIVE_RELEASES_FETCH_SIZE,
+        'query': {'bool': {'filter': [{'term': {'status.keyword': 'active'}}]}},
+        'sort': [{'release_date': {'order': 'asc', 'unmapped_type': 'date'}}],
+    }
+
+    try:
+        response = opensearch_request('GET', f'/{index}/_search', query)
+    except Exception as e:
+        logger.error(f"RELEASE_SCHEDULE_QUERY_FAILED [{request_id}]: {e}")
+        return {'error': f'Failed to query release schedule: {e}', 'type': 'query_error'}
+
+    latest_by_version: Dict[str, Dict[str, Any]] = {}
+    for hit in response.get('hits', {}).get('hits', []):
+        source = hit.get('_source', {})
+        version = source.get('version')
+        if not version:
+            continue
+        existing = latest_by_version.get(version)
+        if existing is None:
+            latest_by_version[version] = source
+            continue
+        candidate = parse_timestamp(source.get('registered_at'))
+        current = parse_timestamp(existing.get('registered_at'))
+        if candidate and (current is None or candidate > current):
+            latest_by_version[version] = source
+
+    releases = []
+    today = _now().date()
+    for source in latest_by_version.values():
+        rc_date = parse_timestamp(source.get('rc_date'))
+        release_date = parse_timestamp(source.get('release_date'))
+        days_to_rc = (rc_date.date() - today).days if rc_date else None
+        days_to_release = (release_date.date() - today).days if release_date else None
+        releases.append({
+            'version': source.get('version'),
+            'rc_date': source.get('rc_date'),
+            'release_date': source.get('release_date'),
+            'days_to_rc': days_to_rc,
+            'days_to_release': days_to_release,
+            'cadence_phase': _cadence_phase(days_to_rc, days_to_release, source.get('status')),
+            'release_manager': source.get('release_manager'),
+            'release_issue': source.get('release_issue'),
+        })
+
+    releases.sort(key=lambda r: (r['days_to_release'] is None, r['days_to_release']))
+    logger.info(f"ACTIVE_RELEASES [{request_id}]: {[r['version'] for r in releases]}")
+
+    return {
+        'data_source': index,
+        'total_results': len(releases),
+        'releases': releases,
+    }
 
 
 def handle_get_release_window(params: Dict[str, Any], request_id: str = 'unknown') -> Dict[str, Any]:

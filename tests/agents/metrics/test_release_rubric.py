@@ -172,8 +172,82 @@ class TestBreakdown:
             'non_blocking_gaps': 1,
             'not_applicable': 1,
             'total': 6,
+            'in_scope': 6,
+            'out_of_scope': 0,
         }
 
     def test_status_is_case_insensitive(self):
         result = rubric.compute_verdict([_criterion('release_notes_ready', 'MET')])
         assert result['verdict'] == 'green'
+
+
+class TestCriteriaScope:
+    """The verdict is judged only against the milestone still ahead.
+
+    Once the RC is cut, an unmet entrance criterion was waived at the gate or is a stale
+    check; holding the release Red on it would report work that is no longer on the
+    critical path as blocking.
+    """
+
+    _MIXED = [
+        _criterion('security_reviews_complete', 'not_met', criterion_type='entrance'),
+        _criterion('release_blog_ready', 'met', criterion_type='exit'),
+    ]
+
+    def test_no_focus_judges_everything(self):
+        result = rubric.compute_verdict(self._MIXED)
+        assert result['criteria_scope'] == 'all'
+        assert result['verdict'] == 'red'
+        assert result['out_of_scope'] == []
+
+    def test_exit_focus_ignores_an_unmet_entrance_criterion(self):
+        result = rubric.compute_verdict(self._MIXED, focus='exit')
+        assert result['criteria_scope'] == 'exit'
+        assert result['verdict'] == 'green'
+        assert result['blocking_failures'] == []
+        # Reported so a waived gate stays visible, but it holds nothing up.
+        assert result['out_of_scope'] == ['security_reviews_complete']
+
+    def test_entrance_focus_ignores_an_unmet_exit_criterion(self):
+        criteria = [
+            _criterion('security_reviews_complete', 'met', criterion_type='entrance'),
+            _criterion('performance_tests_posted', 'not_met', criterion_type='exit'),
+        ]
+        result = rubric.compute_verdict(criteria, focus='entrance')
+        assert result['verdict'] == 'green'
+        assert result['out_of_scope'] == ['performance_tests_posted']
+
+    def test_satisfied_criteria_outside_scope_are_not_reported(self):
+        result = rubric.compute_verdict(self._MIXED, focus='entrance')
+        assert result['verdict'] == 'red'
+        assert result['out_of_scope'] == []
+
+    def test_counts_split_in_and_out_of_scope(self):
+        counts = rubric.compute_verdict(self._MIXED, focus='exit')['counts']
+        assert counts['total'] == 2
+        assert counts['in_scope'] == 1
+        assert counts['out_of_scope'] == 1
+
+    def test_breakdown_flags_scope_per_criterion(self):
+        entries = rubric.compute_verdict(self._MIXED, focus='exit')['criteria']
+        in_scope = {e['criterion_name']: e['in_scope'] for e in entries}
+        assert in_scope == {'security_reviews_complete': False, 'release_blog_ready': True}
+
+    def test_untyped_criterion_is_always_in_scope(self):
+        # Older documents predate criterion_type; dropping them would silently lose a gate.
+        result = rubric.compute_verdict([_criterion('release_notes_ready', 'not_met')], focus='exit')
+        assert result['verdict'] == 'red'
+        assert result['counts']['in_scope'] == 1
+
+    def test_nothing_in_scope_falls_back_to_judging_everything(self):
+        # No evidence about the milestone ahead must never read as ready.
+        criteria = [_criterion('security_reviews_complete', 'not_met', criterion_type='entrance')]
+        result = rubric.compute_verdict(criteria, focus='exit')
+        assert result['verdict'] == 'red'
+        assert result['criteria_scope'] == 'all'
+        assert result['blocking_failures'] == ['security_reviews_complete']
+
+    def test_empty_input_with_a_focus_stays_green(self):
+        result = rubric.compute_verdict([], focus='exit')
+        assert result['verdict'] == 'green'
+        assert result['criteria_scope'] == 'exit'

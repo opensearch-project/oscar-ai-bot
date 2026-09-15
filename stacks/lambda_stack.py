@@ -89,6 +89,9 @@ class OscarLambdaStack(Stack):
         if agents:
             self._create_agent_lambdas(agents)
 
+        # Release notifier, created after the agents so the metrics Lambda it invokes exists
+        self._create_release_notifier_lambda()
+
     # ------------------------------------------------------------------ core
     def _create_supervisor_agent_lambda(self) -> None:
         execution_role = self.permissions_stack.lambda_execution_roles["base"]
@@ -193,6 +196,71 @@ class OscarLambdaStack(Stack):
         rule.add_target(targets.LambdaFunction(function))
 
         self.lambda_functions["identity"] = function
+
+    # --------------------------------------------------- release notifier
+    def _create_release_notifier_lambda(self) -> None:
+        """Create the scheduled Lambda that posts release readiness to Slack.
+
+        The notifier owns no verdict logic - it invokes the metrics Lambda, which owns the
+        rubric, so what an RM reads in Slack matches what they get by asking OSCAR. Without
+        that Lambda there is nothing to report, so the notifier is skipped entirely.
+        """
+        metrics_function = self.lambda_functions.get("metrics")
+        if not metrics_function:
+            logger.warning(
+                "Metrics agent Lambda not created - skipping the release notifier, which "
+                "depends on it for the release verdict"
+            )
+            return
+
+        role = self.permissions_stack.release_notifier_role
+
+        env = {
+            "ENVIRONMENT": self.env_name,
+            "CENTRAL_SECRET_NAME": self.secrets_stack.central_env_secret.secret_name,
+            "METRICS_FUNCTION_NAME": metrics_function.function_name,
+            "RELEASE_NOTIFY_TABLE_NAME": self.storage_stack.release_notify_table.table_name,
+        }
+        # Lets the notifier mention the release manager by resolving the GitHub handle on the
+        # schedule to a Slack user. Guarded because the storage stack builds the table only
+        # when a workspace id is configured; without it the notifier falls back to naming the
+        # manager with a link to their GitHub profile.
+        if self.storage_stack.identity_table:
+            env["IDENTITY_TABLE_NAME"] = self.storage_stack.identity_table.table_name
+
+        function = PythonFunction(
+            self, "ReleaseNotifierLambda",
+            function_name=f"oscar-release-notifier-{self.env_name}",
+            runtime=aws_lambda.Runtime.PYTHON_3_12,
+            handler="lambda_handler",
+            entry="lambda/oscar-release-notifier",
+            index="lambda_function.py",
+            timeout=Duration.seconds(300),
+            memory_size=256,
+            environment=env,
+            role=role,
+            description="Scheduled release readiness notifications for release managers",
+            reserved_concurrent_executions=2,
+        )
+
+        self.storage_stack.release_notify_table.grant_read_write_data(role)
+        self.secrets_stack.grant_read_access(role)
+        if self.storage_stack.identity_table:
+            self.storage_stack.identity_table.grant_read_data(role)
+        # Invoke on the metrics Lambda is granted in the permissions stack - see
+        # _create_release_notifier_role for why it cannot be granted from here.
+
+        # Wake every six hours to match the tightest cadence phase. The Lambda itself decides
+        # whether any given release is actually due for a post.
+        rule = events.Rule(
+            self, "ReleaseNotifierSchedule",
+            rule_name=f"oscar-release-notifier-{self.env_name}",
+            schedule=events.Schedule.rate(Duration.hours(6)),
+            description="Six-hourly release readiness check",
+        )
+        rule.add_target(targets.LambdaFunction(function))
+
+        self.lambda_functions["release-notifier"] = function
 
     def _create_github_webhook_handler_lambda(self) -> None:
         execution_role = self.permissions_stack.github_webhook_role

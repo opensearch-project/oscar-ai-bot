@@ -57,6 +57,7 @@ class TestActionGroup:
             'query_metrics',
             'get_release_status',
             'get_release_window',
+            'list_active_releases',
             'query_release_state',
         }
 
@@ -79,6 +80,9 @@ class TestActionGroup:
         assert params['version'].required is False
         assert params['scope'].required is False
         assert 'schedule' in params['scope'].description
+
+    def test_list_active_releases_takes_no_parameters(self):
+        assert _functions()['list_active_releases'].parameters == {}
 
     def test_query_release_state_defers_verdict_and_dates(self):
         # The free-form action must not be used to derive a verdict or a date.

@@ -89,6 +89,9 @@ def main() -> None:
     )
 
     # 3. Storage (DynamoDB tables + identity tables)
+    # Required in every environment: the deployed environments do not all use distinct
+    # ENVIRONMENT names, so gating the identity table on the name would drop the live table
+    # out of a deployment that already has one.
     workspace_id = os.environ.get("SLACK_WORKSPACE_ID", "").strip()
     if not workspace_id:
         raise ValueError("SLACK_WORKSPACE_ID environment variable is required for deployment")

@@ -278,15 +278,17 @@ class TestAgentStackWiring:
         assert github_fn is not metrics_fn
 
     def test_lambda_function_count(self, stacks):
-        """Should be 4 agent entries + 3 core = 7 keys in lambda_functions dict."""
-        # 4 agents + supervisor-agent + communication-handler + github-webhook-handler = 7 entries
-        assert len(stacks.lambda_functions) == 7
+        """Should be 4 agent entries + 4 non-agent = 8 keys in lambda_functions dict."""
+        # 4 agents + supervisor-agent + communication-handler + github-webhook-handler
+        # + release-notifier = 8 entries
+        assert len(stacks.lambda_functions) == 8
 
     def test_lambda_template_function_count(self, stacks):
-        """CloudFormation template should have 7 Lambda functions
-        (supervisor + communication + github-webhook-handler + jenkins + metrics + security-advisories + github)."""
+        """CloudFormation template should have 8 Lambda functions
+        (supervisor + communication + github-webhook-handler + release-notifier
+        + jenkins + metrics + security-advisories + github)."""
         template = Template.from_stack(stacks)
-        template.resource_count_is("AWS::Lambda::Function", 7)
+        template.resource_count_is("AWS::Lambda::Function", 8)
 
 
 # ---------------------------------------------------------------------------
