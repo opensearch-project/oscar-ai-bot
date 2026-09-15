@@ -33,11 +33,17 @@ def normalize_handle(handle: Optional[str]) -> str:
     """Reduce whatever was registered as the release manager to a bare GitHub handle.
 
     The value is a free-text Jenkins parameter, so it arrives as a handle, an @handle or a
-    pasted profile URL depending on who filled the form in.
+    pasted profile URL depending on who filled the form in. A URL copied out of a browser
+    often carries a query string or fragment too ('.../octocat?tab=repositories'), which has
+    to go before the path is split - left in place it becomes part of the handle, and the
+    lookup then misses the very person the message is meant to reach.
     """
     if not handle:
         return ''
-    value = str(handle).strip().rstrip('/')
+    value = str(handle).strip()
+    for separator in ('?', '#'):
+        value = value.split(separator, 1)[0]
+    value = value.rstrip('/')
     if '/' in value:
         value = value.rsplit('/', 1)[-1]
     return value.lstrip('@')

@@ -211,6 +211,16 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         logger.error(f'RELEASE_NOTIFY_METRICS_FAILED: {e}')
         return {'statusCode': 502, 'error': str(e)}
 
+    # The metrics Lambda is a separate deployment, so its response shape is a contract
+    # rather than a guarantee. Checked before .get() because an unexpected shape here would
+    # otherwise raise past the handler and cost every release its run, not just this call.
+    if not isinstance(active, dict):
+        logger.error(
+            f'RELEASE_NOTIFY_METRICS_FAILED: list_active_releases returned '
+            f'{type(active).__name__}, expected an object'
+        )
+        return {'statusCode': 502, 'error': 'unexpected response shape from metrics Lambda'}
+
     if active.get('error'):
         logger.error(f"RELEASE_NOTIFY_METRICS_FAILED: {active['error']}")
         return {'statusCode': 502, 'error': active['error']}

@@ -46,6 +46,16 @@ class TestNormalizeHandle:
     def test_reduces_to_bare_handle(self, identity, raw):
         assert identity.normalize_handle(raw) == 'gaiksaya'
 
+    @pytest.mark.parametrize('raw', [
+        'https://github.com/gaiksaya?tab=repositories',
+        'https://github.com/gaiksaya?tab=repositories&q=build',
+        'https://github.com/gaiksaya#readme',
+        'https://github.com/gaiksaya/?tab=stars',
+    ])
+    def test_url_query_and_fragment_are_discarded(self, identity, raw):
+        """A profile URL copied from a browser carries these, and they are not the handle."""
+        assert identity.normalize_handle(raw) == 'gaiksaya'
+
     @pytest.mark.parametrize('raw', [None, '', '   '])
     def test_empty_input_yields_empty_handle(self, identity, raw):
         assert identity.normalize_handle(raw) == ''

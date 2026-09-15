@@ -136,6 +136,17 @@ class TestMetricsInvocation:
         result = harness.module.lambda_handler({}, None)
         assert result['statusCode'] == 502
 
+    def test_non_object_result_is_surfaced_rather_than_raised(self, harness, caplog):
+        """The metrics Lambda ships separately, so its shape is a contract, not a promise."""
+        harness.responses['list_active_releases'] = [ACTIVE_RELEASE]
+
+        with caplog.at_level(logging.ERROR):
+            result = harness.module.lambda_handler({}, None)
+
+        assert result['statusCode'] == 502
+        assert 'RELEASE_NOTIFY_METRICS_FAILED' in caplog.text
+        harness.slack.chat_postMessage.assert_not_called()
+
 
 class TestPosting:
 
