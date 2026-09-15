@@ -20,7 +20,7 @@ Jenkins parameter, while the table stores the casing GitHub reported.
 
 import logging
 import os
-from typing import Dict, Optional
+from typing import Dict, Optional, Set
 
 import boto3
 
@@ -44,11 +44,14 @@ def normalize_handle(handle: Optional[str]) -> str:
 
 
 def load_handle_map() -> Dict[str, str]:
-    """Map lowercased GitHub handle to Slack user ID for every active mapping.
+    """Map lowercased GitHub handle to Slack user ID for every unambiguous active mapping.
 
-    Returns an empty map when identity mapping is not deployed (it only runs in beta and
-    prod) or when the table cannot be read. A missing mention is a cosmetic loss, so it must
-    never cost the release manager the notification itself.
+    Returns an empty map where there is no identity table (no Slack workspace id was
+    configured for the deployment) or when the table cannot be read. A missing mention is a
+    cosmetic loss, so it must never cost the release manager the notification itself.
+
+    A handle claimed by two different Slack users is left out entirely - see the collision
+    branch below.
     """
     table_name = os.environ.get('IDENTITY_TABLE_NAME')
     if not table_name:
@@ -58,6 +61,7 @@ def load_handle_map() -> Dict[str, str]:
     table = resource.Table(table_name)
 
     mapping: Dict[str, str] = {}
+    ambiguous: Set[str] = set()
     # The filter does not reduce what DynamoDB charges for - it is applied after the scan -
     # but it keeps expired mappings out of the response, so the payload and the pages this
     # loop walks stay proportional to the people who can actually be mentioned.
@@ -78,14 +82,38 @@ def load_handle_map() -> Dict[str, str]:
                     continue
                 handle = item.get('github_handle')
                 slack_user_id = item.get('slack_user_id')
-                if handle and slack_user_id:
-                    mapping[handle.lower()] = slack_user_id
+                if not isinstance(handle, str) or not isinstance(slack_user_id, str):
+                    # Skipped rather than allowed to raise: the handler below would turn one
+                    # malformed row into an empty map, costing every release manager their
+                    # mention. Only a hand-edited item can get here.
+                    logger.warning('RELEASE_NOTIFY_IDENTITY_MALFORMED: skipping an item whose '
+                                   'handle or Slack id is not a string')
+                    continue
+                if not handle or not slack_user_id:
+                    continue
+
+                key = handle.lower()
+                existing = mapping.get(key)
+                if existing is not None and existing != slack_user_id:
+                    # GitHub handles are reusable, and this table is keyed on the numeric id:
+                    # rename an account, let someone else take the old handle, and two active
+                    # rows claim it. Tagging the wrong person on a release-blocking alert is
+                    # worse than tagging nobody, so the handle is dropped below and the message
+                    # falls back to a profile link.
+                    logger.warning(f'RELEASE_NOTIFY_IDENTITY_COLLISION: {key} is claimed by more '
+                                   f'than one active mapping and will not be mentioned')
+                    ambiguous.add(key)
+                    continue
+                mapping[key] = slack_user_id
             if 'LastEvaluatedKey' not in response:
                 break
             scan_kwargs['ExclusiveStartKey'] = response['LastEvaluatedKey']
     except Exception as e:
         logger.warning(f'RELEASE_NOTIFY_IDENTITY_LOOKUP_FAILED: {e}')
         return {}
+
+    for key in ambiguous:
+        mapping.pop(key, None)
 
     logger.info(f'RELEASE_NOTIFY_IDENTITY: {len(mapping)} active mapping(s) loaded')
     return mapping

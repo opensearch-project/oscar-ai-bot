@@ -8,6 +8,7 @@ the release manager the notification itself - an unreadable table, an unlinked a
 deployment without identity mapping must all degrade to naming them instead.
 """
 
+import logging
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -108,6 +109,41 @@ class TestLoadHandleMap:
             {'Items': [item('later', 'U111')]},
         ]
         assert identity.load_handle_map() == {'later': 'U111'}
+
+    def test_a_handle_claimed_by_two_people_is_not_mentioned(self, identity, dynamodb, table, caplog):
+        """GitHub handles are reusable, and this table is keyed on the numeric id.
+
+        Rename an account, let someone else take the old handle, and two active rows claim it.
+        Tagging the wrong person on a release-blocking alert is worse than tagging nobody, so
+        the handle is dropped and the message falls back to a profile link.
+        """
+        table.scan.return_value = {'Items': [item('gaiksaya', 'U111'), item('GaikSaya', 'U222')]}
+        with caplog.at_level(logging.WARNING):
+            assert identity.load_handle_map() == {}
+        assert 'RELEASE_NOTIFY_IDENTITY_COLLISION' in caplog.text
+
+    def test_a_duplicate_row_for_the_same_person_is_not_a_collision(self, identity, dynamodb, table, caplog):
+        table.scan.return_value = {'Items': [item('gaiksaya', 'U111'), item('gaiksaya', 'U111')]}
+        with caplog.at_level(logging.WARNING):
+            assert identity.load_handle_map() == {'gaiksaya': 'U111'}
+        assert 'COLLISION' not in caplog.text
+
+    def test_a_collision_does_not_cost_the_other_handles(self, identity, dynamodb, table):
+        table.scan.return_value = {'Items': [
+            item('contested', 'U111'), item('contested', 'U222'), item('fine', 'U333'),
+        ]}
+        assert identity.load_handle_map() == {'fine': 'U333'}
+
+    def test_a_malformed_item_is_skipped_without_losing_the_map(self, identity, dynamodb, table, caplog):
+        """.lower() on a non-string would raise, and the handler around the scan turns any
+        exception into an empty map - so one hand-edited row would cost everyone a mention."""
+        table.scan.return_value = {'Items': [
+            {'github_handle': 12345, 'slack_user_id': 'U111', 'status': 'active'},
+            item('fine', 'U222'),
+        ]}
+        with caplog.at_level(logging.WARNING):
+            assert identity.load_handle_map() == {'fine': 'U222'}
+        assert 'RELEASE_NOTIFY_IDENTITY_MALFORMED' in caplog.text
 
     def test_no_table_configured_returns_empty_without_calling_dynamodb(self, identity, monkeypatch):
         """A deployment with no identity table must not pay for a lookup it cannot do."""
