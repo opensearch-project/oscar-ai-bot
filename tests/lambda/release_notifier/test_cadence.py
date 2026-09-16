@@ -22,6 +22,13 @@ class TestPhaseIntervals:
         assert intervals['rc_to_release'] == 24
         assert intervals['final_push'] == 6
 
+    def test_a_slipped_rc_is_not_reported_less_often_than_an_on_track_one(self, cadence):
+        # rc_to_release is 24h, so classifying a missed RC date as post-RC also made the
+        # release that is behind the quieter of the two.
+        assert cadence.PHASE_INTERVAL_HOURS['rc_overdue'] == 6
+        assert (cadence.PHASE_INTERVAL_HOURS['rc_overdue']
+                <= cadence.PHASE_INTERVAL_HOURS['pre_rc_frequent'])
+
     def test_overdue_is_reported_but_slowly(self, cadence):
         # A late release is already known to be late, so it is reported every two days.
         assert cadence.PHASE_INTERVAL_HOURS['overdue'] == 48

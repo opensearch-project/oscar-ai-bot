@@ -53,6 +53,21 @@ class TestHeadline:
         text = message_builder.build_message('3.9.0', window, status())
         assert 'release in 18 days (2026-09-29)' in text
 
+    def test_a_missed_rc_date_is_never_reported_as_an_rc_having_been_created(self, message_builder):
+        # The reported bug: the rc_date passing was enough to headline the RC as created.
+        window = {**WINDOW, 'days_to_rc': -5, 'cadence_phase': 'rc_overdue',
+                  'rc_created': False}
+        text = message_builder.build_message('3.9.0', window, status())
+        assert 'RC date passed, no RC created yet' in text
+        assert message_builder.PHASE_LABEL['rc_to_release'] not in text
+
+    def test_an_overdue_rc_is_counted_as_well_as_the_release(self, message_builder):
+        # The nearer milestone is the one that is late, so it leads.
+        window = {**WINDOW, 'days_to_rc': -5, 'cadence_phase': 'rc_overdue'}
+        text = message_builder.build_message('3.9.0', window, status())
+        assert 'RC 5 days overdue (2026-09-15)' in text
+        assert 'release in 18 days (2026-09-29)' in text
+
     def test_unknown_verdict_gets_a_neutral_marker(self, message_builder):
         text = message_builder.build_message('3.9.0', WINDOW, status(verdict='unknown'))
         assert text.startswith(':white_circle:')
@@ -171,6 +186,35 @@ class TestOutstandingCriteria:
             criterion('all_integration_tests_passing', product='both'),
         ]))
         assert '[both]' not in text
+
+
+class TestRcProgress:
+    """Both distributions are named: they are built separately and differ."""
+
+    def test_both_distributions_are_reported(self, message_builder):
+        window = {**WINDOW, 'days_to_rc': -2, 'cadence_phase': 'rc_to_release',
+                  'rc_created': True,
+                  'rc_numbers': {'opensearch': 3, 'opensearch-dashboards': 1}}
+        text = message_builder.build_message('3.9.0', window, status())
+        assert 'RC builds — opensearch: RC3, opensearch-dashboards: RC1' in text
+
+    def test_a_distribution_with_no_rc_is_named_rather_than_omitted(self, message_builder):
+        # Otherwise the one that is behind is the one that disappears from the message.
+        window = {**WINDOW, 'days_to_rc': -2, 'cadence_phase': 'rc_to_release',
+                  'rc_created': True,
+                  'rc_numbers': {'opensearch': 2, 'opensearch-dashboards': 0}}
+        text = message_builder.build_message('3.9.0', window, status())
+        assert 'RC builds — opensearch: RC2, opensearch-dashboards: none yet' in text
+
+    def test_nothing_is_claimed_when_the_rc_state_is_unknown(self, message_builder):
+        window = {**WINDOW, 'days_to_rc': -2, 'cadence_phase': 'rc_to_release',
+                  'rc_created': None}
+        text = message_builder.build_message('3.9.0', window, status())
+        assert 'RC builds' not in text
+
+    def test_nothing_is_reported_before_the_rc_date(self, message_builder):
+        text = message_builder.build_message('3.9.0', WINDOW, status())
+        assert 'RC builds' not in text
 
 
 class TestDeltaAndFooter:

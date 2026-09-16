@@ -38,7 +38,8 @@ cross-account role — only permission to invoke one Lambda.
 | `out_of_window` | never | More than 14 days before RC; nothing is due yet |
 | `pre_rc_daily` | 24h | 8–14 days before RC |
 | `pre_rc_frequent` | 6h | 0–7 days before RC |
-| `rc_to_release` | 24h | RC cut, release not yet reached |
+| `rc_overdue` | 6h | RC date has passed with no RC created; the release is late to its first gate |
+| `rc_to_release` | 24h | RC created, release not yet reached |
 | `final_push` | 6h | Two days or fewer to release |
 | `overdue` | 48h | Active but past its date; already known to be late |
 | `released` / `cancelled` / `not_scheduled` | never | Nothing left to report |
@@ -47,6 +48,21 @@ Messages lead with the criteria due in the **current** phase: entrance criteria 
 RC, exit criteria gate GA. Before RC an unfinished exit criterion is expected rather than
 news, so presenting it as blocking would train readers to ignore the alert. Criteria that
 are open but not yet due are still listed, just separately.
+
+### Telling a created RC from a missed RC date
+
+The schedule index records the *planned* `rc_date` and stays `active` whether or not the RC
+was actually created, so the dates alone cannot distinguish the two — which is why a passed
+`rc_date` used to be reported as "RC created, approaching release" for a release that had no
+RC. Once the `rc_date` is behind an active release, the metrics Lambda reads the build results
+index (`opensearch-distribution-build-results`) for a successful RC build, using the same
+query as `ReleaseCandidateStatus.getLatestRcNumber` in `opensearch-build-libraries`, and
+reports `rc_created` plus the RC number reached by **each** distribution — OpenSearch and
+Dashboards are built separately and reach different numbers.
+
+If that query fails the phase stays as the dates imply, rather than every in-flight release
+being silently reclassified because one query timed out. Grep `RC_NUMBER_QUERY_FAILED` or
+`RC_NUMBER_UNPARSEABLE` in the metrics Lambda's logs.
 
 ## Tagging the release manager
 
@@ -86,7 +102,7 @@ channel, the tag renders but does not reach them.
 | Lambda env (CDK) | `METRICS_FUNCTION_NAME` | The metrics Lambda to invoke |
 | Lambda env (CDK) | `RELEASE_NOTIFY_TABLE_NAME` | Where the last post per version is recorded |
 | Lambda env (CDK) | `CENTRAL_SECRET_NAME` | Where to read the two secret values |
-| Lambda env (CDK) | `IDENTITY_TABLE_NAME` | Slack-GitHub mappings, for tagging the RM. Only set where identity mapping is deployed (beta, prod) |
+| Lambda env (CDK) | `IDENTITY_TABLE_NAME` | Slack-GitHub mappings, for tagging the RM. Set in every environment that has a `SLACK_WORKSPACE_ID` configured, and unset only where one is not |
 
 Point `RELEASE_CHANNELS` at a test channel first — the cadence only becomes visible over
 several days of a real release.

@@ -28,6 +28,7 @@ VERDICT_EMOJI = {
 PHASE_FOCUS = {
     'pre_rc_daily': 'entrance',
     'pre_rc_frequent': 'entrance',
+    'rc_overdue': 'entrance',
     'rc_to_release': 'exit',
     'final_push': 'exit',
     'overdue': 'exit',
@@ -45,7 +46,11 @@ LEFTOVER_LABEL = {
 PHASE_LABEL = {
     'pre_rc_daily': 'approaching RC',
     'pre_rc_frequent': 'RC imminent',
-    'rc_to_release': 'RC cut, approaching release',
+    # States the fact rather than asserting a milestone: the RC date is behind us and no RC
+    # build exists. Claiming the RC here is what made the notifier report a milestone the
+    # release had not reached.
+    'rc_overdue': 'RC date passed, no RC created yet',
+    'rc_to_release': 'RC created, approaching release',
     'final_push': 'final stretch before release',
     'overdue': 'past its release date',
     'released': 'released',
@@ -57,19 +62,43 @@ PHASE_LABEL = {
 MAX_LISTED_COMPONENTS = 10
 
 
+def _days(count: int) -> str:
+    return f"{count} day{'s' if count != 1 else ''}"
+
+
 def _countdown(window: Dict[str, Any]) -> str:
     """Describe how far away the next milestone is."""
     days_to_rc = window.get('days_to_rc')
     days_to_release = window.get('days_to_release')
 
     if days_to_rc is not None and days_to_rc >= 0:
-        return f"RC in {days_to_rc} day{'s' if days_to_rc != 1 else ''} ({window.get('rc_date')})"
+        return f"RC in {_days(days_to_rc)} ({window.get('rc_date')})"
+
     if days_to_release is not None and days_to_release >= 0:
-        return (
-            f"release in {days_to_release} day{'s' if days_to_release != 1 else ''} "
-            f"({window.get('release_date')})"
-        )
+        countdown = f"release in {_days(days_to_release)} ({window.get('release_date')})"
+        # An RC that has not been created is the nearer milestone and the one that is late, so
+        # the headline says how late rather than only counting down to a date further out.
+        if window.get('cadence_phase') == 'rc_overdue' and days_to_rc is not None:
+            return f"RC {_days(abs(days_to_rc))} overdue ({window.get('rc_date')}) · {countdown}"
+        return countdown
+
     return f"release date {window.get('release_date')}"
+
+
+def _rc_progress(window: Dict[str, Any]) -> Optional[str]:
+    """Report the RC number reached per distribution, when it is known.
+
+    Both are named even when one is at zero: the distributions are built separately and reach
+    different RC numbers, so a single figure would hide one of them being behind.
+    """
+    numbers = window.get('rc_numbers')
+    if not isinstance(numbers, dict) or not numbers:
+        return None
+    parts = [
+        f"{product}: {f'RC{number}' if number else 'none yet'}"
+        for product, number in numbers.items()
+    ]
+    return 'RC builds — ' + ', '.join(parts)
 
 
 def _criterion_line(criterion: Dict[str, Any]) -> str:
@@ -161,6 +190,10 @@ def build_message(
         if delta.get('raised'):
             parts.append('newly raised: ' + ', '.join(f'`{n}`' for n in delta['raised']))
         lines.append('\n*Since last update* — ' + '; '.join(parts))
+
+    rc_progress = _rc_progress(window)
+    if rc_progress:
+        lines.append(f"\n{rc_progress}")
 
     manager = render_release_manager(window.get('release_manager'), handle_map)
     if manager:
