@@ -43,6 +43,20 @@ class TestFormatMarkdownToSlackMrkdwn:
         assert "<#C123|general>" in result
         assert "<<#" not in result
 
+    def test_issue_number_not_treated_as_channel(self):
+        # "#1494" is a PR/issue reference, not a channel — must stay literal.
+        result = MessageFormatter.format_markdown_to_slack_mrkdwn("see PR #1494 for the fix")
+        assert "#1494" in result
+        assert "<#1494>" not in result
+
+    def test_pr_number_inside_link_keeps_link_intact(self):
+        # The reported bug: a markdown link whose text contains "#1494" must
+        # convert to a clean <url|text> without a nested <#1494> breaking it.
+        msg = "[PR #1494: cleanup, address CVEs](https://github.com/o/r/pull/1494)"
+        result = MessageFormatter.format_markdown_to_slack_mrkdwn(msg)
+        assert result == "<https://github.com/o/r/pull/1494|PR #1494: cleanup, address CVEs>"
+        assert "<#1494>" not in result
+
     def test_xml_tag_stripping_answer(self):
         result = MessageFormatter.format_markdown_to_slack_mrkdwn("<answer>hello world</answer>")
         assert "hello world" in result

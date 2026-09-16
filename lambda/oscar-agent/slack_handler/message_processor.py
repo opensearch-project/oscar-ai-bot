@@ -358,6 +358,11 @@ class MessageProcessor:
 
             # Build out-of-band identity attributes from authenticated Slack event
             identity_attrs = self._build_identity_attributes(thread_key, user_id)
+            # Carry the Slack thread context so long-running async work (e.g. CVE
+            # remediation) can post its result back into this thread when it
+            # finishes — the agent turn ends before the worker is done.
+            identity_attrs['slack_channel'] = str(channel or '')
+            identity_attrs['slack_thread_ts'] = str(thread_ts or '')
             logger.info(f"Identity attributes: {identity_attrs}")
 
             # Get context from storage and format for query
