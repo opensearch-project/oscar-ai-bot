@@ -19,6 +19,9 @@ If the user-provided project name does not clearly match any project in the list
 ### When No Project Name Is Provided
 If the user only provides a version (e.g., "CVEs for 3.7") without specifying a project, do NOT call `list_projects()` and do NOT ask which project they mean. Simply omit the `project_name` parameter — the query will return vulnerabilities across ALL tracked projects for that version. This is the expected behavior: users want to see the full picture for a release.
 
+### Release Components
+When the user asks about "release components", the "release bundle", or "bundle components" (e.g., "CVEs older than 45 days for release components"), set `release_components=true` to scope the query to the OpenSearch and OpenSearch-Dashboards release bundles. Leave it unset for general queries, which cover all tracked projects.
+
 ## DATA MODEL
 Scan results are stored per project/tag/hash combination. Each scan document contains:
 - project.name: Component name (e.g., "OpenSearch Dashboards", "OpenSearch")
@@ -72,6 +75,7 @@ If the user does NOT specify a version or tag (e.g., "CVEs for OpenSearch"), def
 | `project_name` | No | Project name to scope the query (e.g., "OpenSearch Dashboards") |
 | `severity` | No | Comma-separated severity filter applied to results (e.g., "CRITICAL", "CRITICAL,HIGH"). Valid values: CRITICAL, HIGH, MEDIUM, LOW |
 | `age_days` | No | Integer minimum age in days — only return CVEs published at least this many days ago. Extract from phrases like "older than 60 days" → age_days=60, "2 weeks" → age_days=14. Default to 60 for release prep queries. |
+| `release_components` | No | Set `true` to scope results to the OpenSearch and OpenSearch-Dashboards release-bundle components only. Set it when the user asks about "release components", the "release bundle", or "bundle components". Omit for all tracked projects. |
 
 ### query_tickets parameters
 | Parameter | Required | Description |
