@@ -272,6 +272,51 @@ class TestDSLQueryStructure:
         assert {'term': {'project.tag': 'origin/2.19'}} in filters
         assert {'term': {'project.name': 'OpenSearch'}} in filters
 
+    def test_release_components_adds_release_type_filter(self):
+        """release_components=True scopes the query to the two release bundles."""
+        mock_response = {'hits': {'hits': []}}
+        mod, mock_aws = _load_dsl_query_builder(
+            mock_opensearch_request=mock_response,
+        )
+
+        mod.query_vulnerabilities(version='3.7', release_components=True)
+
+        call_args = mock_aws.opensearch_request.call_args
+        body_str = call_args[0][2] if len(call_args[0]) > 2 else call_args[1].get('body')
+        filters = json.loads(body_str)['query']['bool']['filter']
+        assert {'terms': {'release_type.keyword':
+                          ['bundle_opensearch', 'bundle_opensearch_dashboards']}} in filters
+        assert {'term': {'project.tag': 'origin/3.7'}} in filters
+
+    def test_release_components_only_produces_bundle_filter(self):
+        """release_components alone (no version/project) still filters to bundles."""
+        mock_response = {'hits': {'hits': []}}
+        mod, mock_aws = _load_dsl_query_builder(
+            mock_opensearch_request=mock_response,
+        )
+
+        mod.query_vulnerabilities(project_name='OpenSearch', release_components=True)
+
+        call_args = mock_aws.opensearch_request.call_args
+        body_str = call_args[0][2] if len(call_args[0]) > 2 else call_args[1].get('body')
+        filters = json.loads(body_str)['query']['bool']['filter']
+        assert {'terms': {'release_type.keyword':
+                          ['bundle_opensearch', 'bundle_opensearch_dashboards']}} in filters
+
+    def test_release_components_omitted_by_default(self):
+        """Without release_components, no release_type filter is applied."""
+        mock_response = {'hits': {'hits': []}}
+        mod, mock_aws = _load_dsl_query_builder(
+            mock_opensearch_request=mock_response,
+        )
+
+        mod.query_vulnerabilities(version='3.7')
+
+        call_args = mock_aws.opensearch_request.call_args
+        body_str = call_args[0][2] if len(call_args[0]) > 2 else call_args[1].get('body')
+        filters = json.loads(body_str)['query']['bool']['filter']
+        assert not any('release_type.keyword' in f.get('terms', {}) for f in filters)
+
     def test_query_targets_correct_index(self):
         """Validates: Requirement 1.4"""
         mock_response = {'hits': {'hits': []}}

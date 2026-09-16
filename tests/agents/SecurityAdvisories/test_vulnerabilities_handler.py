@@ -315,7 +315,7 @@ class TestDefaultVersionBehavior:
 
         # Handler passes through to builder; builder applies origin/main default
         mock_dsl.query_vulnerabilities.assert_called_once_with(
-            version=None, project_name=None,
+            version=None, project_name=None, release_components=False,
         )
         assert result['status'] == 'success'
 
@@ -331,7 +331,7 @@ class TestDefaultVersionBehavior:
         )
 
         mock_dsl.query_vulnerabilities.assert_called_once_with(
-            version='', project_name='',
+            version='', project_name='', release_components=False,
         )
         assert result['status'] == 'success'
 
@@ -347,7 +347,7 @@ class TestDefaultVersionBehavior:
         )
 
         mock_dsl.query_vulnerabilities.assert_called_once_with(
-            version=None, project_name=None,
+            version=None, project_name=None, release_components=False,
         )
         assert result['status'] == 'success'
 
@@ -376,6 +376,30 @@ class TestDefaultVersionBehavior:
 
         assert result['status'] == 'success'
         mock_dsl.query_vulnerabilities.assert_called_once()
+
+
+class TestReleaseComponentsParam:
+    """The release_components param is parsed (bool or string) and passed through."""
+
+    def _call(self, params):
+        mock_dsl = _make_mock_dsl_query_builder()
+        mock_dsl.query_vulnerabilities.return_value = {'hits': {'hits': []}}
+        mod, _ = _load_vulnerabilities_handler(mock_dsl=mock_dsl)
+        mod.handle_query_vulnerabilities({'query': 'q', **params}, 'test-rc')
+        return mock_dsl.query_vulnerabilities.call_args.kwargs['release_components']
+
+    def test_true_bool_passes_through(self):
+        assert self._call({'release_components': True}) is True
+
+    def test_true_string_passes_through(self):
+        # Bedrock may deliver a boolean param as the string "true".
+        assert self._call({'release_components': 'true'}) is True
+
+    def test_false_when_absent(self):
+        assert self._call({}) is False
+
+    def test_false_for_other_values(self):
+        assert self._call({'release_components': 'no'}) is False
 
 
 # ---------------------------------------------------------------------------

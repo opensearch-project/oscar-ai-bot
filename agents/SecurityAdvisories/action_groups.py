@@ -82,6 +82,17 @@ def _privileged_action_group(
                             ),
                             required=False,
                         ),
+                        "release_components": bedrock.CfnAgent.ParameterDetailProperty(
+                            type="boolean",
+                            description=(
+                                "Set true to scope results to the OpenSearch and "
+                                "OpenSearch-Dashboards release-bundle components only. "
+                                "Use when the user asks about 'release components', the "
+                                "'release bundle', or 'bundle components'. Omit for all "
+                                "tracked projects."
+                            ),
+                            required=False,
+                        ),
                     },
                 ),
                 bedrock.CfnAgent.FunctionProperty(

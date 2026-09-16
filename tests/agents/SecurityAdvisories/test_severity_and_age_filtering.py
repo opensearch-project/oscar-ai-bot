@@ -485,6 +485,18 @@ class TestActionGroupNewParameters:
         func = self._get_query_vulns_func(agent)
         assert func.parameters['age_days'].type == 'integer'
 
+    def test_release_components_param_exists(self, agent):
+        func = self._get_query_vulns_func(agent)
+        assert 'release_components' in func.parameters
+
+    def test_release_components_param_is_optional(self, agent):
+        func = self._get_query_vulns_func(agent)
+        assert func.parameters['release_components'].required is False
+
+    def test_release_components_param_is_boolean_type(self, agent):
+        func = self._get_query_vulns_func(agent)
+        assert func.parameters['release_components'].type == 'boolean'
+
 
 # ---------------------------------------------------------------------------
 # Agent instruction documentation
@@ -506,6 +518,10 @@ class TestInstructionDocumentation:
     def test_instruction_mentions_age_days_param(self, agent):
         instruction = agent.get_agent_instruction()
         assert 'age_days' in instruction
+
+    def test_instruction_mentions_release_components_param(self, agent):
+        instruction = agent.get_agent_instruction()
+        assert 'release_components' in instruction
 
     def test_instruction_has_severity_example(self, agent):
         instruction = agent.get_agent_instruction()
