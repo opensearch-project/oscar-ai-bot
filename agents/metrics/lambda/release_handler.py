@@ -53,6 +53,21 @@ RELEASE_STATE_FETCH_SIZE = 1000
 # enough documents to reduce to the newest registration per version.
 ACTIVE_RELEASES_FETCH_SIZE = 100
 
+# Unsuffixed and unwildcarded, matching the Jenkins libraries that own this data
+# (opensearch-build-libraries: vars/buildRC.groovy, vars/checkIntegTestResultsOverview.groovy).
+# Deliberately not the monthly -{month}-{year} pattern the other build queries use: this index
+# is not month-partitioned, and an RC may predate the month being asked about.
+BUILD_RESULTS_INDEX = 'opensearch-distribution-build-results'
+
+# Release-state product name -> the component_category recorded in the build results index.
+# The two distributions are built independently and reach different RC numbers, so both are
+# reported rather than collapsed: OpenSearch on RC3 while Dashboards is still on RC1 is exactly
+# the kind of gap a release manager needs to see.
+RC_PRODUCTS = {
+    'opensearch': 'OpenSearch',
+    'opensearch-dashboards': 'OpenSearch Dashboards',
+}
+
 SCOPE_STATE = 'state'
 SCOPE_SCHEDULE = 'schedule'
 
@@ -64,6 +79,10 @@ CRITERIA_FOCUS_BY_PHASE = {
     'out_of_window': release_rubric.ENTRANCE,
     'pre_rc_daily': release_rubric.ENTRANCE,
     'pre_rc_frequent': release_rubric.ENTRANCE,
+    # The RC date came and went without an RC, so the RC is still the milestone ahead and
+    # entrance criteria are still what gates it. Judging this against exit criteria would
+    # report on a gate the release has not reached.
+    'rc_overdue': release_rubric.ENTRANCE,
     'rc_to_release': release_rubric.EXIT,
     'final_push': release_rubric.EXIT,
     'overdue': release_rubric.EXIT,
@@ -71,6 +90,106 @@ CRITERIA_FOCUS_BY_PHASE = {
     'cancelled': None,
     'not_scheduled': None,
 }
+
+
+def _latest_rc_number(version: str, component_category: str, request_id: str) -> Optional[int]:
+    """Highest RC number successfully built for one distribution of a version.
+
+    Mirrors ReleaseCandidateStatus.getLatestRcNumberQuery in opensearch-build-libraries so
+    that OSCAR and the Jenkins jobs read the same signal the same way: match_phrase rather
+    than term (this index is dynamically mapped and every field here is analyzed text), the
+    rc flag rather than rc_number to identify an RC build (every build document carries an
+    rc_number, RC or not), and a SUCCESS filter because an RC that failed to build is not one
+    the release has actually reached.
+
+    Returns 0 when no RC has been built, or None when the query failed - the two must not be
+    conflated, since "no RC yet" changes the release's phase and "we could not tell" must not.
+    """
+    query = {
+        'size': 1,
+        '_source': ['rc_number'],
+        'sort': [
+            {'distribution_build_number': {'order': 'desc'}},
+            {'rc_number': {'order': 'desc'}},
+        ],
+        'query': {
+            'bool': {
+                'filter': [
+                    {'match_phrase': {'component_category': component_category}},
+                    {'match_phrase': {'rc': 'true'}},
+                    {'match_phrase': {'version': version}},
+                    {'match_phrase': {'overall_build_result': 'SUCCESS'}},
+                ]
+            }
+        },
+    }
+
+    try:
+        response = opensearch_request('GET', f'/{BUILD_RESULTS_INDEX}/_search', query)
+    except Exception as e:
+        logger.warning(
+            f"RC_NUMBER_QUERY_FAILED [{request_id}]: {version} {component_category}: {e}"
+        )
+        return None
+
+    hits = response.get('hits', {}).get('hits', [])
+    if not hits:
+        return 0
+
+    raw = hits[0].get('_source', {}).get('rc_number')
+    try:
+        # Indexed as a string by the Jenkins side, so never compared without coercion.
+        return int(raw)
+    except (TypeError, ValueError):
+        logger.warning(
+            f"RC_NUMBER_UNPARSEABLE [{request_id}]: {version} {component_category}: {raw!r}"
+        )
+        return None
+
+
+def _rc_numbers(version: str, request_id: str) -> Optional[Dict[str, int]]:
+    """Latest successfully built RC number per distribution, or None if it cannot be read.
+
+    All or nothing: a partial answer would let one failed query read as "Dashboards has no
+    RC", which is the difference between two phases.
+    """
+    numbers: Dict[str, int] = {}
+    for product, component_category in RC_PRODUCTS.items():
+        rc_number = _latest_rc_number(version, component_category, request_id)
+        if rc_number is None:
+            return None
+        numbers[product] = rc_number
+
+    logger.info(f"RC_NUMBERS [{request_id}]: {version} -> {numbers}")
+    return numbers
+
+
+def _resolve_rc_state(
+    days_to_rc: Optional[int],
+    status: Optional[str],
+    version: Optional[str],
+    request_id: str,
+) -> Dict[str, Any]:
+    """Look up RC build state, but only when the answer can change the phase.
+
+    Asked lazily so a normal run pays for nothing extra: before the RC date the countdown
+    decides the phase, and a released or cancelled release is decided by its status, so in
+    neither case does the build index tell us anything the schedule has not already said.
+
+    Returns the keys to merge into the window response. rc_created is None when unknown.
+    """
+    if version is None or days_to_rc is None or days_to_rc >= 0:
+        return {'rc_created': None}
+    if (status or '').strip().lower() != 'active':
+        return {'rc_created': None}
+
+    numbers = _rc_numbers(version, request_id)
+    if numbers is None:
+        return {'rc_created': None}
+
+    # Any RC counts as the release having entered its RC phase - the distributions are built
+    # separately, and one of them having started is not "no RC yet".
+    return {'rc_created': any(n > 0 for n in numbers.values()), 'rc_numbers': numbers}
 
 
 def _require_version(params: Dict[str, Any]) -> Optional[str]:
@@ -216,15 +335,21 @@ def handle_list_active_releases(params: Dict[str, Any], request_id: str = 'unkno
         release_date = parse_timestamp(source.get('release_date'))
         days_to_rc = (rc_date.date() - today).days if rc_date else None
         days_to_release = (release_date.date() - today).days if release_date else None
+        rc_state = _resolve_rc_state(
+            days_to_rc, source.get('status'), source.get('version'), request_id
+        )
         releases.append({
             'version': source.get('version'),
             'rc_date': source.get('rc_date'),
             'release_date': source.get('release_date'),
             'days_to_rc': days_to_rc,
             'days_to_release': days_to_release,
-            'cadence_phase': _cadence_phase(days_to_rc, days_to_release, source.get('status')),
+            'cadence_phase': _cadence_phase(
+                days_to_rc, days_to_release, source.get('status'), rc_state['rc_created']
+            ),
             'release_manager': source.get('release_manager'),
             'release_issue': source.get('release_issue'),
+            **rc_state,
         })
 
     releases.sort(key=lambda r: (r['days_to_release'] is None, r['days_to_release']))
@@ -275,6 +400,7 @@ def handle_get_release_window(params: Dict[str, Any], request_id: str = 'unknown
 
     days_to_rc = (rc_date.date() - today).days if rc_date else None
     days_to_release = (release_date.date() - today).days if release_date else None
+    rc_state = _resolve_rc_state(days_to_rc, source.get('status'), version, request_id)
 
     return {
         'version': version,
@@ -285,9 +411,12 @@ def handle_get_release_window(params: Dict[str, Any], request_id: str = 'unknown
         'release_date': source.get('release_date'),
         'days_to_rc': days_to_rc,
         'days_to_release': days_to_release,
-        'cadence_phase': _cadence_phase(days_to_rc, days_to_release, source.get('status')),
+        'cadence_phase': _cadence_phase(
+            days_to_rc, days_to_release, source.get('status'), rc_state['rc_created']
+        ),
         'release_manager': source.get('release_manager'),
         'release_issue': source.get('release_issue'),
+        **rc_state,
     }
 
 
@@ -295,12 +424,20 @@ def _cadence_phase(
     days_to_rc: Optional[int],
     days_to_release: Optional[int],
     status: Optional[str] = None,
+    rc_created: Optional[bool] = None,
 ) -> str:
     """Classify the schedule phase from the release status and its dates.
 
     The schedule status wins wherever it disagrees with the dates: dates alone cannot tell
     a shipped release from a cancelled or a late one, so inferring the lifecycle from them
     would contradict the status field reported alongside this phase.
+
+    Once the RC date has passed, the dates cannot tell whether the RC was actually created
+    either - the schedule records the planned date and stays active either way - so
+    rc_created carries that answer from the build results index. It is deliberately a
+    parameter rather than a lookup: this function stays pure, and the caller decides whether
+    the question is worth a query. None means unknown, and preserves the date-derived phase
+    rather than guessing.
 
     Phases follow the escalating notification cadence in the proposal:
       cancelled:        schedule status is cancelled, whatever the dates say
@@ -309,7 +446,8 @@ def _cadence_phase(
       out_of_window:    more than 14 days before RC
       pre_rc_daily:     14 to 8 days before RC
       pre_rc_frequent:  7 to 0 days before RC
-      rc_to_release:    RC cut, more than 2 days before release
+      rc_overdue:       RC date has passed with no RC created
+      rc_to_release:    RC created, more than 2 days before release
       final_push:       final 2 days before release
       not_scheduled:    no usable dates
     """
@@ -329,8 +467,13 @@ def _cadence_phase(
             return 'pre_rc_daily'
         if 0 <= days_to_rc <= 7:
             return 'pre_rc_frequent'
+        if rc_created is False:
+            # The RC date slipped. Reported as its own phase rather than as rc_to_release,
+            # which would claim a milestone the release has not reached and judge it against
+            # exit criteria while the entrance gate is still what stands in the way.
+            return 'rc_overdue'
         if days_to_release is None:
-            # RC is cut but no release date is registered: still post-RC, not unscheduled.
+            # An RC exists but no release date is registered: still post-RC, not unscheduled.
             return 'rc_to_release'
 
     if days_to_release is not None:

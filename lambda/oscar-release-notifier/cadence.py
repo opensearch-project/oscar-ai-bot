@@ -21,6 +21,10 @@ PHASE_INTERVAL_HOURS: Dict[str, Optional[int]] = {
     'out_of_window': None,
     'pre_rc_daily': 24,
     'pre_rc_frequent': 6,
+    # The RC date has passed with no RC built. Kept at the pre-RC frequency rather than the
+    # slower post-RC one: a release that is late to its first gate needs attention at least
+    # as often as one that is on track, and dropping to 24h here would make slipping quieter.
+    'rc_overdue': 6,
     'rc_to_release': 24,
     'final_push': 6,
     # An active release past its date is late by definition and the RM already knows it, so

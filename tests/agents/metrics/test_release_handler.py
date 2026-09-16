@@ -15,6 +15,8 @@ import sys
 from datetime import datetime, timezone
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 _LAMBDA_PATH = os.path.join(
     os.path.dirname(__file__), '..', '..', '..', 'agents', 'metrics', 'lambda',
 )
@@ -197,9 +199,13 @@ class TestGetReleaseWindow:
 
     def test_query_shape(self):
         handler, mock_aws, _ = _load_handler(opensearch_response=self._schedule_response())
-        handler.handle_get_release_window({'version': '3.9.0'})
+        # Pinned, and asserting on the FIRST call: with an unpinned clock the rc_date is in
+        # the past, which fires the RC build lookup and makes call_args the wrong query.
+        fake_now = datetime(2026, 9, 1, 12, 0, tzinfo=timezone.utc)
+        with patch.object(handler, '_now', return_value=fake_now):
+            handler.handle_get_release_window({'version': '3.9.0'})
 
-        _, path, query = mock_aws.opensearch_request.call_args[0]
+        _, path, query = mock_aws.opensearch_request.call_args_list[0][0]
         assert path == '/opensearch_release_schedule/_search'
         assert query['size'] == 1
         assert {'term': {'version.keyword': '3.9.0'}} in query['query']['bool']['filter']
@@ -356,7 +362,7 @@ class TestCadencePhase:
         assert result['status'] == 'cancelled'
         assert result['cadence_phase'] == 'cancelled'
 
-    def test_rc_cut_without_a_release_date_is_post_rc(self):
+    def test_rc_created_without_a_release_date_is_post_rc(self):
         # RC has passed and no release date is registered: post-RC, not unscheduled.
         handler, _, _ = _load_handler()
         assert handler._cadence_phase(-3, None) == 'rc_to_release'
@@ -365,6 +371,36 @@ class TestCadencePhase:
         handler, _, _ = _load_handler()
         assert handler._cadence_phase(None, 10) == 'rc_to_release'
         assert handler._cadence_phase(None, 1) == 'final_push'
+
+    def test_a_passed_rc_date_with_no_rc_created_is_not_post_rc(self):
+        # The reported bug: the date passing was taken as the RC having happened.
+        handler, _, _ = _load_handler()
+        assert handler._cadence_phase(-5, 13, 'active', rc_created=False) == 'rc_overdue'
+
+    def test_a_created_rc_is_post_rc(self):
+        handler, _, _ = _load_handler()
+        assert handler._cadence_phase(-5, 13, 'active', rc_created=True) == 'rc_to_release'
+
+    def test_unknown_rc_state_keeps_the_date_derived_phase(self):
+        # A failed lookup must not reclassify every in-flight release.
+        handler, _, _ = _load_handler()
+        assert handler._cadence_phase(-5, 13, 'active', rc_created=None) == 'rc_to_release'
+
+    def test_rc_state_does_not_override_the_lifecycle(self):
+        handler, _, _ = _load_handler()
+        assert handler._cadence_phase(-5, 13, 'cancelled', rc_created=False) == 'cancelled'
+        assert handler._cadence_phase(-5, 13, 'released', rc_created=False) == 'released'
+
+    def test_rc_state_does_not_override_an_overdue_release(self):
+        # Past its release date matters more than which gate it never reached.
+        handler, _, _ = _load_handler()
+        assert handler._cadence_phase(-20, -3, 'active', rc_created=False) == 'overdue'
+
+    def test_a_missing_rc_before_its_date_is_not_overdue(self):
+        # Before the rc_date there is nothing late about not having an RC.
+        handler, _, _ = _load_handler()
+        assert handler._cadence_phase(5, 19, 'active', rc_created=False) == 'pre_rc_frequent'
+        assert handler._cadence_phase(10, 24, 'active', rc_created=False) == 'pre_rc_daily'
 
 
 class TestQueryReleaseState:
@@ -429,6 +465,9 @@ class TestCriteriaScoping:
                    criterion_type='exit'),
     ]}}
 
+    # An RC was built, so a passed rc_date really does mean the release is post-RC.
+    _RC_BUILT = {'hits': {'total': {'value': 1}, 'hits': [{'_source': {'rc_number': '2'}}]}}
+
     @staticmethod
     def _schedule(rc_date, release_date, status='active'):
         return {'hits': {'total': {'value': 1}, 'hits': [{'_source': {
@@ -438,18 +477,34 @@ class TestCriteriaScoping:
             'status': status,
         }}]}}
 
-    def _status(self, schedule, state=None, now=datetime(2026, 9, 20, 12, 0, tzinfo=timezone.utc)):
+    def _status(self, schedule, state=None, rc=None,
+                now=datetime(2026, 9, 20, 12, 0, tzinfo=timezone.utc)):
         handler, mock_aws, _ = _load_handler()
-        mock_aws.opensearch_request.side_effect = [state or self._MIXED_STATE, schedule]
+        # State query, then the schedule, then one build query per distribution.
+        rc_responses = rc if rc is not None else [self._RC_BUILT, self._RC_BUILT]
+        mock_aws.opensearch_request.side_effect = [
+            state or self._MIXED_STATE, schedule, *rc_responses,
+        ]
         with patch.object(handler, '_now', return_value=now):
             return handler.handle_get_release_status({'version': '3.9.0'})
 
     def test_post_rc_judges_exit_criteria_only(self):
-        # RC cut on the 15th, release on the 29th: the entrance gate is behind us.
+        # RC created on the 15th, release on the 29th: the entrance gate is behind us.
         result = self._status(self._schedule('2026-09-15', '2026-09-29'))
         assert result['criteria_scope'] == 'exit'
         assert result['verdict'] == 'green'
         assert result['out_of_scope'] == ['security_reviews_complete']
+
+    def test_a_slipped_rc_is_still_judged_on_entrance_criteria(self):
+        # Same dates as above, but no RC was ever built: the entrance gate is what the
+        # release is still standing at, so judging it on exit criteria would report on a
+        # gate it has not reached - and would have called this GREEN.
+        no_rc = {'hits': {'total': {'value': 0}, 'hits': []}}
+        result = self._status(
+            self._schedule('2026-09-15', '2026-09-29'), rc=[no_rc, no_rc])
+        assert result['criteria_scope'] == 'entrance'
+        assert result['verdict'] == 'red'
+        assert result['blocking_failures'] == ['security_reviews_complete']
 
     def test_pre_rc_judges_entrance_criteria_only(self):
         result = self._status(
@@ -500,9 +555,158 @@ class TestCriteriaScoping:
         # A phase missing from the map would silently be judged against everything.
         handler, _, _ = _load_handler()
         phases = {
-            handler._cadence_phase(rc, rel, status)
+            handler._cadence_phase(rc, rel, status, rc_created)
             for rc in (None, -5, 0, 5, 10, 20)
             for rel in (None, -3, 1, 5, 20)
             for status in (None, 'active', 'released', 'cancelled')
+            for rc_created in (None, True, False)
         }
         assert phases <= set(handler.CRITERIA_FOCUS_BY_PHASE)
+
+
+class TestRcDetection:
+    """A passed rc_date is not an RC.
+
+    The schedule index records the planned date and stays active either way, so the RC
+    itself is read from the build results index - the same signal, read the same way, as
+    ReleaseCandidateStatus.getLatestRcNumber in opensearch-build-libraries.
+    """
+
+    _NOW = datetime(2026, 9, 20, 12, 0, tzinfo=timezone.utc)
+
+    @staticmethod
+    def _schedule(status='active', rc_date='2026-09-15', release_date='2026-09-29'):
+        return {'hits': {'total': {'value': 1}, 'hits': [{'_source': {
+            'version': '3.9.0',
+            'status': status,
+            'rc_date': rc_date,
+            'release_date': release_date,
+        }}]}}
+
+    @staticmethod
+    def _rc(rc_number):
+        if rc_number is None:
+            return {'hits': {'total': {'value': 0}, 'hits': []}}
+        return {'hits': {'total': {'value': 1},
+                         'hits': [{'_source': {'rc_number': rc_number}}]}}
+
+    def _window(self, schedule=None, rc_responses=(), now=None):
+        handler, mock_aws, _ = _load_handler()
+        mock_aws.opensearch_request.side_effect = [
+            schedule if schedule is not None else self._schedule(), *rc_responses,
+        ]
+        with patch.object(handler, '_now', return_value=now or self._NOW):
+            result = handler.handle_get_release_window({'version': '3.9.0'})
+        return result, mock_aws
+
+    def test_query_matches_the_jenkins_library(self):
+        _, mock_aws = self._window(rc_responses=[self._rc('3'), self._rc('1')])
+
+        _, path, query = mock_aws.opensearch_request.call_args_list[1][0]
+        # Unsuffixed and unwildcarded: this index is not month-partitioned.
+        assert path == '/opensearch-distribution-build-results/_search'
+        assert query['query']['bool']['filter'] == [
+            {'match_phrase': {'component_category': 'OpenSearch'}},
+            # The rc flag, not rc_number: every build document carries an rc_number.
+            {'match_phrase': {'rc': 'true'}},
+            {'match_phrase': {'version': '3.9.0'}},
+            # An RC that failed to build is not one the release has reached.
+            {'match_phrase': {'overall_build_result': 'SUCCESS'}},
+        ]
+        assert query['sort'] == [
+            {'distribution_build_number': {'order': 'desc'}},
+            {'rc_number': {'order': 'desc'}},
+        ]
+        assert query['size'] == 1
+
+    def test_both_distributions_are_queried(self):
+        _, mock_aws = self._window(rc_responses=[self._rc('3'), self._rc('1')])
+        queried = [
+            call[0][2]['query']['bool']['filter'][0]['match_phrase']['component_category']
+            for call in mock_aws.opensearch_request.call_args_list[1:]
+        ]
+        # A space, not a hyphen - this is the value the build jobs index.
+        assert queried == ['OpenSearch', 'OpenSearch Dashboards']
+
+    def test_different_rc_numbers_per_distribution_are_both_reported(self):
+        # The distributions are built independently, so one being behind must stay visible.
+        result, _ = self._window(rc_responses=[self._rc('3'), self._rc('1')])
+        assert result['rc_numbers'] == {'opensearch': 3, 'opensearch-dashboards': 1}
+        assert result['rc_created'] is True
+        assert result['cadence_phase'] == 'rc_to_release'
+
+    def test_no_rc_on_either_distribution_is_overdue(self):
+        result, _ = self._window(rc_responses=[self._rc(None), self._rc(None)])
+        assert result['rc_created'] is False
+        assert result['rc_numbers'] == {'opensearch': 0, 'opensearch-dashboards': 0}
+        assert result['cadence_phase'] == 'rc_overdue'
+
+    def test_one_distribution_having_an_rc_counts_as_post_rc(self):
+        result, _ = self._window(rc_responses=[self._rc('2'), self._rc(None)])
+        assert result['rc_created'] is True
+        assert result['rc_numbers'] == {'opensearch': 2, 'opensearch-dashboards': 0}
+        assert result['cadence_phase'] == 'rc_to_release'
+
+    def test_a_failed_build_query_leaves_the_rc_state_unknown(self):
+        # Never conflated with "no RC": one timed-out query must not reclassify a release.
+        handler, mock_aws, _ = _load_handler()
+        mock_aws.opensearch_request.side_effect = [self._schedule(), Exception('boom')]
+        with patch.object(handler, '_now', return_value=self._NOW):
+            result = handler.handle_get_release_window({'version': '3.9.0'})
+        assert result['rc_created'] is None
+        assert 'rc_numbers' not in result
+        assert result['cadence_phase'] == 'rc_to_release'
+
+    def test_one_failed_query_discards_the_partial_answer(self):
+        handler, mock_aws, _ = _load_handler()
+        mock_aws.opensearch_request.side_effect = [
+            self._schedule(), self._rc('2'), Exception('boom'),
+        ]
+        with patch.object(handler, '_now', return_value=self._NOW):
+            result = handler.handle_get_release_window({'version': '3.9.0'})
+        assert result['rc_created'] is None
+        assert 'rc_numbers' not in result
+
+    def test_an_unparseable_rc_number_leaves_the_state_unknown(self):
+        result, _ = self._window(rc_responses=[self._rc('not-a-number')])
+        assert result['rc_created'] is None
+        assert 'rc_numbers' not in result
+
+    def test_a_string_rc_number_is_coerced(self):
+        # The Jenkins side indexes it as a string, so it is never compared uncoerced.
+        result, _ = self._window(rc_responses=[self._rc('10'), self._rc('9')])
+        assert result['rc_numbers'] == {'opensearch': 10, 'opensearch-dashboards': 9}
+
+    def test_the_build_index_is_not_queried_before_the_rc_date(self):
+        # Before the rc_date the countdown decides the phase, so a normal run pays nothing.
+        result, mock_aws = self._window(
+            schedule=self._schedule(rc_date='2026-09-25', release_date='2026-10-09'))
+        assert mock_aws.opensearch_request.call_count == 1
+        assert result['rc_created'] is None
+        assert result['cadence_phase'] == 'pre_rc_frequent'
+
+    @pytest.mark.parametrize('status', ['released', 'cancelled'])
+    def test_the_build_index_is_not_queried_for_a_finished_release(self, status):
+        result, mock_aws = self._window(schedule=self._schedule(status=status))
+        assert mock_aws.opensearch_request.call_count == 1
+        assert result['rc_created'] is None
+        assert result['cadence_phase'] == status
+
+    def test_active_releases_carry_the_same_rc_state(self):
+        # The notifier reads this list, so it must not disagree with the single-version view.
+        handler, mock_aws, _ = _load_handler()
+        schedule = {'hits': {'hits': [{'_source': {
+            'version': '3.9.0',
+            'status': 'active',
+            'rc_date': '2026-09-15',
+            'release_date': '2026-09-29',
+            'registered_at': '2026-08-01T00:00:00Z',
+        }}]}}
+        mock_aws.opensearch_request.side_effect = [
+            schedule, self._rc(None), self._rc(None),
+        ]
+        with patch.object(handler, '_now', return_value=self._NOW):
+            release = handler.handle_list_active_releases({})['releases'][0]
+        assert release['cadence_phase'] == 'rc_overdue'
+        assert release['rc_created'] is False
+        assert release['rc_numbers'] == {'opensearch': 0, 'opensearch-dashboards': 0}
