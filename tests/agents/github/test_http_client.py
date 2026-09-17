@@ -250,6 +250,7 @@ class TestTokenManager:
     def test_get_token_cached(self, mock_post, mock_jwt):
         mod = _load_http_client()
         mock_resp = MagicMock()
+        mock_resp.status_code = 201
         mock_resp.raise_for_status.return_value = None
         mock_resp.json.return_value = {
             "token": "ghs_cached",
@@ -270,6 +271,7 @@ class TestTokenManager:
     def test_get_token_org_wide(self, mock_post, mock_jwt):
         mod = _load_http_client()
         mock_resp = MagicMock()
+        mock_resp.status_code = 201
         mock_resp.raise_for_status.return_value = None
         mock_resp.json.return_value = {
             "token": "ghs_org",
@@ -289,6 +291,7 @@ class TestTokenManager:
     def test_get_token_refreshes_on_scope_change(self, mock_post, mock_jwt):
         mod = _load_http_client()
         mock_resp = MagicMock()
+        mock_resp.status_code = 201
         mock_resp.raise_for_status.return_value = None
         mock_resp.json.return_value = {
             "token": "ghs_new_scope",
@@ -309,6 +312,7 @@ class TestTokenManager:
     def test_get_token_no_expires_at_defaults(self, mock_post, mock_jwt):
         mod = _load_http_client()
         mock_resp = MagicMock()
+        mock_resp.status_code = 201
         mock_resp.raise_for_status.return_value = None
         mock_resp.json.return_value = {"token": "ghs_noexpiry"}
         mock_post.return_value = mock_resp
@@ -349,3 +353,18 @@ class TestTokenManager:
         tm._token_expires_at = time.time() + 3600
         tm._token_repos = frozenset(["OpenSearch"])
         assert tm.needs_refresh(repositories=["NewRepo"]) is True
+
+    @patch('jwt.encode', return_value='fake-jwt-token')
+    @patch('requests.post')
+    def test_get_token_logs_error_on_failure(self, mock_post, mock_jwt):
+        import requests as req
+        mod = _load_http_client()
+        mock_resp = MagicMock()
+        mock_resp.status_code = 403
+        mock_resp.text = "Bad credentials"
+        mock_resp.raise_for_status.side_effect = req.HTTPError("403")
+        mock_post.return_value = mock_resp
+
+        tm = mod.TokenManager("12345", "fake-key", "67890")
+        with pytest.raises(req.HTTPError):
+            tm.get_token(repositories=["OpenSearch"])

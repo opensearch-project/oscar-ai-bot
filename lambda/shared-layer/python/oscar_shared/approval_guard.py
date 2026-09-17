@@ -21,6 +21,7 @@ def validate_two_person_approval(
     session_attributes: Dict[str, Any],
     enable_2pr: bool,
     action_label: str,
+    auth_policy: Optional[str] = None,
 ) -> Optional[Dict[str, Any]]:
     """Validate two-person approval if the feature flag is enabled.
 
@@ -30,6 +31,8 @@ def validate_two_person_approval(
             Expected keys: 'requester_user_id', 'approver_user_id'.
         enable_2pr: Whether the ENABLE_2PR flag is active.
         action_label: Human-readable label for logs (e.g. 'job=docker-scan', 'channel=C123').
+        auth_policy: The function's auth_policy. When "maintainer", the approver
+            must be an admin. When "admin", the approver must be a different admin.
 
     Returns:
         None if validation passes (or flag is off). Otherwise a dict with
@@ -42,11 +45,21 @@ def validate_two_person_approval(
     approver_user_id = session_attributes.get('approver_user_id')
 
     if not requester_user_id or not approver_user_id:
+        if session_attributes.get('approval_expired') == 'True':
+            return {
+                'status': 'error',
+                'message': (
+                    'SECURITY ERROR: The approval window has expired. '
+                    'Please re-request the action to get a new confirmation prompt. '
+                    '[2PR_PENDING]'
+                ),
+            }
         return {
             'status': 'error',
             'message': (
                 'SECURITY ERROR: Two-person approval requires both a requester and a distinct '
-                'approver. A second authorized user must confirm this action in the thread.'
+                'approver. A second authorized user must confirm this action in the thread. '
+                '[2PR_PENDING]'
             ),
         }
 
@@ -55,9 +68,32 @@ def validate_two_person_approval(
             'status': 'error',
             'message': (
                 f'SECURITY ERROR: Self-approval is not permitted. The user who requested this action '
-                f'({requester_user_id.strip()}) cannot also approve it. A different authorized user must confirm.'
+                f'({requester_user_id.strip()}) cannot also approve it. A different authorized user must confirm. '
+                '[2PR_PENDING]'
             ),
         }
+
+    if auth_policy == "maintainer":
+        if session_attributes.get('approver_is_admin') != 'True':
+            return {
+                'status': 'error',
+                'message': (
+                    'SECURITY ERROR: This maintainer operation requires approval from an admin. '
+                    'Please have an admin reply to confirm. '
+                    '[2PR_PENDING]'
+                ),
+            }
+
+    elif auth_policy == "admin":
+        if session_attributes.get('approver_is_admin') != 'True':
+            return {
+                'status': 'error',
+                'message': (
+                    'SECURITY ERROR: This admin operation requires approval from a different admin. '
+                    'Please have another admin reply to confirm. '
+                    '[2PR_PENDING]'
+                ),
+            }
 
     logger.info(
         f'TWO_PERSON_APPROVAL: requester={requester_user_id.strip()}, '

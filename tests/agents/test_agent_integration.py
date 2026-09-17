@@ -6,6 +6,7 @@ and are wired correctly into CDK stacks."""
 import ast
 import glob
 import os
+from unittest.mock import patch
 
 import pytest
 from aws_cdk import App, Environment
@@ -110,8 +111,8 @@ class TestAgentRegistration:
     def test_security_advisories_access_level(self):
         assert SecurityAdvisoriesAgent().get_access_level() == "privileged"
 
-    def test_github_is_privileged_only(self):
-        assert GitHubAgent().get_access_level() == "privileged"
+    def test_github_accessible_by_both_privilege_levels(self):
+        assert GitHubAgent().get_access_level() == "both"
 
 
 # ---------------------------------------------------------------------------
@@ -302,46 +303,46 @@ class TestGitHubAgentWriteOperations:
     """Validate the GitHub agent's write operation configuration."""
 
     def test_github_action_group_count(self):
-        """GitHub agent should have 4 action groups (read, write, bulk merge, maintainer lookup)."""
+        """GitHub agent should have 3 tier-tagged action groups."""
         agent = GitHubAgent()
         groups = agent.get_action_groups("arn:aws:lambda:us-east-1:123456789012:function:placeholder")
-        assert len(groups) == 4
+        assert len(groups) == 3
 
-    def test_github_write_group_exists(self):
-        """GitHub agent should have a write operations action group."""
+    def test_github_tier_groups_exist(self):
+        """GitHub agent should have contributor, maintainer, and admin action groups."""
         agent = GitHubAgent()
         groups = agent.get_action_groups("arn:aws:lambda:us-east-1:123456789012:function:placeholder")
         group_names = [g.action_group_name for g in groups]
-        assert "githubWriteOperations" in group_names
+        assert "githubContributorOps" in group_names
+        assert "githubMaintainerOps" in group_names
+        assert "githubAdminOps" in group_names
 
-    def test_github_bulk_merge_group_exists(self):
-        """GitHub agent should have a bulk merge operations action group."""
+    def test_github_admin_ops_functions_defined(self):
+        """Admin ops group should have merge, transfer, bulk ops."""
         agent = GitHubAgent()
         groups = agent.get_action_groups("arn:aws:lambda:us-east-1:123456789012:function:placeholder")
-        group_names = [g.action_group_name for g in groups]
-        assert "githubBulkMergeOperations" in group_names
+        admin_group = next(g for g in groups if g.action_group_name == "githubAdminOps")
+        func_names = [f.name for f in admin_group.function_schema.functions]
+        for name in ["create_issue", "close_issue", "merge_pr", "transfer_issue", "bulk_comment", "list_merge_candidates", "bulk_merge_prs"]:
+            assert name in func_names, f"Missing admin function: {name}"
 
-    def test_github_bulk_merge_functions_defined(self):
-        """Bulk merge action group should have list_merge_candidates and bulk_merge_prs."""
+    def test_github_maintainer_ops_functions_defined(self):
+        """Maintainer ops group should have create_tag and create_branch."""
         agent = GitHubAgent()
         groups = agent.get_action_groups("arn:aws:lambda:us-east-1:123456789012:function:placeholder")
-        merge_group = next(g for g in groups if g.action_group_name == "githubBulkMergeOperations")
-        func_names = [f.name for f in merge_group.function_schema.functions]
-        assert "list_merge_candidates" in func_names
-        assert "bulk_merge_prs" in func_names
+        maint_group = next(g for g in groups if g.action_group_name == "githubMaintainerOps")
+        func_names = [f.name for f in maint_group.function_schema.functions]
+        assert "create_tag" in func_names
+        assert "create_branch" in func_names
 
-    def test_github_write_functions_defined(self):
-        """All expected write functions should be defined in the write action group."""
+    def test_github_contributor_ops_functions_defined(self):
+        """Contributor ops group should have read-only ops."""
         agent = GitHubAgent()
         groups = agent.get_action_groups("arn:aws:lambda:us-east-1:123456789012:function:placeholder")
-        write_group = next(g for g in groups if g.action_group_name == "githubWriteOperations")
-        func_names = [f.name for f in write_group.function_schema.functions]
-        expected = [
-            "merge_pr", "create_issue", "close_issue",
-            "transfer_issue", "add_comment", "bulk_comment",
-        ]
-        for name in expected:
-            assert name in func_names, f"Missing write function: {name}"
+        contrib_group = next(g for g in groups if g.action_group_name == "githubContributorOps")
+        func_names = [f.name for f in contrib_group.function_schema.functions]
+        for name in ["get_pr_details", "list_prs", "get_issue_details", "get_repo_maintainers"]:
+            assert name in func_names, f"Missing contributor function: {name}"
 
     def test_github_mcp_not_read_only(self):
         """GitHub agent MCP should NOT be in read-only mode to support writes."""
@@ -362,6 +363,24 @@ class TestGitHubAgentWriteOperations:
         instruction = agent.get_agent_instruction()
         assert "ORGANIZATION ENFORCEMENT" in instruction
 
+    @pytest.mark.parametrize("env_var", ["ENABLE_2PR", "GITHUB_ENABLE_2PR"])
+    def test_github_agent_instruction_2pr_enabled(self, env_var):
+        """When 2PR is enabled, instruction mentions two-person review."""
+        with patch.dict(os.environ, {env_var: "true"}):
+            agent = GitHubAgent()
+            instruction = agent.get_agent_instruction()
+            assert "TWO-PERSON REVIEW" in instruction
+            assert "different authorized user" in instruction
+
+    def test_github_agent_instruction_2pr_disabled(self):
+        """When 2PR is disabled, instruction uses single-user confirmation."""
+        with patch.dict(os.environ, {"ENABLE_2PR": "false", "GITHUB_ENABLE_2PR": "false"}):
+            agent = GitHubAgent()
+            instruction = agent.get_agent_instruction()
+            assert "CONFIRMATION (MANDATORY" in instruction
+            assert "same user" in instruction.lower()
+            assert "TWO-PERSON REVIEW" not in instruction
+
 
 class TestGitHubAuthorizer:
     """Test the GitHub agent authorization module."""
@@ -373,7 +392,7 @@ class TestGitHubAuthorizer:
         from authorizer import is_write_operation
         write_ops = [
             "merge_pr", "create_issue", "close_issue",
-            "transfer_issue", "add_comment", "bulk_comment",
+            "transfer_issue", "bulk_comment",
             "bulk_merge_prs",
         ]
         for op in write_ops:

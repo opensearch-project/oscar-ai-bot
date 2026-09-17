@@ -1,7 +1,12 @@
 # Copyright OpenSearch Contributors
 # SPDX-License-Identifier: Apache-2.0
 
-"""Bedrock action group definitions for GitHub agent."""
+"""Bedrock action group definitions for GitHub agent.
+
+Three tier-tagged groups: contributor (read-only),
+maintainer (create_tag, create_branch), admin (all writes).
+The Lambda enforces authorization at runtime via group gate + function gate.
+"""
 
 from typing import List
 
@@ -18,10 +23,10 @@ def get_action_groups(lambda_arn: str) -> List[bedrock.CfnAgent.AgentActionGroup
     executor = bedrock.CfnAgent.ActionGroupExecutorProperty(lambda_=lambda_arn)
 
     return [
-        # -------------------------------------------------------- Group 1: Read Operations
+        # ------------------------------------ Group 1: Contributor Operations
         bedrock.CfnAgent.AgentActionGroupProperty(
-            action_group_name="githubReadOperations",
-            description="Read-only GitHub operations for PRs and issues",
+            action_group_name="githubContributorOps",
+            description="Read-only GitHub operations: PRs, issues, search, and maintainer lookup",
             action_group_state="ENABLED",
             action_group_executor=executor,
             function_schema=bedrock.CfnAgent.FunctionSchemaProperty(
@@ -86,18 +91,119 @@ def get_action_groups(lambda_arn: str) -> List[bedrock.CfnAgent.AgentActionGroup
                             "order": _param("string", "Sort order: 'asc' or 'desc'"),
                         },
                     ),
+                    bedrock.CfnAgent.FunctionProperty(
+                        name="get_repo_maintainers",
+                        description=(
+                            "Get the current maintainers of a repository by parsing its MAINTAINERS.md file. "
+                            "Returns GitHub handles and display names. Use this when the user asks to "
+                            "tag or mention maintainers (e.g. in bulk comments), or to look up who "
+                            "maintains a specific repo."
+                        ),
+                        parameters={
+                            "repo": _param("string", "Repository name", True),
+                            "organization": _param(
+                                "string",
+                                "GitHub organization (defaults to 'opensearch-project')",
+                            ),
+                        },
+                    ),
                 ]
             ),
         ),
 
-        # -------------------------------------------------------- Group 2: Write Operations
+        # ------------------------------------ Group 2: Maintainer Operations
         bedrock.CfnAgent.AgentActionGroupProperty(
-            action_group_name="githubWriteOperations",
-            description="Write operations for PRs, issues, and comments (requires confirmation)",
+            action_group_name="githubMaintainerOps",
+            description=(
+                "Repository maintainer operations: create tags and branches. "
+                "Requires the requester to be a maintainer of the target repository."
+            ),
             action_group_state="ENABLED",
             action_group_executor=executor,
             function_schema=bedrock.CfnAgent.FunctionSchemaProperty(
                 functions=[
+                    bedrock.CfnAgent.FunctionProperty(
+                        name="create_tag",
+                        description=(
+                            "Create a lightweight Git tag on a specific commit in a repository. "
+                            "Requires explicit user confirmation before execution. "
+                            "The commit can be a full or abbreviated SHA. "
+                            "Tag names typically follow semver (e.g., '3.12.0')."
+                        ),
+                        parameters={
+                            "repo": _param("string", "Repository name", True),
+                            "tag_name": _param("string", "Name for the tag (e.g., '3.12.0')", True),
+                            "commit_sha": _param(
+                                "string",
+                                "Commit SHA (full or abbreviated) or branch name to tag. "
+                                "If omitted, the HEAD of the default branch is used.",
+                                False,
+                            ),
+                        },
+                    ),
+                    bedrock.CfnAgent.FunctionProperty(
+                        name="create_branch",
+                        description=(
+                            "Create a new branch from a specific commit in a repository. "
+                            "Requires explicit user confirmation before execution. "
+                            "The commit can be a full or abbreviated SHA; abbreviated SHAs "
+                            "are resolved to the full SHA automatically."
+                        ),
+                        parameters={
+                            "repo": _param("string", "Repository name", True),
+                            "branch_name": _param("string", "Name for the branch (e.g., '3.12')", True),
+                            "commit_sha": _param(
+                                "string",
+                                "Commit SHA (full or abbreviated) or branch name to branch from. "
+                                "If omitted, the HEAD of the default branch is used.",
+                                False,
+                            ),
+                        },
+                    ),
+                ]
+            ),
+        ),
+
+        # ------------------------------------ Group 3: Admin Operations
+        bedrock.CfnAgent.AgentActionGroupProperty(
+            action_group_name="githubAdminOps",
+            description=(
+                "Admin-only operations: create/close issues, merge PRs, transfer issues, "
+                "bulk comment, and bulk merge automated PRs with guardrail validation."
+            ),
+            action_group_state="ENABLED",
+            action_group_executor=executor,
+            function_schema=bedrock.CfnAgent.FunctionSchemaProperty(
+                functions=[
+                    bedrock.CfnAgent.FunctionProperty(
+                        name="create_issue",
+                        description=(
+                            "Create an issue on a repository. "
+                            "Requires explicit user confirmation before execution."
+                        ),
+                        parameters={
+                            "repo": _param("string", "Repository name", True),
+                            "title": _param("string", "Issue title", True),
+                            "body": _param("string", "Issue description body"),
+                            "labels": _param("string", "Comma-separated label names to apply"),
+                            "assignees": _param("string", "Comma-separated GitHub usernames to assign"),
+                        },
+                    ),
+                    bedrock.CfnAgent.FunctionProperty(
+                        name="close_issue",
+                        description=(
+                            "Close an issue with a reason. "
+                            "Requires explicit user confirmation before execution."
+                        ),
+                        parameters={
+                            "repo": _param("string", "Repository name", True),
+                            "issue_number": _param("string", "Issue number to close", True),
+                            "reason": _param(
+                                "string",
+                                "Reason for closing: 'completed' or 'not_planned'. Defaults to 'completed'.",
+                            ),
+                        },
+                    ),
                     bedrock.CfnAgent.FunctionProperty(
                         name="merge_pr",
                         description=(
@@ -141,47 +247,6 @@ def get_action_groups(lambda_arn: str) -> List[bedrock.CfnAgent.AgentActionGroup
                         },
                     ),
                     bedrock.CfnAgent.FunctionProperty(
-                        name="create_issue",
-                        description=(
-                            "Create an issue on a repository. "
-                            "Requires explicit user confirmation before execution."
-                        ),
-                        parameters={
-                            "repo": _param("string", "Repository name", True),
-                            "title": _param("string", "Issue title", True),
-                            "body": _param("string", "Issue description body"),
-                            "labels": _param("string", "Comma-separated label names to apply"),
-                            "assignees": _param("string", "Comma-separated GitHub usernames to assign"),
-                        },
-                    ),
-                    bedrock.CfnAgent.FunctionProperty(
-                        name="close_issue",
-                        description=(
-                            "Close an issue with a reason. "
-                            "Requires explicit user confirmation before execution."
-                        ),
-                        parameters={
-                            "repo": _param("string", "Repository name", True),
-                            "issue_number": _param("string", "Issue number to close", True),
-                            "reason": _param(
-                                "string",
-                                "Reason for closing: 'completed' or 'not_planned'. Defaults to 'completed'.",
-                            ),
-                        },
-                    ),
-                    bedrock.CfnAgent.FunctionProperty(
-                        name="add_comment",
-                        description=(
-                            "Add a comment to an issue or pull request. "
-                            "Requires explicit user confirmation before execution."
-                        ),
-                        parameters={
-                            "repo": _param("string", "Repository name", True),
-                            "issue_number": _param("string", "Issue or pull request number", True),
-                            "body": _param("string", "Comment body text (supports markdown)", True),
-                        },
-                    ),
-                    bedrock.CfnAgent.FunctionProperty(
                         name="bulk_comment",
                         description=(
                             "Add the same comment to multiple issues or pull requests at once, "
@@ -200,18 +265,6 @@ def get_action_groups(lambda_arn: str) -> List[bedrock.CfnAgent.AgentActionGroup
                             "body": _param("string", "Comment body text (supports markdown)", True),
                         },
                     ),
-                ]
-            ),
-        ),
-
-        # ------------------------------------------------- Group 3: Bulk Merge Operations
-        bedrock.CfnAgent.AgentActionGroupProperty(
-            action_group_name="githubBulkMergeOperations",
-            description="Bulk merge automated PRs (version increments and release notes) with guardrail validation",
-            action_group_state="ENABLED",
-            action_group_executor=executor,
-            function_schema=bedrock.CfnAgent.FunctionSchemaProperty(
-                functions=[
                     bedrock.CfnAgent.FunctionProperty(
                         name="list_merge_candidates",
                         description=(
@@ -247,34 +300,6 @@ def get_action_groups(lambda_arn: str) -> List[bedrock.CfnAgent.AgentActionGroup
                                 "string",
                                 "REQUIRED: Must be 'true' to execute. Set to 'true' ONLY after user explicitly confirms.",
                                 True,
-                            ),
-                        },
-                    ),
-                ]
-            ),
-        ),
-
-        # -------------------------------------------- Group 4: Maintainer Lookup
-        bedrock.CfnAgent.AgentActionGroupProperty(
-            action_group_name="githubMaintainerLookup",
-            description="Look up current maintainers of a repository from MAINTAINERS.md",
-            action_group_state="ENABLED",
-            action_group_executor=executor,
-            function_schema=bedrock.CfnAgent.FunctionSchemaProperty(
-                functions=[
-                    bedrock.CfnAgent.FunctionProperty(
-                        name="get_repo_maintainers",
-                        description=(
-                            "Get the current maintainers of a repository by parsing its MAINTAINERS.md file. "
-                            "Returns GitHub handles and display names. Use this when the user asks to "
-                            "tag or mention maintainers (e.g. in bulk comments), or to look up who "
-                            "maintains a specific repo."
-                        ),
-                        parameters={
-                            "repo": _param("string", "Repository name", True),
-                            "organization": _param(
-                                "string",
-                                "GitHub organization (defaults to 'opensearch-project')",
                             ),
                         },
                     ),

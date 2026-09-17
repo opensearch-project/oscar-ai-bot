@@ -15,6 +15,7 @@ from typing import Callable
 import boto3
 from config import config
 from input_validator import InputValidationError, validate_and_sanitize
+from oscar_shared.auth_policy import derive_tier
 from oscar_shared.oauth_state import generate_state
 from slack_sdk import WebClient
 
@@ -56,6 +57,19 @@ class MessageProcessor:
         query = re.sub(config.patterns['mention'], '', text).strip()
         return query
 
+    def _enrich_user_attrs(self, attrs: dict, user_id: str, prefix: str) -> None:
+        """Add admin, github_handle, is_maintainer, and tier for a user."""
+        is_admin = self.is_fully_authorized_user(user_id)
+        attrs[f'{prefix}_is_admin'] = str(is_admin)
+
+        record = self._get_identity_record(user_id)
+        github_handle = record.get("github_handle", "")
+        is_maintainer = record.get("is_org_maintainer", False)
+
+        attrs[f'{prefix}_github_handle'] = github_handle
+        attrs[f'{prefix}_is_maintainer'] = str(bool(is_maintainer))
+        attrs[f'{prefix}_tier'] = derive_tier(is_admin, bool(is_maintainer))
+
     def _build_identity_attributes(self, thread_key: str, current_user_id: str) -> dict:
         """Build out-of-band session attributes for identity provenance.
 
@@ -63,26 +77,53 @@ class MessageProcessor:
         - Requester = user whose message triggered a [CONFIRMATION_REQUIRED] response
         - Approver = a *different* user who speaks after that prompt
 
-        This prevents stale thread participants from being treated as implicit
-        requesters for actions they never initiated.
+        Enriches each with github_handle, is_maintainer, and tier for
+        downstream group gate and function gate enforcement.
 
-        The current_user_id is the authenticated Slack user from the signed event.
+        Pending approvals expire after 5 minutes and are single-use: once an
+        approver is paired with a requester the pending state is consumed.
         """
         attrs = {'current_user_id': current_user_id}
 
         stored_context = self.storage.get_context(thread_key)
         if stored_context:
             pending_requester = stored_context.get('pending_approval_requester')
+            expires_at = stored_context.get('pending_approval_expires_at', 0)
+
+            if pending_requester and time.time() > expires_at:
+                logger.warning(
+                    "Pending approval expired for thread %s (requester=%s)",
+                    thread_key, pending_requester,
+                )
+                self.storage.clear_pending_approval_requester(thread_key)
+                pending_requester = None
+                attrs['approval_expired'] = 'True'
+
             if pending_requester:
                 attrs['requester_user_id'] = pending_requester
+                self._enrich_user_attrs(attrs, pending_requester, 'requester')
                 if current_user_id != pending_requester:
                     attrs['approver_user_id'] = current_user_id
+                    self._enrich_user_attrs(attrs, current_user_id, 'approver')
+                    self.storage.clear_pending_approval_requester(thread_key)
             else:
                 attrs['requester_user_id'] = current_user_id
+                self._enrich_user_attrs(attrs, current_user_id, 'requester')
         else:
             attrs['requester_user_id'] = current_user_id
+            self._enrich_user_attrs(attrs, current_user_id, 'requester')
 
         return attrs
+
+    @staticmethod
+    def _is_approval_rejection(response: str) -> bool:
+        """Check if the response indicates a 2PR rejection (approval still pending).
+
+        The Lambda appends [2PR_PENDING] to approval errors. The LLM is
+        instructed to preserve bracketed markers, so we match on the exact
+        tag rather than fuzzy keyword heuristics.
+        """
+        return '[2PR_PENDING]' in response
 
     def _handle_confirmation_detection(self, response: str, channel: str, thread_ts: str) -> str:
         """Handle confirmation detection and warning reaction management.
@@ -246,15 +287,33 @@ class MessageProcessor:
             self._identity_table = dynamodb_resource.Table(table_name)
         return self._identity_table
 
-    def _has_identity_mapping(self, user_id: str) -> bool:
+    def _get_identity_record(self, user_id: str) -> dict:
+        """Look up the active identity record for a Slack user.
+
+        Returns the full DynamoDB item or an empty dict if not found.
+        Results are cached per user_id for the lifetime of this instance.
+        """
+        cache = getattr(self, '_identity_cache', None)
+        if cache is None:
+            self._identity_cache = cache = {}
+        if user_id in cache:
+            return cache[user_id]
         table = self._get_identity_table()
         resp = table.query(
             IndexName="slack-user-index",
             KeyConditionExpression="slack_user_id = :uid",
             ExpressionAttributeValues={":uid": user_id},
         )
-        items = resp.get("Items", [])
-        return any(i.get("status") == "active" for i in items)
+        record = {}
+        for item in resp.get("Items", []):
+            if item.get("status") == "active":
+                record = item
+                break
+        cache[user_id] = record
+        return record
+
+    def _has_identity_mapping(self, user_id: str) -> bool:
+        return bool(self._get_identity_record(user_id))
 
     def _handle_link_github_via_dm(self, user_id: str, channel: str, thread_ts: str, reaction_ts: str, say: Callable) -> None:
         """Handle link-github request by sending OAuth link via DM."""
@@ -352,6 +411,7 @@ class MessageProcessor:
                 say(text=e.user_message, thread_ts=thread_ts)
                 return
 
+            self._identity_cache = {}
             if not self._has_identity_mapping(user_id):
                 self._handle_link_github_via_dm(user_id, channel, thread_ts, reaction_ts, say)
                 return
@@ -398,13 +458,21 @@ class MessageProcessor:
             response = self._handle_confirmation_detection(response, channel, thread_ts)
 
             # Track who triggered the confirmation for 2PR identity provenance.
-            # Set when a confirmation prompt is emitted; clear after the next turn
-            # (the approval or any non-confirmation response) — UNLESS the response
-            # is a self-approval rejection, which means the prompt is still pending.
+            # Set when a confirmation prompt is emitted; clear after the next
+            # turn (the approval or any non-confirmation response) — UNLESS
+            # the response is a 2PR rejection (e.g. self-approval, non-admin
+            # approver, expired window), which means the prompt is still pending.
+            # Only overwrite an existing requester if the current user is authorized
+            # (matches main's behavior where only admins could interact). This prevents
+            # a non-authorized user providing follow-up from becoming the requester.
             if confirmation_required:
+                stored_ctx = self.storage.get_context(thread_key)
+                existing_requester = stored_ctx.get('pending_approval_requester') if stored_ctx else None
+                if not existing_requester or self.is_fully_authorized_user(user_id):
+                    self.storage.set_pending_approval_requester(thread_key, user_id)
+            elif response and self._is_approval_rejection(response):
                 self.storage.set_pending_approval_requester(thread_key, user_id)
-            elif response and 'SECURITY ERROR' in response:
-                pass
+                response = response.replace('[2PR_PENDING]', '').strip()
             else:
                 self.storage.clear_pending_approval_requester(thread_key)
 

@@ -231,6 +231,7 @@ class StorageManager(StorageInterface):
             if context is None:
                 context = {"session_id": None, "history": [], "thread_user_ids": []}
             context['pending_approval_requester'] = user_id
+            context['pending_approval_expires_at'] = int(time.time()) + 300
             self.store_context(thread_key, context)
             logger.info(f"Set pending_approval_requester={user_id} for thread {thread_key}")
         except Exception as e:
@@ -243,6 +244,7 @@ class StorageManager(StorageInterface):
             if not context or 'pending_approval_requester' not in context:
                 return
             del context['pending_approval_requester']
+            context.pop('pending_approval_expires_at', None)
             self.store_context(thread_key, context)
             logger.info(f"Cleared pending_approval_requester for thread {thread_key}")
         except Exception as e:
