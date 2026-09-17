@@ -29,6 +29,7 @@ the live upstream repo — only the PR is opened there.
 import json
 import logging
 import os
+import re
 import shutil
 import subprocess
 import urllib.request
@@ -78,6 +79,43 @@ class RemediationInProgress(RemediationError):
     concurrently remediating the same CVE (or a branch from a previously closed
     PR was left behind). Either way we stop rather than open a duplicate PR.
     """
+
+
+class RemediationUnsupported(RemediationError):
+    """Raised when the fix can't be applied automatically for this repo.
+
+    Not a failure — the CVE is real but the declaration form is out of the
+    worker's scope (e.g. a maven version inherited from OpenSearch core, an
+    undeclared dependency, or an indirection we don't edit). Surfaced as a neutral
+    "needs manual review" outcome rather than an error.
+    """
+
+
+def at_or_above(version_spec, patched):
+    """Best-effort downgrade guard: is the declared version already >= patched?
+
+    Compares leading numeric release components (ignoring range operators and
+    qualifiers like ``.Final`` / ``-jre`` / ``^`` / ``~``). Returns False when it
+    can't tell, so callers default to bumping — this only prevents a downgrade if
+    a fix landed between the scan and remediation. Shared by the npm and maven
+    strategies.
+    """
+    cur = _release_tuple(version_spec)
+    tgt = _release_tuple(patched)
+    if cur is None or tgt is None:
+        return False
+    return cur >= tgt
+
+
+def _release_tuple(version_spec):
+    """``(major, minor, patch, ...)`` ints from a version spec, or None."""
+    m = re.search(r"(\d+(?:\.\d+)*)", version_spec or "")
+    if not m:
+        return None
+    try:
+        return tuple(int(p) for p in m.group(1).split("."))
+    except ValueError:
+        return None
 
 
 def handle(event, strategy):
@@ -148,6 +186,12 @@ def _execute(event, strategy):
         logger.info("Remediation already in progress for %s: %s",
                     ctx.get("cve_id"), e)
         return {"status": "remediation_in_progress", "cve_id": ctx.get("cve_id"),
+                "message": str(e)}
+    except RemediationUnsupported as e:
+        # The declaration form is out of the worker's scope (e.g. inherited from
+        # core, undeclared). Real CVE, just not auto-fixable here — needs review.
+        logger.info("Remediation unsupported for %s: %s", ctx.get("cve_id"), e)
+        return {"status": "unsupported", "cve_id": ctx.get("cve_id"),
                 "message": str(e)}
     except RemediationError as e:
         logger.error("Remediation failed for %s: %s", ctx.get("cve_id"), e)
@@ -234,6 +278,10 @@ def _format_slack_message(result):
     if status == "remediation_in_progress":
         return (f":hourglass_flowing_sand: A remediation for *{cve}* is already in "
                 f"progress; not opening a duplicate.")
+    if status == "unsupported":
+        return (f":warning: Couldn't automatically remediate *{cve}*: "
+                f"{result.get('message', 'unsupported declaration form.')} "
+                f"Manual review needed.")
     return f":x: Remediation for *{cve}* failed: {result.get('message', 'unknown error.')}"
 
 

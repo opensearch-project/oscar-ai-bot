@@ -19,10 +19,13 @@ from unittest.mock import patch
 
 import pytest
 
-_NPM_PATH = os.path.join(
+_WORKERS_PATH = os.path.join(
     os.path.dirname(__file__), '..', '..', '..',
-    'agents', 'SecurityAdvisories', 'remediation-workers', 'npm',
+    'agents', 'SecurityAdvisories', 'remediation-workers',
 )
+_NPM_PATH = os.path.join(_WORKERS_PATH, 'npm')
+# The shared remediation flow now lives in remediation-workers/shared/.
+_SHARED_PATH = os.path.join(_WORKERS_PATH, 'shared')
 
 # Put the worker dir on sys.path so npm.py's ``import llm_planner`` resolves to a
 # single stable module we can patch.
@@ -46,7 +49,7 @@ def _llm_off_by_default():
 def _load_npm():
     """Load npm.py with its ``remediation`` dependency injected."""
     rem_spec = importlib.util.spec_from_file_location(
-        'remediation', os.path.join(_NPM_PATH, 'remediation.py'))
+        'remediation', os.path.join(_SHARED_PATH, 'remediation.py'))
     rem = importlib.util.module_from_spec(rem_spec)
     rem_spec.loader.exec_module(rem)
     with patch.dict('sys.modules', {'remediation': rem}):

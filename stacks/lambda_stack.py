@@ -419,7 +419,9 @@ class OscarLambdaStack(Stack):
             "worker",
             container_name="worker",
             image=ecs.ContainerImage.from_asset(
-                directory="agents/SecurityAdvisories/remediation-workers/npm",
+                # Context is the workers dir so the image can COPY shared/ + npm/.
+                directory="agents/SecurityAdvisories/remediation-workers",
+                file="npm/Dockerfile",
                 platform=ecr_assets.Platform.LINUX_AMD64,
             ),
             # Bypass the Lambda runtime client baked into the base image and run

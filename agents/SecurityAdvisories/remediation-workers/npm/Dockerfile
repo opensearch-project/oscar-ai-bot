@@ -38,7 +38,10 @@ ENV PATH=$NVM_DIR/versions/node/v$NODE_VERSION/bin:$PATH
 # calls remediation.handle. We override the Lambda base image's runtime-client
 # ENTRYPOINT to run it directly (the base image is used only for its AL2023 +
 # Python + toolchain, not the Lambda runtime).
-COPY remediation.py npm.py llm_planner.py main.py git-askpass.sh ${LAMBDA_TASK_ROOT}/
+# Build context is remediation-workers/ so the shared flow can be COPYed alongside
+# the npm strategy. Everything lands flat in LAMBDA_TASK_ROOT, so imports like
+# `import remediation` still resolve.
+COPY shared/remediation.py shared/git-askpass.sh npm/npm.py npm/llm_planner.py npm/main.py ${LAMBDA_TASK_ROOT}/
 # git-askpass.sh feeds the token to git as the HTTPS password (via GIT_ASKPASS)
 # so it never lands in a URL/argv/.git/config; ensure it's executable.
 RUN chmod +x ${LAMBDA_TASK_ROOT}/git-askpass.sh
