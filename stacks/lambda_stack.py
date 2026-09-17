@@ -406,10 +406,9 @@ class OscarLambdaStack(Stack):
             cpu=2048,                 # 2 vCPU
             memory_limit_mib=8192,    # 8 GB (OSD install peaked ~4 GB; headroom)
             ephemeral_storage_gib=50,  # clone + node_modules + yarn cache; up to 200 for core
-            # Match the image platform (arm64) — native Apple-Silicon builds and
-            # cheaper Graviton.
+            # Match the image platform (x86_64), as the knowledge-base image does.
             runtime_platform=ecs.RuntimePlatform(
-                cpu_architecture=ecs.CpuArchitecture.ARM64,
+                cpu_architecture=ecs.CpuArchitecture.X86_64,
                 operating_system_family=ecs.OperatingSystemFamily.LINUX,
             ),
             task_role=task_role,
@@ -421,7 +420,7 @@ class OscarLambdaStack(Stack):
             container_name="worker",
             image=ecs.ContainerImage.from_asset(
                 directory="agents/SecurityAdvisories/remediation-workers/npm",
-                platform=ecr_assets.Platform.LINUX_ARM64,
+                platform=ecr_assets.Platform.LINUX_AMD64,
             ),
             # Bypass the Lambda runtime client baked into the base image and run
             # the env-driven Fargate entrypoint directly. Files are under
