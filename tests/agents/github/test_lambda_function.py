@@ -331,6 +331,7 @@ class TestLambdaHandlerRouting:
         result = mod.lambda_handler({
             "function": "bulk_merge_prs",
             "parameters": [{"name": "version", "value": "3.0.0"}],
+            "sessionAttributes": {"requester_user_id": "U_ADM", "requester_is_admin": "True"},
         }, None)
         body = _get_body(result)
         assert "SECURITY ERROR" in body
@@ -350,6 +351,7 @@ class TestLambdaHandlerRouting:
                 {"name": "version", "value": "3.0.0"},
                 {"name": "confirmed", "value": "false"},
             ],
+            "sessionAttributes": {"requester_user_id": "U_ADM", "requester_is_admin": "True"},
         }, None)
         body = _get_body(result)
         assert "cancelled" in body
@@ -390,6 +392,7 @@ class TestGuardrailBlocking:
                 {"name": "repo", "value": "OpenSearch"},
                 {"name": "pr_number", "value": "10"},
             ],
+            "sessionAttributes": {"requester_user_id": "U_ADM", "requester_is_admin": "True"},
         }, None)
         body = _get_body(result)
         assert "CI failing" in body
@@ -434,7 +437,7 @@ class TestGuardrailBlocking:
                 {"name": "pr_number", "value": "10"},
                 {"name": "force", "value": "true"},
             ],
-            "sessionAttributes": {},
+            "sessionAttributes": {"requester_user_id": "U_ADM", "requester_is_admin": "True", "approver_is_admin": "True"},
         }, None)
         body = _get_body(result)
         assert "SECURITY ERROR" in body
@@ -458,7 +461,7 @@ class TestTransferIssue:
                 {"name": "issue_number", "value": "5"},
                 {"name": "target_repo", "value": "other-repo"},
             ],
-            "sessionAttributes": {},
+            "sessionAttributes": {"requester_user_id": "U_ADM", "requester_is_admin": "True", "approver_is_admin": "True"},
         }, None)
         body = _get_body(result)
         assert "SECURITY ERROR" in body
@@ -479,6 +482,7 @@ class TestTransferIssue:
                 {"name": "issue_number", "value": "5"},
                 {"name": "target_repo", "value": "other-repo"},
             ],
+            "sessionAttributes": {"requester_user_id": "U_ADM", "requester_is_admin": "True"},
         }, None)
         body = _get_body(result)
         assert "success" in body

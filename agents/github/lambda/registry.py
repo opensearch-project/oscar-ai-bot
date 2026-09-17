@@ -28,6 +28,9 @@ class FunctionDef:
     # Whether the MCP tool needs owner/repo injected
     needs_owner: bool = False
 
+    # Authorization policy: None = no pre-check, "admin" = admin-only
+    auth_policy: Optional[str] = None
+
     # Transform function: (params) -> mcp_args (only for MCP-routed functions)
     transform: Optional[Callable[[Dict[str, str]], Dict[str, Any]]] = None
 

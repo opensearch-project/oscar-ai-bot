@@ -110,8 +110,8 @@ class TestAgentRegistration:
     def test_security_advisories_access_level(self):
         assert SecurityAdvisoriesAgent().get_access_level() == "privileged"
 
-    def test_github_is_privileged_only(self):
-        assert GitHubAgent().get_access_level() == "privileged"
+    def test_github_accessible_by_both_privilege_levels(self):
+        assert GitHubAgent().get_access_level() == "both"
 
 
 # ---------------------------------------------------------------------------

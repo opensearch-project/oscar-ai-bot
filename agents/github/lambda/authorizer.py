@@ -20,6 +20,8 @@ WRITE_FUNCTIONS = frozenset({
     "add_comment",
     "bulk_comment",
     "bulk_merge_prs",
+    "create_tag",
+    "create_branch",
 })
 
 
