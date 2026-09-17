@@ -1,7 +1,7 @@
 {
     "_meta": {
         "hash": {
-            "sha256": "6fb98d34e8c3c0f3edbb550c39a982fd73517f814fdacc8e113d6bbf207ba283"
+            "sha256": "864c243ed3d682a429055d05172ca1034a6aaebe1a11fe33b56be77c25677de4"
         },
         "pipfile-spec": 6,
         "requires": {
@@ -26,20 +26,20 @@
         },
         "aws-cdk-lib": {
             "hashes": [
-                "sha256:dc31ebff30145fda226849a7cf46aeace6347c000b662091488c19effd7d5d37",
-                "sha256:f55e76cc53d1aa64e22c120f75da1a9680541e76c846668090838e42d9885eb0"
+                "sha256:58997c8a5af49d5328f5106468581a14235a1356dfe7574bb14656799594a2b5",
+                "sha256:6db33e164f9afd6207698d382579bf62f762f14325f4b6d77643865e92448f20"
             ],
             "index": "pypi",
             "markers": "python_version ~= '3.9'",
-            "version": "==2.235.0"
+            "version": "==2.253.0"
         },
         "aws-cdk.asset-awscli-v1": {
             "hashes": [
-                "sha256:cde1bf3ad6bd0164f031a452b115b8679524feaa892b3c7cb8ab877f81d0325a",
-                "sha256:d87d2a2ca1466a8ac494f5dc170d2a15678f92aeae3015bc39dbaf19830a5dd2"
+                "sha256:1a0994afa7b48f63b580603be64c7a99d19ed6777bdf81d3c2435d8b43cf0d71",
+                "sha256:6580dad3416e53712db434f81add6fb4a314e1a80f9c57cc42606df1f64c8e0f"
             ],
             "markers": "python_version ~= '3.9'",
-            "version": "==2.2.261"
+            "version": "==2.2.273"
         },
         "aws-cdk.asset-node-proxy-agent-v6": {
             "hashes": [
@@ -59,11 +59,11 @@
         },
         "aws-cdk.cloud-assembly-schema": {
             "hashes": [
-                "sha256:229aa136c26b71b0a82b5a32658eabcd30e344f7e136315fdb6e3de8ef523bfa",
-                "sha256:f5b6cf661cac8690add9461de13aeae3f3742eec71c066032bd045b08d0b7c3e"
+                "sha256:12e28dc44026e5f062041ba1450a510b1acddcfbe8358f73cfda8df993712d42",
+                "sha256:c5de34f4a0d61eb48574a0264a9567175f601c27b4d053fb24ad1157c4ea0d99"
             ],
-            "markers": "python_version ~= '3.9'",
-            "version": "==48.20.0"
+            "markers": "python_version ~= '3.10'",
+            "version": "==53.28.0"
         },
         "boto3": {
             "hashes": [
