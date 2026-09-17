@@ -27,6 +27,7 @@ RUN mkdir -p "$NVM_DIR" && \
     for v in $NODE_VERSION_LIST; do nvm install "$v" && nvm use "$v" && npm install -g yarn@1.22.22; done && \
     nvm alias default "$NODE_VERSION" && \
     printf '[gh-cli]\nname=packages for the GitHub CLI\nbaseurl=https://cli.github.com/packages/rpm\nenabled=1\ngpgcheck=1\ngpgkey=https://cli.github.com/packages/githubcli-archive-keyring.asc\n' > /etc/yum.repos.d/gh-cli.repo && \
+    rpm --import https://cli.github.com/packages/githubcli-archive-keyring.asc && \
     dnf install -y gh && \
     dnf clean all && \
     source "$NVM_DIR/nvm.sh" && nvm use default && \
