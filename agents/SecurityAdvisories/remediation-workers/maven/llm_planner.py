@@ -108,8 +108,10 @@ Choose exactly one action and return JSON of the form:
   "reason": "<one short sentence on where {coordinate} is declared and why>"}}
 
 Actions:
-- "edit_literal": {coordinate} is declared with a hardcoded version literal (a
-  `force`/direct-dep line like "group:artifact:1.2.3"). "target" = that literal
+- "edit_literal": {coordinate} is declared with a hardcoded version literal, in
+  either Gradle syntax: a colon string on a `force`/direct-dep line
+  ("group:artifact:1.2.3"), OR the named-argument form
+  (group: 'group', name: 'artifact', version: '1.2.3'). "target" = that literal
   version string (e.g. "1.2.3"); "file" = the build.gradle it's in.
 - "edit_ext_var": {coordinate}'s version references a variable DEFINED in the
   shown files. Two forms: a plain ext var (e.g. ext {{ foo_version = '1.2.3' }}
