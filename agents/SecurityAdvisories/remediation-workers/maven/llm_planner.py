@@ -111,12 +111,16 @@ Actions:
 - "edit_literal": {coordinate} is declared with a hardcoded version literal (a
   `force`/direct-dep line like "group:artifact:1.2.3"). "target" = that literal
   version string (e.g. "1.2.3"); "file" = the build.gradle it's in.
-- "edit_ext_var": {coordinate}'s version is a reference to an in-repo variable
-  defined in this repo (e.g. ext {{ foo_version = '1.2.3' }} used as
-  "...:${{foo_version}}"). "target" = the variable name (e.g. "foo_version").
-- "out_of_scope": the version is inherited from OpenSearch core
-  (e.g. ${{versions.X}}), set via System.getProperty, a sub-artifact the repo does
-  not declare, or {coordinate} is not declared here at all. "target" empty.
+- "edit_ext_var": {coordinate}'s version references a variable DEFINED in the
+  shown files. Two forms: a plain ext var (e.g. ext {{ foo_version = '1.2.3' }}
+  used as "...:${{foo_version}}") -> "target" = the var name ("foo_version"); or a
+  module-local ``versions`` map entry (e.g. versions << ['foo': '1.2.3'] used as
+  "...:${{versions.foo}}") -> "target" = the map key ("foo"). Only pick this if the
+  definition is actually present in the shown files.
+- "out_of_scope": the version is inherited from OpenSearch core — a ${{versions.X}}
+  reference whose key X is NOT defined in the shown files (no matching
+  versions << ['X': ...] / ext), set via System.getProperty, a sub-artifact the repo
+  does not declare, or {coordinate} is not declared here at all. "target" empty.
 - "none": {coordinate} is already at or above {patched_version} everywhere it is
   declared. "target" empty.
 

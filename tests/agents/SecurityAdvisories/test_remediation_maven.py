@@ -388,15 +388,21 @@ class TestCoreCatalog:
         assert ctx['bumped_sections'] == []           # shared flow -> no_change
         assert 'log4j = "2.25.4"' in _catalog_text(tmp_path)
 
-    def test_coordinate_absent_from_catalog_unsupported(self, tmp_path):
-        maven, rem = _load_maven()
+    def test_coordinate_absent_from_catalog_falls_back_to_scanner(self, tmp_path):
+        # Not in the catalog -> fall back to the build.gradle scanner. Here the
+        # coordinate is declared as a literal in a submodule, so it's editable.
+        maven, _ = _load_maven()
         _catalog(tmp_path,  # only a guava entry; log4j-core has no [libraries] row
                  libraries='guava = { group = "com.google.guava", name = "guava", '
                            'version.ref = "guava" }\n',
                  versions='guava = "31.1-jre"\n')
-        with pytest.raises(rem.RemediationUnsupported) as exc:
-            maven.apply_fix(str(tmp_path), _ctx(maven))
-        assert 'no [libraries] entry' in str(exc.value)
+        sub = tmp_path / 'plugins' / 'p'
+        sub.mkdir(parents=True)
+        _gradle(sub, 'force "org.apache.logging.log4j:log4j-core:2.20.0"\n')
+        ctx = _ctx(maven)  # log4j-core, patched 2.25.4
+        maven.apply_fix(str(tmp_path), ctx)
+        assert ctx['is_core'] is True
+        assert 'log4j-core:2.25.4' in _read(sub, 'build.gradle')
 
     def test_llm_catalog_plan_applied(self, tmp_path):
         maven, _ = _load_maven()
@@ -461,7 +467,92 @@ class TestCoreCatalog:
         assert 'gradlew' in str(exc.value)
 
 
+class TestCoreSubmodule:
+    """Core repos declare some deps outside the catalog, in a submodule build.gradle
+    (often a module-local ``versions << ['X': '...']`` map used as ${versions.X}).
+    A catalog miss falls back to the LLM-first build.gradle path; regenerate still
+    runs updateShas because it's a core repo."""
+
+    def _hive(self, tmp_path):
+        _catalog(tmp_path, gradlew=True)   # core marker; libthrift NOT in catalog
+        sub = tmp_path / 'plugins' / 'ingestion-hive'
+        sub.mkdir(parents=True)
+        _gradle(sub, "versions << [\n  'thrift': '0.23.0',\n]\n"
+                "dependencies {\n"
+                '  api "org.apache.thrift:libthrift:${versions.thrift}"\n}\n')
+        return sub
+
+    def test_submodule_versions_map_bumped_via_scanner(self, tmp_path):
+        # LLM off (autouse) -> deterministic scanner locates + bumps the map entry.
+        maven, _ = _load_maven()
+        sub = self._hive(tmp_path)
+        ctx = _ctx(maven, package='org.apache.thrift/libthrift', patched='0.24.0')
+        maven.apply_fix(str(tmp_path), ctx)
+        assert ctx['is_core'] is True
+        assert "'thrift': '0.24.0'" in _read(sub, 'build.gradle')
+        assert ctx['bumped_sections'] == ['versions.thrift (variable)']
+
+    def test_llm_edit_ext_var_plan_bumps_versions_map(self, tmp_path):
+        # LLM routes ${versions.thrift} as edit_ext_var target=thrift; _apply_plan
+        # now resolves it via the versions-map (not just plain `thrift = ...`).
+        maven, _ = _load_maven()
+        _gradle(tmp_path, "versions << [ 'thrift': '0.23.0' ]\n"
+                'api "org.apache.thrift:libthrift:${versions.thrift}"\n')
+        plan = {'action': 'edit_ext_var', 'file': 'build.gradle',
+                'target': 'thrift', 'reason': 'r'}
+        ctx = _ctx(maven, package='org.apache.thrift/libthrift', patched='0.24.0')
+        with patch.object(llm_planner, 'plan_edit', return_value=plan):
+            maven.apply_fix(str(tmp_path), ctx)
+        assert "'thrift': '0.24.0'" in _read(tmp_path)
+        assert ctx['bumped_sections'] == ['versions.thrift (variable)']
+
+    def test_core_inherited_versions_key_still_unsupported(self, tmp_path):
+        # ${versions.X} with NO in-repo definition = inherited from core -> unsupported.
+        maven, rem = _load_maven()
+        _catalog(tmp_path)
+        sub = tmp_path / 'plugins' / 'x'
+        sub.mkdir(parents=True)
+        _gradle(sub, 'api "org.apache.httpcomponents.core5:httpcore5:'
+                '${versions.httpcore5}"\n')
+        ctx = _ctx(maven, package='org.apache.httpcomponents.core5/httpcore5',
+                   patched='5.4.3')
+        with pytest.raises(rem.RemediationUnsupported) as exc:
+            maven.apply_fix(str(tmp_path), ctx)
+        assert 'versions.httpcore5' in str(exc.value)
+
+    def test_core_coordinate_undeclared_anywhere_unsupported(self, tmp_path):
+        maven, rem = _load_maven()
+        _catalog(tmp_path)  # libthrift not in catalog...
+        _gradle(tmp_path, "dependencies { api 'other:thing:1.0' }\n")  # ...nor here
+        ctx = _ctx(maven, package='org.apache.thrift/libthrift', patched='0.24.0')
+        with pytest.raises(rem.RemediationUnsupported):
+            maven.apply_fix(str(tmp_path), ctx)
+
+
 class TestCoreHelpers:
+    def test_versions_map_key(self):
+        maven, _ = _load_maven()
+        assert maven._versions_map_key('${versions.thrift}') == 'thrift'
+        assert maven._versions_map_key('$versions.thrift') == 'thrift'
+        assert maven._versions_map_key('${versions.httpcore5}') == 'httpcore5'
+        assert maven._versions_map_key('${foo}') is None       # bare var, not versions.X
+        assert maven._versions_map_key('1.2.3') is None
+
+    def test_bump_versions_map_literal_and_forms(self, tmp_path):
+        maven, _ = _load_maven()
+        _gradle(tmp_path, "versions << [\n  'thrift': '0.23.0',\n]\n")
+        assert maven._bump_versions_map(str(tmp_path), 'thrift', '0.24.0') is True
+        assert "'thrift': '0.24.0'" in _read(tmp_path)
+        # already at/above -> False (no change); absent key -> None
+        assert maven._bump_versions_map(str(tmp_path), 'thrift', '0.24.0') is False
+        assert maven._bump_versions_map(str(tmp_path), 'nope', '1.0') is None
+
+    def test_bump_versions_map_assignment_form(self, tmp_path):
+        maven, _ = _load_maven()
+        _gradle(tmp_path, "versions.thrift = '0.23.0'\n")
+        assert maven._bump_versions_map(str(tmp_path), 'thrift', '0.24.0') is True
+        assert "versions.thrift = '0.24.0'" in _read(tmp_path)
+
     def test_version_ref_for_coordinate(self):
         maven, _ = _load_maven()
         text = ('[libraries]\n'
