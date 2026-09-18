@@ -319,6 +319,35 @@ class TestHelpers:
         maven, _ = _load_maven()
         assert maven.regenerate(str(tmp_path), {}) is None
 
+    def test_gradle_sources_reads_each_file_once(self, tmp_path, monkeypatch):
+        # Regression guard: files were previously read twice (once for the sort
+        # key, once in the loop body). They must now be read exactly once.
+        maven, _ = _load_maven()
+        _gradle(tmp_path, 'force "org.apache.logging.log4j:log4j-core:2.20.0"\n')
+        sub = tmp_path / 'plugins' / 'p'
+        sub.mkdir(parents=True)
+        _gradle(sub, 'implementation "com.other:thing:1.0"\n')
+        reads = []
+        real_read = maven._read
+
+        def counting_read(path):
+            reads.append(path)
+            return real_read(path)
+
+        monkeypatch.setattr(maven, '_read', counting_read)
+        maven._gradle_sources(str(tmp_path), 'org.apache.logging.log4j:log4j-core')
+        assert len(reads) == len(set(reads)) == 2  # each file once, no re-reads
+
+    def test_gradle_sources_ranks_artifact_file_first(self, tmp_path):
+        maven, _ = _load_maven()
+        _gradle(tmp_path, 'implementation "com.other:thing:1.0"\n')  # no mention
+        sub = tmp_path / 'plugins' / 'p'
+        sub.mkdir(parents=True)
+        _gradle(sub, 'force "org.apache.logging.log4j:log4j-core:2.20.0"\n')
+        out = maven._gradle_sources(str(tmp_path),
+                                    'org.apache.logging.log4j:log4j-core')
+        assert out.index('log4j-core') < out.index('com.other')
+
 
 class TestLlmPlan:
     """LLM planner path: verified edit plans are applied; everything else defers to

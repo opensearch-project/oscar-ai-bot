@@ -222,11 +222,12 @@ def _gradle_sources(work_dir, coord, max_chars=20000):
     capped so a huge multi-module repo can't blow the prompt."""
     artifact = coord.split(":")[-1] if ":" in coord else coord
     files = _find_files(work_dir, "**/build.gradle")
+    contents = {path: _read(path) for path in files}  # read each file once
     blocks, total = [], 0
     # Files mentioning the artifact first (most likely to hold the declaration).
-    ranked = sorted(files, key=lambda p: artifact not in _read(p))
+    ranked = sorted(files, key=lambda p: artifact not in contents[p])
     for path in ranked:
-        block = f"# {os.path.relpath(path, work_dir)}\n{_read(path)}"
+        block = f"# {os.path.relpath(path, work_dir)}\n{contents[path]}"
         if total + len(block) > max_chars and blocks:
             break
         blocks.append(block)
