@@ -164,8 +164,13 @@ def plan_edit(ctx, gradle_sources, mode="plugin"):
         logger.warning("LLM planner call failed; falling back to scanner: %s", e)
         return None
 
-    logger.info("LLM planner model=%s usage=%s raw_response=%s",
-                MODEL_ID, payload.get("usage"), text)
+    logger.info("LLM planner model=%s stop_reason=%s usage=%s raw_response=%s",
+                MODEL_ID, payload.get("stop_reason"), payload.get("usage"), text)
+    if payload.get("stop_reason") == "max_tokens":
+        # Truncated JSON -> _validate fails -> scanner fallback; log it so a too-low
+        # MAX_TOKENS doesn't look like a silent parse failure.
+        logger.warning("LLM planner hit max_tokens (%s); output truncated, "
+                       "falling back to scanner.", MAX_TOKENS)
     plan = _validate(text, mode)
     logger.info("LLM planner plan=%s", plan)
     return plan
