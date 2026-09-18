@@ -44,6 +44,7 @@ from remediation import (RemediationError, RemediationUnsupported, at_or_above,
                          new_branch_name)
 
 logger = logging.getLogger()
+logger.setLevel(logging.INFO)
 
 name = "maven"
 
