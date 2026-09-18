@@ -771,6 +771,27 @@ class TestLlmPlannerValidate:
     def test_rejects_edit_without_sections(self):
         assert llm_planner._validate('{"action": "edit_and_install", "sections": []}') is None
 
+    def test_truncated_output_warns_and_falls_back(self, caplog):
+        # stop_reason=max_tokens -> the JSON is cut off, so _validate fails and
+        # plan_edit returns None (router fallback). We must log it as a WARNING
+        # naming max_tokens rather than fail silently like any other parse error.
+        import io
+        import json as _json
+        payload = {
+            'stop_reason': 'max_tokens',
+            'usage': {'input_tokens': 1200, 'output_tokens': llm_planner.MAX_TOKENS},
+            'content': [{'type': 'text', 'text': '{"action": "upgra'}],  # truncated
+        }
+        fake = type('C', (), {'invoke_model': lambda self, **kw: {
+            'body': io.BytesIO(_json.dumps(payload).encode())}})()
+        ctx = {'package_name': 'qs', 'patched_version': '6.5.3',
+               'installed_version': '6.5.0'}
+        with patch.object(llm_planner, '_runtime', return_value=fake), \
+                caplog.at_level('WARNING'):
+            assert _REAL_PLAN_EDIT(ctx, '{}', False) is None
+        assert any('max_tokens' in r.message and r.levelname == 'WARNING'
+                   for r in caplog.records)
+
     def test_rejects_sections_on_non_edit_action(self):
         assert llm_planner._validate('{"action": "none", "sections": ["resolutions"]}') is None
 
