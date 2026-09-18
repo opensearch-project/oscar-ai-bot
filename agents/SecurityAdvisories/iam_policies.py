@@ -40,9 +40,11 @@ def get_policies(account_id: str, region: str, env: str) -> List[iam.PolicyState
             sid="SecurityAdvisoriesRemediationRunTask",
             effect=iam.Effect.ALLOW,
             actions=["ecs:RunTask"],
-            # Family ARN with :* covers every task-definition revision.
+            # Family ARN with :* covers every task-definition revision. One entry
+            # per ecosystem worker (npm, maven).
             resources=[
-                f"arn:aws:ecs:{region}:{account_id}:task-definition/oscar-remediation-npm-{env}:*"
+                f"arn:aws:ecs:{region}:{account_id}:task-definition/oscar-remediation-npm-{env}:*",
+                f"arn:aws:ecs:{region}:{account_id}:task-definition/oscar-remediation-maven-{env}:*",
             ],
         ),
         # RunTask hands the task + execution roles to the ECS tasks service; the
