@@ -23,7 +23,7 @@ RUN dnf install -y git && \
 # calls remediation.handle. We override the Lambda base image's runtime-client
 # ENTRYPOINT to run it directly (the base image is used only for its AL2023 +
 # Python, not the Lambda runtime).
-COPY shared/remediation.py shared/git-askpass.sh maven/maven.py maven/main.py ${LAMBDA_TASK_ROOT}/
+COPY shared/remediation.py shared/git-askpass.sh maven/maven.py maven/llm_planner.py maven/main.py ${LAMBDA_TASK_ROOT}/
 # git-askpass.sh feeds the token to git as the HTTPS password (via GIT_ASKPASS)
 # so it never lands in a URL/argv/.git/config; ensure it's executable.
 RUN chmod +x ${LAMBDA_TASK_ROOT}/git-askpass.sh
