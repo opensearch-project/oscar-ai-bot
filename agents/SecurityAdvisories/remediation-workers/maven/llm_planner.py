@@ -35,7 +35,7 @@ logger.setLevel(logging.INFO)
 MODEL_ID = os.environ.get(
     "REMEDIATION_LLM_MODEL_ID", "us.anthropic.claude-sonnet-4-5-20250929-v1:0"
 )
-MAX_TOKENS = 512
+MAX_TOKENS = 2000
 TEMPERATURE = 0  # a classification/routing decision, not prose
 
 # Allowed actions per mode, and which of them must name a "target" (the literal
