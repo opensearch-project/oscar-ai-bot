@@ -31,6 +31,10 @@ _llm_spec = importlib.util.spec_from_file_location(
 llm_planner = importlib.util.module_from_spec(_llm_spec)
 _llm_spec.loader.exec_module(llm_planner)
 
+# The real plan_edit, captured before the autouse fixture patches it out — lets a
+# test drive the actual Bedrock parse path with only the client mocked.
+_ORIG_PLAN_EDIT = llm_planner.plan_edit
+
 
 @pytest.fixture(autouse=True)
 def _llm_off_by_default():
@@ -330,6 +334,26 @@ class TestLlmPlan:
         with patch.object(llm_planner, 'plan_edit', return_value=plan):
             maven.apply_fix(str(tmp_path), _ctx(maven))
         assert 'log4j-core:2.25.4' in _read(tmp_path)
+
+    def test_truncated_output_warns_and_falls_back(self, caplog):
+        # stop_reason=max_tokens -> the JSON is cut off, so _validate fails and
+        # plan_edit returns None (scanner fallback). We must log it as a WARNING
+        # naming max_tokens rather than fail silently like any other parse error.
+        import io
+        import json as _json
+        payload = {
+            'stop_reason': 'max_tokens',
+            'usage': {'input_tokens': 5789, 'output_tokens': llm_planner.MAX_TOKENS},
+            'content': [{'type': 'text', 'text': '{"action": "cata'}],  # truncated
+        }
+        fake = type('C', (), {'invoke_model': lambda self, **kw: {
+            'body': io.BytesIO(_json.dumps(payload).encode())}})()
+        ctx = {'coordinate': 'g:a', 'patched_version': '2.0', 'installed_version': '1.0'}
+        with patch.object(llm_planner, '_runtime', return_value=fake), \
+                caplog.at_level('WARNING'):
+            assert _ORIG_PLAN_EDIT(ctx, 'sources', mode='catalog') is None
+        assert any('max_tokens' in r.message and r.levelname == 'WARNING'
+                   for r in caplog.records)
 
     def test_edit_ext_var_plan_applied(self, tmp_path):
         maven, _ = _load_maven()

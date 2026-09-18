@@ -11,8 +11,8 @@ dependency versions:
     coordinate maps to (via its ``[libraries]`` ``version.ref``). A coordinate not
     in the catalog is declared directly in a submodule ``build.gradle`` (literal,
     ext var, or a module-local ``versions << ['X': '...']`` map used as
-    ``${versions.X}``) — the fix falls back to the plugin build.gradle path for
-    those. Either way ``regenerate`` runs ``./gradlew updateShas`` to rewrite the
+    ``${versions.X}``) — the fix falls back to the shared build.gradle path
+    (``_apply_build_gradle_fix``) for those. Either way ``regenerate`` runs ``./gradlew updateShas`` to rewrite the
     per-module ``.jar.sha1`` dependency-license checksums so the
     ``dependencyLicenses`` precommit passes.
   - **plugin** (no catalog) — OpenSearch Gradle plugins. The fix edits the
@@ -121,11 +121,16 @@ def apply_fix(work_dir, ctx):
         _apply_core_fix(work_dir, ctx, catalog)
         return
     ctx["is_core"] = False
-    _apply_plugin_fix(work_dir, ctx)
+    _apply_build_gradle_fix(work_dir, ctx)
 
 
-def _apply_plugin_fix(work_dir, ctx):
+def _apply_build_gradle_fix(work_dir, ctx):
     """Decide + apply the build.gradle edit (LLM-first, deterministic fallback).
+
+    Used by BOTH repo styles — plugin repos (no catalog) and core repos for a
+    coordinate that isn't in the version catalog (a submodule build.gradle dep).
+    It only edits build.gradle; it does not depend on ``is_core`` and never
+    changes it, so the caller's catalog/checksum decisions are unaffected.
 
     Asks the LLM planner to classify how the coordinate's version is declared, and
     applies verified edit plans (``edit_literal`` / ``edit_ext_var``) via the same
@@ -268,11 +273,11 @@ def _apply_core_fix(work_dir, ctx, catalog):
         # Not in the catalog: a core repo still declares some deps directly in a
         # submodule build.gradle (literal, ext var, or a module-local `versions <<
         # ['X': '...']` map used as ${versions.X}). Fall back to the same LLM-first
-        # build.gradle path the plugins use (deterministic scanner as authority);
-        # regenerate still runs updateShas since this is a core repo.
+        # build.gradle path plugin repos use (deterministic scanner as authority).
+        # is_core stays True, so regenerate still runs updateShas afterward.
         logger.info("%s not in %s; scanning build.gradle (submodule dep).",
                     coord, rel)
-        _apply_plugin_fix(work_dir, ctx)
+        _apply_build_gradle_fix(work_dir, ctx)
         return
 
     ctx["bumped_sections"] = _bump_catalog_version(catalog, rel, key,
