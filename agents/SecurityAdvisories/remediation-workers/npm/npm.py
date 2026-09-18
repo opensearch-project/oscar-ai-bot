@@ -25,7 +25,7 @@ import re
 import subprocess
 
 import llm_planner
-from remediation import RemediationError, new_branch_name
+from remediation import RemediationError, at_or_above, new_branch_name
 
 logger = logging.getLogger()
 
@@ -167,7 +167,7 @@ def _apply_fix_deterministic(pkg_path, content, manifest, ctx, in_lockfile):
     elif dep_decl:
         # Direct dependency with no resolution -> targeted yarn upgrade.
         _section, current = dep_decl
-        if _at_or_above(current, patched):
+        if at_or_above(current, patched):
             ctx["method"] = "none"          # already patched; nothing to do
             ctx["bumped_sections"] = []
         else:
@@ -292,7 +292,7 @@ def _edit_versions(content, package_name, patched, declarations):
     edited = content
     bumped = []
     for section, current in declarations:
-        if _at_or_above(current, patched):
+        if at_or_above(current, patched):
             logger.info("%s in %s is already %s (>= %s); skipping",
                         package_name, section, current, patched)
             continue
@@ -382,28 +382,3 @@ def _replace_version(content, package_name, current, new_value):
         lambda m: f'"{package_name}"' + m.group(1) + f'"{new_value}"',
         content,
     )
-
-
-def _at_or_above(version_spec, patched):
-    """Best-effort: is the declared version already >= ``patched``?
-
-    Compares numeric release components (ignoring range operators + suffixes).
-    Returns False when it can't tell, so we default to bumping — this only guards
-    against a downgrade if a fix landed between the scan and remediation.
-    """
-    cur = _release_tuple(version_spec)
-    tgt = _release_tuple(patched)
-    if cur is None or tgt is None:
-        return False
-    return cur >= tgt
-
-
-def _release_tuple(version_spec):
-    """``(major, minor, patch, ...)`` ints from a version spec, or None."""
-    m = re.search(r"(\d+(?:\.\d+)*)", version_spec or "")
-    if not m:
-        return None
-    try:
-        return tuple(int(p) for p in m.group(1).split("."))
-    except ValueError:
-        return None

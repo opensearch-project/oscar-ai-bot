@@ -247,11 +247,13 @@ class TestVersionHelpers:
         assert npm._version_prefix('4.0.4') == ''
 
     def test_at_or_above(self):
+        # at_or_above now comes from the shared remediation module (imported into
+        # npm's namespace); npm no longer defines its own copy.
         npm, _ = _load_npm()
-        assert npm._at_or_above('4.0.8', '4.0.6') is True
-        assert npm._at_or_above('4.0.6', '4.0.6') is True
-        assert npm._at_or_above('4.0.4', '4.0.6') is False
-        assert npm._at_or_above('^4.0.4', '4.0.6') is False  # operator ignored
+        assert npm.at_or_above('4.0.8', '4.0.6') is True
+        assert npm.at_or_above('4.0.6', '4.0.6') is True
+        assert npm.at_or_above('4.0.4', '4.0.6') is False
+        assert npm.at_or_above('^4.0.4', '4.0.6') is False  # operator ignored
 
 
 # ---------------------------------------------------------------------------
