@@ -27,6 +27,7 @@ import logging
 import os
 import re
 
+import llm_planner
 from remediation import (RemediationError, RemediationUnsupported, at_or_above,
                          new_branch_name)
 
@@ -84,6 +85,102 @@ def build_context(event, write_owner, base_owner):
 
 
 def apply_fix(work_dir, ctx):
+    """Decide + apply the build.gradle edit (LLM-first, deterministic fallback).
+
+    Asks the LLM planner to classify how the coordinate's version is declared, and
+    applies verified edit plans (``edit_literal`` / ``edit_ext_var``) via the same
+    primitives the deterministic scanner uses. Any other plan (``out_of_scope`` /
+    ``none``), an unverifiable target, an invalid/absent plan, or a Bedrock failure
+    all defer to ``_apply_fix_deterministic`` — the authoritative scanner — so the
+    LLM can only cause a *verified* edit, never a wrong abstain or a wrong no-change.
+    """
+    plan = None
+    sources = _gradle_sources(work_dir, ctx["coordinate"])
+    if sources:
+        plan = llm_planner.plan_edit(ctx, sources)
+    if plan is not None:
+        logger.info("Applying LLM edit plan: %s", plan)
+        if _apply_plan(work_dir, ctx, plan):
+            return
+        logger.info("LLM plan not applied (unverified/deferred); using scanner.")
+    else:
+        logger.info("No LLM plan; using deterministic scanner.")
+    _apply_fix_deterministic(work_dir, ctx)
+
+
+def _apply_plan(work_dir, ctx, plan):
+    """Apply a verified LLM edit plan; return True if it fully handled the fix.
+
+    Only ``edit_literal`` / ``edit_ext_var`` are acted on, and only when the named
+    target is actually present (verified against the files). Everything else —
+    ``out_of_scope``, ``none``, or a target that can't be confirmed — returns False
+    so the deterministic scanner makes the authoritative decision.
+    """
+    action = plan["action"]
+    patched = ctx["patched_version"]
+    if action == "edit_ext_var":
+        result = _bump_variable(work_dir, plan["target"], patched)
+        if result is None:          # var not defined in-repo -> let the scanner decide
+            return False
+        ctx["bumped_sections"] = [f"{plan['target']} (variable)"] if result else []
+        return True
+    if action == "edit_literal":
+        bumped = _edit_coordinate_literals(work_dir, ctx["coordinate"], patched)
+        if bumped is None:          # no literal declaration found -> LLM mis-located
+            return False
+        ctx["bumped_sections"] = bumped   # [] => already patched (no_change)
+        return True
+    return False                    # out_of_scope / none -> deterministic decides
+
+
+def _edit_coordinate_literals(work_dir, coord, patched):
+    """Edit literal versions of ``coord`` across build.gradle(s), minimal-diff.
+
+    Returns the list of bumped files ([] if only already-at/above-patched literals
+    were found — a no-change), or None if no literal declaration of ``coord`` exists
+    at all (so the caller falls back to the scanner). Shared by the LLM edit_literal
+    path; the deterministic scanner has its own combined literal+var pass.
+    """
+    found_literal = False
+    bumped = []
+    for path in _find_files(work_dir, "**/build.gradle"):
+        content = _read(path)
+        edits = []
+        for m, version_token in _declaration_matches(content, coord):
+            if "$" in version_token:
+                continue            # a variable reference, not a literal
+            found_literal = True
+            if at_or_above(version_token, patched):
+                continue
+            new_text = m.group(0).replace(version_token, patched, 1)
+            edits.append((m.start(), m.end(), new_text))
+            bumped.append(os.path.relpath(path, work_dir))
+        for start, end, replacement in sorted(edits, reverse=True):
+            content = content[:start] + replacement + content[end:]
+        if edits:
+            _write(path, content)
+    return bumped if found_literal else None
+
+
+def _gradle_sources(work_dir, coord, max_chars=20000):
+    """build.gradle content to show the planner: prefer files that mention the
+    artifact, else all build.gradle(s). Each block is ``# <relpath>\\n<content>``;
+    capped so a huge multi-module repo can't blow the prompt."""
+    artifact = coord.split(":")[-1] if ":" in coord else coord
+    files = _find_files(work_dir, "**/build.gradle")
+    blocks, total = [], 0
+    # Files mentioning the artifact first (most likely to hold the declaration).
+    ranked = sorted(files, key=lambda p: artifact not in _read(p))
+    for path in ranked:
+        block = f"# {os.path.relpath(path, work_dir)}\n{_read(path)}"
+        if total + len(block) > max_chars and blocks:
+            break
+        blocks.append(block)
+        total += len(block)
+    return "\n\n".join(blocks)
+
+
+def _apply_fix_deterministic(work_dir, ctx):
     """Edit the coordinate's version in build.gradle, in place (minimal diff).
 
     Scans every build.gradle for a ``"group:artifact:<version>"`` declaration.

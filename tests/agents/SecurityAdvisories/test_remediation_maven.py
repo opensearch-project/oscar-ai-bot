@@ -23,14 +23,32 @@ _WORKERS_PATH = os.path.join(
 _MAVEN_PATH = os.path.join(_WORKERS_PATH, 'maven')
 _SHARED_PATH = os.path.join(_WORKERS_PATH, 'shared')
 
+# Load the maven planner under a UNIQUE module name (the npm worker also has an
+# `llm_planner`; a bare `import llm_planner` on sys.path would collide in
+# sys.modules). We inject it as `llm_planner` only while loading maven.py below.
+_llm_spec = importlib.util.spec_from_file_location(
+    'maven_llm_planner', os.path.join(_MAVEN_PATH, 'llm_planner.py'))
+llm_planner = importlib.util.module_from_spec(_llm_spec)
+_llm_spec.loader.exec_module(llm_planner)
+
+
+@pytest.fixture(autouse=True)
+def _llm_off_by_default():
+    """Default the LLM planner OFF so tests exercise the deterministic scanner.
+    LLM-path tests override ``plan_edit`` with their own return value."""
+    with patch.object(llm_planner, 'plan_edit', return_value=None):
+        yield
+
 
 def _load_maven():
-    """Load maven.py with its ``remediation`` dependency injected."""
+    """Load maven.py with its ``remediation`` + ``llm_planner`` deps injected."""
     rem_spec = importlib.util.spec_from_file_location(
         'remediation', os.path.join(_SHARED_PATH, 'remediation.py'))
     rem = importlib.util.module_from_spec(rem_spec)
     rem_spec.loader.exec_module(rem)
-    with patch.dict('sys.modules', {'remediation': rem}):
+    # Inject our planner as `llm_planner` only for maven.py's import (restored on
+    # exit), so it never persists in sys.modules to collide with the npm suite.
+    with patch.dict('sys.modules', {'remediation': rem, 'llm_planner': llm_planner}):
         mav_spec = importlib.util.spec_from_file_location(
             'maven_strategy', os.path.join(_MAVEN_PATH, 'maven.py'))
         mav = importlib.util.module_from_spec(mav_spec)
@@ -280,3 +298,79 @@ class TestHelpers:
     def test_regenerate_is_noop(self, tmp_path):
         maven, _ = _load_maven()
         assert maven.regenerate(str(tmp_path), {}) is None
+
+
+class TestLlmPlan:
+    """LLM planner path: verified edit plans are applied; everything else defers to
+    the deterministic scanner, so the LLM can only cause a *verified* edit — never
+    a wrong abstain or wrong no-change."""
+
+    def test_edit_literal_plan_applied(self, tmp_path):
+        maven, _ = _load_maven()
+        _gradle(tmp_path, 'resolutionStrategy {\n'
+                '  force "org.apache.logging.log4j:log4j-core:2.20.0"\n}\n')
+        plan = {'action': 'edit_literal', 'file': 'build.gradle',
+                'target': '2.20.0', 'reason': 'r'}
+        with patch.object(llm_planner, 'plan_edit', return_value=plan):
+            maven.apply_fix(str(tmp_path), _ctx(maven))
+        assert 'log4j-core:2.25.4' in _read(tmp_path)
+
+    def test_edit_ext_var_plan_applied(self, tmp_path):
+        maven, _ = _load_maven()
+        _gradle(tmp_path, "ext {\n  log4j_version = '2.20.0'\n}\n"
+                'dependencies {\n'
+                '  force "org.apache.logging.log4j:log4j-core:${log4j_version}"\n}\n')
+        plan = {'action': 'edit_ext_var', 'file': 'build.gradle',
+                'target': 'log4j_version', 'reason': 'r'}
+        with patch.object(llm_planner, 'plan_edit', return_value=plan):
+            maven.apply_fix(str(tmp_path), _ctx(maven))
+        assert "log4j_version = '2.25.4'" in _read(tmp_path)
+
+    def test_out_of_scope_plan_defers_to_scanner(self, tmp_path):
+        # LLM says out_of_scope, but the coordinate IS an editable literal — the
+        # scanner still edits it, so a wrong out_of_scope can't cause a bad abstain.
+        maven, _ = _load_maven()
+        _gradle(tmp_path, 'resolutionStrategy {\n'
+                '  force "org.apache.logging.log4j:log4j-core:2.20.0"\n}\n')
+        plan = {'action': 'out_of_scope', 'file': '', 'target': '', 'reason': 'x'}
+        with patch.object(llm_planner, 'plan_edit', return_value=plan):
+            maven.apply_fix(str(tmp_path), _ctx(maven))
+        assert 'log4j-core:2.25.4' in _read(tmp_path)
+
+    def test_unverifiable_edit_literal_defers_to_scanner(self, tmp_path):
+        # Plan claims edit_literal but the coordinate isn't declared -> fall back ->
+        # the scanner authoritatively reports out-of-scope (not declared).
+        maven, rem = _load_maven()
+        _gradle(tmp_path, "dependencies {\n  implementation 'other:thing:1.0'\n}\n")
+        plan = {'action': 'edit_literal', 'file': 'build.gradle',
+                'target': '2.20.0', 'reason': 'r'}
+        with patch.object(llm_planner, 'plan_edit', return_value=plan):
+            with pytest.raises(rem.RemediationUnsupported):
+                maven.apply_fix(str(tmp_path), _ctx(maven))
+
+
+class TestMavenPlannerValidate:
+    """Schema validation of the maven planner's model output."""
+
+    def test_valid_edit_literal(self):
+        plan = llm_planner._validate(
+            '{"action":"edit_literal","file":"build.gradle","target":"1.2.3","reason":"r"}')
+        assert plan == {'action': 'edit_literal', 'file': 'build.gradle',
+                        'target': '1.2.3', 'reason': 'r'}
+
+    def test_unknown_action_returns_none(self):
+        assert llm_planner._validate('{"action":"frobnicate","target":""}') is None
+
+    def test_edit_action_missing_target_returns_none(self):
+        assert llm_planner._validate('{"action":"edit_ext_var","target":""}') is None
+
+    def test_out_of_scope_with_target_returns_none(self):
+        assert llm_planner._validate('{"action":"out_of_scope","target":"x"}') is None
+
+    def test_fenced_json_tolerated(self):
+        plan = llm_planner._validate(
+            '```json\n{"action":"none","file":"","target":"","reason":"ok"}\n```')
+        assert plan['action'] == 'none'
+
+    def test_non_json_returns_none(self):
+        assert llm_planner._validate('not json at all') is None
