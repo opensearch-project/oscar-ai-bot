@@ -8,9 +8,13 @@ dependency versions:
 
   - **core** (``gradle/libs.versions.toml`` present) — OpenSearch core and any
     repo using a Gradle version catalog. The fix bumps the ``[versions]`` key the
-    coordinate maps to (via its ``[libraries]`` ``version.ref``); ``regenerate``
-    then runs ``./gradlew updateShas`` to rewrite the per-module ``.jar.sha1``
-    dependency-license checksums so the ``dependencyLicenses`` precommit passes.
+    coordinate maps to (via its ``[libraries]`` ``version.ref``). A coordinate not
+    in the catalog is declared directly in a submodule ``build.gradle`` (literal,
+    ext var, or a module-local ``versions << ['X': '...']`` map used as
+    ``${versions.X}``) — the fix falls back to the plugin build.gradle path for
+    those. Either way ``regenerate`` runs ``./gradlew updateShas`` to rewrite the
+    per-module ``.jar.sha1`` dependency-license checksums so the
+    ``dependencyLicenses`` precommit passes.
   - **plugin** (no catalog) — OpenSearch Gradle plugins. The fix edits the
     vulnerable dependency's version where it's declared in ``build.gradle``; there
     is no lockfile/checksum, so ``regenerate`` is a no-op — the text edit is the
@@ -155,10 +159,18 @@ def _apply_plan(work_dir, ctx, plan):
     action = plan["action"]
     patched = ctx["patched_version"]
     if action == "edit_ext_var":
-        result = _bump_variable(work_dir, plan["target"], patched)
-        if result is None:          # var not defined in-repo -> let the scanner decide
+        # target is either a plain ext var (``foo = '1.2.3'``) or a module-local
+        # ``versions`` map key (``versions << ['foo': '1.2.3']`` used as
+        # ${versions.foo}); try both, so the LLM's route holds for either form.
+        target = plan["target"]
+        result = _bump_variable(work_dir, target, patched)
+        label = f"{target} (variable)"
+        if result is None:
+            result = _bump_versions_map(work_dir, target, patched)
+            label = f"versions.{target} (variable)"
+        if result is None:          # not defined in-repo -> let the scanner decide
             return False
-        ctx["bumped_sections"] = [f"{plan['target']} (variable)"] if result else []
+        ctx["bumped_sections"] = [label] if result else []
         return True
     if action == "edit_literal":
         bumped = _edit_coordinate_literals(work_dir, ctx["coordinate"], patched)
@@ -253,9 +265,15 @@ def _apply_core_fix(work_dir, ctx, catalog):
     if key is None:
         key = _version_ref_for_coordinate(text, coord)
     if key is None:
-        raise RemediationUnsupported(
-            f"`{coord}` has no [libraries] entry in {rel} "
-            f"({ctx['repo_name']}), so its catalog version key can't be resolved.")
+        # Not in the catalog: a core repo still declares some deps directly in a
+        # submodule build.gradle (literal, ext var, or a module-local `versions <<
+        # ['X': '...']` map used as ${versions.X}). Fall back to the same LLM-first
+        # build.gradle path the plugins use (deterministic scanner as authority);
+        # regenerate still runs updateShas since this is a core repo.
+        logger.info("%s not in %s; scanning build.gradle (submodule dep).",
+                    coord, rel)
+        _apply_plugin_fix(work_dir, ctx)
+        return
 
     ctx["bumped_sections"] = _bump_catalog_version(catalog, rel, key,
                                                    ctx["patched_version"])
@@ -333,6 +351,7 @@ def _apply_fix_deterministic(work_dir, ctx):
     bumped = []
     unsupported_reasons = []
     vars_to_bump = set()
+    versions_map_keys = set()
     already_patched = False
     saw_declaration = False
 
@@ -352,12 +371,17 @@ def _apply_fix_deterministic(work_dir, ctx):
                 # or bare); a core-inherited (${versions.X}) or otherwise indirect
                 # one is out of scope.
                 var = _var_name(version_token)
-                if var is None:
+                map_key = _versions_map_key(version_token)
+                if var is not None:
+                    vars_to_bump.add(var)
+                elif map_key is not None:
+                    # ${versions.X}: resolvable only if X is set by a module-local
+                    # `versions << ['X': '...']` map (else it's core-inherited).
+                    versions_map_keys.add(map_key)
+                else:
                     unsupported_reasons.append(
                         f"`{coord}` version is set indirectly "
                         f"(`{version_token}`), which isn't edited automatically.")
-                else:
-                    vars_to_bump.add(var)
                 continue
             # Literal version. Edit only this match's span (a shared literal like
             # 2.17.1 on a sibling artifact must not be cross-edited) by swapping
@@ -383,6 +407,19 @@ def _apply_fix_deterministic(work_dir, ctx):
                 f"in this repository (likely inherited from OpenSearch core).")
         elif result:
             bumped.append(f"{var} (variable)")
+        else:
+            already_patched = True
+
+    # Phase 2b: bump module-local `versions << ['key': '...']` map entries. A key
+    # not defined in any such map is inherited from core (out of scope here).
+    for key in sorted(versions_map_keys):
+        result = _bump_versions_map(work_dir, key, patched)
+        if result is None:
+            unsupported_reasons.append(
+                f"`{coord}` version comes from `${{versions.{key}}}`, which isn't "
+                f"defined in this repository (likely inherited from OpenSearch core).")
+        elif result:
+            bumped.append(f"versions.{key} (variable)")
         else:
             already_patched = True
 
@@ -538,6 +575,68 @@ def _bump_variable(work_dir, var, patched):
         logger.info("Bumped %s: %s -> %s in %s", var, current, patched,
                     os.path.relpath(path, work_dir))
         edited = True
+    if not found:
+        return None
+    return edited
+
+
+def _versions_map_key(version_token):
+    """Map key ``X`` from a ``${versions.X}`` / ``$versions.X`` token, else None.
+
+    OpenSearch core submodules extend a shared ``versions`` map (``versions <<
+    ['X': '1.2.3']``) and reference it as ``${versions.X}``. Unlike a bare
+    ``${foo}`` (handled by ``_var_name``), this dotted form is resolvable ONLY if
+    ``X`` is set by such an in-repo map (checked by ``_bump_versions_map``); if not,
+    ``versions.X`` is inherited from core's build-tools and out of scope.
+    """
+    for pattern in (r"\$\{versions\.([A-Za-z_][A-Za-z0-9_]*)\}",
+                    r"\$versions\.([A-Za-z_][A-Za-z0-9_]*)"):
+        m = re.fullmatch(pattern, version_token)
+        if m:
+            return m.group(1)
+    return None
+
+
+def _bump_versions_map(work_dir, key, patched):
+    """Edit a module-local ``versions`` map entry for ``key`` to ``patched``.
+
+    Handles the forms OpenSearch submodules use to set ``versions.<key>`` in-repo:
+    a map-literal entry (``'key': '1.2.3'`` inside ``versions << [ ... ]``), a
+    ``versions.key = '1.2.3'`` assignment, or ``versions['key'] = '1.2.3'``. Edits
+    each defining file. Returns True if any was edited, False if all definitions are
+    already at/above ``patched``, or None if ``key`` isn't set by any in-repo map
+    (so it's inherited from core — out of scope).
+    """
+    k = re.escape(key)
+    # Each pattern: (regex, index of the (quote, version, quote) triple's start).
+    # The version literal is captured so we can swap it and keep the surrounding
+    # syntax (quotes / separator) untouched.
+    patterns = (
+        re.compile(r'''(["']''' + k + r'''["']\s*:\s*)(["'])([^"']+)(["'])'''),   # map entry
+        re.compile(r'''(\bversions\.''' + k + r'''\s*=\s*)(["'])([^"']+)(["'])'''),  # versions.key =
+        re.compile(r'''(\bversions\[\s*["']''' + k + r'''["']\s*\]\s*=\s*)(["'])([^"']+)(["'])'''),  # versions['key'] =
+    )
+    found = False
+    edited = False
+    for path in _find_files(work_dir, "**/build.gradle"):
+        content = _read(path)
+        changed = False
+        for pat in patterns:
+            m = pat.search(content)
+            if not m:
+                continue
+            found = True
+            if at_or_above(m.group(3), patched):
+                continue
+            content = (content[:m.start()]
+                       + f"{m.group(1)}{m.group(2)}{patched}{m.group(4)}"
+                       + content[m.end():])
+            logger.info("Bumped versions.%s: %s -> %s in %s", key, m.group(3),
+                        patched, os.path.relpath(path, work_dir))
+            changed = True
+        if changed:
+            _write(path, content)
+            edited = True
     if not found:
         return None
     return edited
