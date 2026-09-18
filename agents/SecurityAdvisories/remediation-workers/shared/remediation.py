@@ -91,6 +91,14 @@ class RemediationUnsupported(RemediationError):
     """
 
 
+# Worker outcomes where the task ran correctly (no error) — the ECS entrypoint
+# exits 0 for these. Only a genuine ``error`` is a task failure; ``unsupported``
+# (out of scope) and ``remediation_in_progress`` (a concurrent worker) are
+# expected outcomes, not failures.
+CLEAN_WORKER_STATUSES = ("success", "no_change", "unsupported",
+                         "remediation_in_progress")
+
+
 def at_or_above(version_spec, patched):
     """Best-effort downgrade guard: is the declared version already >= patched?
 

@@ -1,7 +1,7 @@
 # Copyright OpenSearch Contributors
 # SPDX-License-Identifier: Apache-2.0
 
-"""Entrypoint for the npm/yarn ecosystem remediation Fargate task.
+"""Entrypoint for the maven/Gradle ecosystem remediation Fargate task.
 
 The task is dispatched via ``ecs.run_task`` with the remediation payload passed
 as container environment variables (``containerOverrides.environment``), so this
@@ -17,7 +17,7 @@ import logging
 import os
 import sys
 
-import npm
+import maven
 import remediation
 
 # Fargate has no Lambda-runtime log handler; without this, INFO logs are dropped.
@@ -46,14 +46,13 @@ def _event_from_env():
 
 def main():
     event = _event_from_env()
-    logger.info("npm remediation (ECS) invoked: cve_id=%s repo_name=%s package=%s",
+    logger.info("maven remediation (ECS) invoked: cve_id=%s repo_name=%s package=%s",
                 event.get("cve_id"), event.get("repo_name"), event.get("package"))
-    result = remediation.handle(event, npm)
-    # Surface a non-zero exit on failure so the ECS task's stopped-reason /
-    # exit code reflects the outcome (the Slack post-back is the user-facing
-    # signal; this is for task-level observability).
+    result = remediation.handle(event, maven)
+    # Surface the outcome via the task exit code for observability (the Slack
+    # post-back is the user-facing signal).
     status = (result or {}).get("status")
-    logger.info("npm remediation (ECS) finished: status=%s", status)
+    logger.info("maven remediation (ECS) finished: status=%s", status)
     return 0 if status in remediation.CLEAN_WORKER_STATUSES else 1
 
 

@@ -462,7 +462,7 @@ def handle_list_affected_repositories(
 # CDK stack injects the value when it wires the ECS task to this handler.
 _REMEDIATION_TASKDEF_ENV = {
     'npm': 'NPM_REMEDIATION_TASKDEF',
-    # 'maven': 'MAVEN_REMEDIATION_TASKDEF',  # added with the maven ecosystem
+    'maven': 'MAVEN_REMEDIATION_TASKDEF',
 }
 
 # The container in the task definition to override (see the CDK task def).
