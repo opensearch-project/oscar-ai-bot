@@ -443,16 +443,22 @@ class OscarLambdaStack(Stack):
         )
         self.remediation_npm_task_def = task_def
 
-        # maven plugin worker: a pure build.gradle text edit (no install/build, no
-        # lockfile/checksums), so it needs far less than npm — modest cpu/mem and a
-        # small disk. Reuses the same cluster + task/execution roles. x86_64 to
-        # match the CI runner + npm worker (arm64 fails to build on the x64 runner).
+        # maven worker (unified plugin + core): the plugin path is a build.gradle
+        # text edit; the core path bumps the version catalog and runs a real gradle
+        # build to regenerate .jar.sha1 checksums (see maven.py). Reuses the same
+        # cluster + task/execution roles. x86_64 to match the CI runner + npm worker
+        # (arm64 fails to build on the x64 runner).
         maven_task_def = ecs.FargateTaskDefinition(
             self, "RemediationMavenTaskDef",
             family=f"oscar-remediation-maven-{self.env_name}",
-            cpu=1024,                 # 1 vCPU
-            memory_limit_mib=2048,    # 2 GB (clone + text edit; no node_modules)
-            ephemeral_storage_gib=21,  # Fargate minimum; a plugin checkout is small
+            # Sized for the heavier of the two paths this worker handles: the core
+            # path runs ``./gradlew updateShas`` over OpenSearch core (buildSrc
+            # compile + configuring the whole multi-project build + downloading
+            # every dependency jar), which needs real CPU/RAM. The plugin path (a
+            # text edit) fits easily within the same envelope.
+            cpu=4096,                 # 4 vCPU (speeds the gradle build)
+            memory_limit_mib=8192,    # 8 GB (OpenSearch gradle build is memory-hungry)
+            ephemeral_storage_gib=50,  # core clone + gradle dist + dependency jars
             runtime_platform=ecs.RuntimePlatform(
                 cpu_architecture=ecs.CpuArchitecture.X86_64,
                 operating_system_family=ecs.OperatingSystemFamily.LINUX,

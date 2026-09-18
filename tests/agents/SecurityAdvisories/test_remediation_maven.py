@@ -73,6 +73,22 @@ def _read(tmp_path, name='build.gradle'):
     return (tmp_path / name).read_text()
 
 
+def _catalog(tmp_path, versions='log4j = "2.20.0"\n',
+             libraries=('log4jcore = { group = "org.apache.logging.log4j", '
+                        'name = "log4j-core", version.ref = "log4j" }\n'),
+             gradlew=False):
+    """Write a gradle/libs.versions.toml (marks a core-style repo)."""
+    (tmp_path / 'gradle').mkdir(exist_ok=True)
+    (tmp_path / 'gradle' / 'libs.versions.toml').write_text(
+        f"[versions]\n{versions}\n[libraries]\n{libraries}")
+    if gradlew:
+        (tmp_path / 'gradlew').write_text("#!/bin/sh\n")
+
+
+def _catalog_text(tmp_path):
+    return (tmp_path / 'gradle' / 'libs.versions.toml').read_text()
+
+
 class TestSharedContract:
     """Guards the shared symbols the maven worker's main.py depends on — a missing
     CLEAN_WORKER_STATUSES crashed the ECS entrypoint at exit despite a successful
@@ -349,6 +365,119 @@ class TestLlmPlan:
                 maven.apply_fix(str(tmp_path), _ctx(maven))
 
 
+class TestCoreCatalog:
+    """Core (version-catalog) path: a gradle/libs.versions.toml routes apply_fix to
+    the catalog editor, and regenerate runs ./gradlew updateShas to rewrite the
+    .jar.sha1 checksums. The deterministic [libraries]->version.ref lookup is
+    authoritative; the LLM only supplies a verified [versions] key."""
+
+    def test_catalog_presence_marks_core_and_bumps_version_ref(self, tmp_path):
+        maven, _ = _load_maven()
+        _catalog(tmp_path)  # log4j = 2.20.0, log4jcore -> version.ref log4j
+        ctx = _ctx(maven)   # log4j-core, patched 2.25.4
+        maven.apply_fix(str(tmp_path), ctx)
+        assert ctx['is_core'] is True
+        assert 'log4j = "2.25.4"' in _catalog_text(tmp_path)
+        assert ctx['bumped_sections'] == ['log4j (catalog)']
+
+    def test_catalog_already_at_or_above_is_no_change(self, tmp_path):
+        maven, _ = _load_maven()
+        _catalog(tmp_path, versions='log4j = "2.25.4"\n')
+        ctx = _ctx(maven)
+        maven.apply_fix(str(tmp_path), ctx)  # no raise
+        assert ctx['bumped_sections'] == []           # shared flow -> no_change
+        assert 'log4j = "2.25.4"' in _catalog_text(tmp_path)
+
+    def test_coordinate_absent_from_catalog_unsupported(self, tmp_path):
+        maven, rem = _load_maven()
+        _catalog(tmp_path,  # only a guava entry; log4j-core has no [libraries] row
+                 libraries='guava = { group = "com.google.guava", name = "guava", '
+                           'version.ref = "guava" }\n',
+                 versions='guava = "31.1-jre"\n')
+        with pytest.raises(rem.RemediationUnsupported) as exc:
+            maven.apply_fix(str(tmp_path), _ctx(maven))
+        assert 'no [libraries] entry' in str(exc.value)
+
+    def test_llm_catalog_plan_applied(self, tmp_path):
+        maven, _ = _load_maven()
+        _catalog(tmp_path)
+        plan = {'action': 'catalog', 'file': 'gradle/libs.versions.toml',
+                'target': 'log4j', 'reason': 'r'}
+        with patch.object(llm_planner, 'plan_edit', return_value=plan):
+            maven.apply_fix(str(tmp_path), _ctx(maven))
+        assert 'log4j = "2.25.4"' in _catalog_text(tmp_path)
+
+    def test_llm_catalog_plan_with_bogus_key_defers_to_lookup(self, tmp_path):
+        # LLM names a [versions] key that doesn't exist -> not verified -> the
+        # deterministic [libraries] lookup still finds the right key and bumps it.
+        maven, _ = _load_maven()
+        _catalog(tmp_path)
+        plan = {'action': 'catalog', 'file': 'gradle/libs.versions.toml',
+                'target': 'not_a_real_key', 'reason': 'r'}
+        with patch.object(llm_planner, 'plan_edit', return_value=plan):
+            maven.apply_fix(str(tmp_path), _ctx(maven))
+        assert 'log4j = "2.25.4"' in _catalog_text(tmp_path)
+
+    def test_regenerate_runs_gradlew_updateshas_for_core(self, tmp_path):
+        maven, _ = _load_maven()
+        _catalog(tmp_path, gradlew=True)
+        ctx = _ctx(maven)
+        ctx['is_core'] = True
+        ctx['bumped_sections'] = ['log4j (catalog)']
+        with patch.object(maven.subprocess, 'run') as run:
+            run.return_value = type('R', (), {'returncode': 0, 'stdout': '', 'stderr': ''})()
+            maven.regenerate(str(tmp_path), ctx)
+        args = run.call_args[0][0]
+        assert args[0] == './gradlew' and 'updateShas' in args
+
+    def test_regenerate_raises_when_gradlew_fails(self, tmp_path):
+        maven, rem = _load_maven()
+        _catalog(tmp_path, gradlew=True)
+        ctx = _ctx(maven)
+        ctx['is_core'] = True
+        ctx['bumped_sections'] = ['log4j (catalog)']
+        with patch.object(maven.subprocess, 'run') as run:
+            run.return_value = type('R', (), {'returncode': 1, 'stdout': '',
+                                              'stderr': 'boom'})()
+            with pytest.raises(rem.RemediationError):
+                maven.regenerate(str(tmp_path), ctx)
+
+    def test_regenerate_skipped_for_plugin_and_on_no_change(self, tmp_path):
+        maven, _ = _load_maven()
+        with patch.object(maven.subprocess, 'run') as run:
+            maven.regenerate(str(tmp_path), {'is_core': False,
+                                             'bumped_sections': ['build.gradle']})
+            maven.regenerate(str(tmp_path), {'is_core': True,
+                                             'bumped_sections': []})
+            run.assert_not_called()
+
+    def test_regenerate_core_without_wrapper_raises(self, tmp_path):
+        maven, rem = _load_maven()
+        _catalog(tmp_path)  # no gradlew
+        with pytest.raises(rem.RemediationError) as exc:
+            maven.regenerate(str(tmp_path),
+                             {'is_core': True, 'repo_name': 'OpenSearch',
+                              'bumped_sections': ['log4j (catalog)']})
+        assert 'gradlew' in str(exc.value)
+
+
+class TestCoreHelpers:
+    def test_version_ref_for_coordinate(self):
+        maven, _ = _load_maven()
+        text = ('[libraries]\n'
+                'log4jcore = { group = "org.apache.logging.log4j", '
+                'name = "log4j-core", version.ref = "log4j" }\n')
+        assert maven._version_ref_for_coordinate(
+            text, 'org.apache.logging.log4j:log4j-core') == 'log4j'
+        assert maven._version_ref_for_coordinate(text, 'com.google.guava:guava') is None
+
+    def test_versions_key_present(self):
+        maven, _ = _load_maven()
+        text = '[versions]\nlog4j = "2.20.0"\n'
+        assert maven._versions_key_present(text, 'log4j') is True
+        assert maven._versions_key_present(text, 'nope') is False
+
+
 class TestMavenPlannerValidate:
     """Schema validation of the maven planner's model output."""
 
@@ -374,3 +503,22 @@ class TestMavenPlannerValidate:
 
     def test_non_json_returns_none(self):
         assert llm_planner._validate('not json at all') is None
+
+    def test_valid_catalog_action_in_catalog_mode(self):
+        plan = llm_planner._validate(
+            '{"action":"catalog","file":"gradle/libs.versions.toml",'
+            '"target":"log4j","reason":"r"}', mode='catalog')
+        assert plan == {'action': 'catalog', 'file': 'gradle/libs.versions.toml',
+                        'target': 'log4j', 'reason': 'r'}
+
+    def test_catalog_action_rejected_in_plugin_mode(self):
+        assert llm_planner._validate(
+            '{"action":"catalog","target":"log4j"}', mode='plugin') is None
+
+    def test_edit_literal_rejected_in_catalog_mode(self):
+        assert llm_planner._validate(
+            '{"action":"edit_literal","target":"1.2.3"}', mode='catalog') is None
+
+    def test_catalog_action_missing_target_returns_none(self):
+        assert llm_planner._validate(
+            '{"action":"catalog","target":""}', mode='catalog') is None

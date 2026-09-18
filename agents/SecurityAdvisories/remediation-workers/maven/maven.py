@@ -1,14 +1,22 @@
 # Copyright OpenSearch Contributors
 # SPDX-License-Identifier: Apache-2.0
 
-"""maven / Gradle ecosystem strategy (OpenSearch plugins).
+"""maven / Gradle ecosystem strategy (OpenSearch plugins + core).
 
-Fixes a CVE in a Gradle plugin by editing the vulnerable dependency's version
-where it's declared in ``build.gradle``. OpenSearch plugins have no version
-catalog and no lockfile, so there is nothing to regenerate — editing the
-declaration text IS the whole fix (``regenerate`` is a no-op).
+One worker, two declaration styles — it branches on how the repo declares
+dependency versions:
 
-Declaration forms this slice handles (see cve-remediation-maven.md):
+  - **core** (``gradle/libs.versions.toml`` present) — OpenSearch core and any
+    repo using a Gradle version catalog. The fix bumps the ``[versions]`` key the
+    coordinate maps to (via its ``[libraries]`` ``version.ref``); ``regenerate``
+    then runs ``./gradlew updateShas`` to rewrite the per-module ``.jar.sha1``
+    dependency-license checksums so the ``dependencyLicenses`` precommit passes.
+  - **plugin** (no catalog) — OpenSearch Gradle plugins. The fix edits the
+    vulnerable dependency's version where it's declared in ``build.gradle``; there
+    is no lockfile/checksum, so ``regenerate`` is a no-op — the text edit is the
+    whole fix.
+
+Plugin declaration forms handled (see cve-remediation-maven.md):
   - **force literal** — ``resolutionStrategy { force "group:artifact:1.2.3" }``
   - **direct-dep literal** — ``implementation "group:artifact:1.2.3"``
   - **in-repo ext var** — ``force "group:artifact:${foo_version}"`` where
@@ -16,16 +24,16 @@ Declaration forms this slice handles (see cve-remediation-maven.md):
 
 Out of scope (raised as ``RemediationUnsupported`` — a real CVE we can't
 auto-fix here, not an error):
-  - the coordinate isn't declared in any build.gradle (e.g. the advisory names a
-    sub-artifact the plugin doesn't declare)
-  - the version comes from a core-inherited map (``${versions.X}``) or other
-    indirection (``System.getProperty(...)``) not defined in this repo
+  - the coordinate isn't declared in any build.gradle / the catalog
+  - (plugin) the version comes from a core-inherited map (``${versions.X}``) or
+    other indirection (``System.getProperty(...)``) not defined in this repo
 """
 
 import glob
 import logging
 import os
 import re
+import subprocess
 
 import llm_planner
 from remediation import (RemediationError, RemediationUnsupported, at_or_above,
@@ -37,6 +45,17 @@ name = "maven"
 
 # Files we scan for declarations and for resolving in-repo version variables.
 _GRADLE_GLOBS = ("**/build.gradle", "**/gradle.properties")
+
+# A Gradle version catalog at this path marks a "core"-style repo (OpenSearch
+# core and anything else using a catalog); its absence marks a plugin.
+_CATALOG_REL = os.path.join("gradle", "libs.versions.toml")
+
+# Core checksum regen: ``updateShas`` downloads every dependency jar to rewrite
+# the per-module ``.jar.sha1`` files (see regenerate). It's the long pole — a
+# full run over core is ~2 min cold (gradle download + buildSrc compile + jar
+# downloads), so the timeout is generous but still bounds a hung build.
+_GRADLE_TASK = "updateShas"
+_GRADLE_TIMEOUT = 900
 
 
 def build_context(event, write_owner, base_owner):
@@ -85,6 +104,23 @@ def build_context(event, write_owner, base_owner):
 
 
 def apply_fix(work_dir, ctx):
+    """Apply the version edit, branching on the repo's declaration style.
+
+    A ``gradle/libs.versions.toml`` marks a core-style repo (version catalog): the
+    fix bumps the catalog and ``regenerate`` rewrites the ``.jar.sha1`` checksums.
+    Otherwise it's a plugin: edit the version in ``build.gradle`` and ``regenerate``
+    is a no-op. ``ctx['is_core']`` records the branch so ``regenerate`` matches.
+    """
+    catalog = _catalog_path(work_dir)
+    if catalog:
+        ctx["is_core"] = True
+        _apply_core_fix(work_dir, ctx, catalog)
+        return
+    ctx["is_core"] = False
+    _apply_plugin_fix(work_dir, ctx)
+
+
+def _apply_plugin_fix(work_dir, ctx):
     """Decide + apply the build.gradle edit (LLM-first, deterministic fallback).
 
     Asks the LLM planner to classify how the coordinate's version is declared, and
@@ -178,6 +214,102 @@ def _gradle_sources(work_dir, coord, max_chars=20000):
         blocks.append(block)
         total += len(block)
     return "\n\n".join(blocks)
+
+
+# --------------------------------------------------------------------------
+# core (version catalog) path
+# --------------------------------------------------------------------------
+
+def _catalog_path(work_dir):
+    """Absolute path to ``gradle/libs.versions.toml`` if this repo has one, else
+    None. Its presence is what distinguishes a core-style repo from a plugin."""
+    path = os.path.join(work_dir, _CATALOG_REL)
+    return path if os.path.isfile(path) else None
+
+
+def _apply_core_fix(work_dir, ctx, catalog):
+    """Bump the coordinate's version key in the Gradle version catalog.
+
+    LLM-first (mirrors the plugin path): the planner is shown the catalog and asked
+    which ``[versions]`` key drives the coordinate (``catalog`` action). A verified
+    key (confirmed present in ``[versions]``) is used; otherwise we fall back to a
+    deterministic ``[libraries]`` lookup (match the coordinate's group+name, follow
+    its ``version.ref``). If neither resolves a key the coordinate isn't in the
+    catalog -> ``RemediationUnsupported``. The actual bump + the ``.jar.sha1``
+    regen happen in ``_bump_catalog_version`` / ``regenerate``.
+    """
+    text = _read(catalog)
+    coord = ctx["coordinate"]
+    rel = os.path.relpath(catalog, work_dir)
+
+    key = None
+    plan = llm_planner.plan_edit(ctx, text, mode="catalog")
+    if plan is not None:
+        logger.info("Applying LLM catalog plan: %s", plan)
+        if plan["action"] == "catalog" and _versions_key_present(text, plan["target"]):
+            key = plan["target"]
+        else:
+            logger.info("LLM catalog plan not applied (unverified); using lookup.")
+    if key is None:
+        key = _version_ref_for_coordinate(text, coord)
+    if key is None:
+        raise RemediationUnsupported(
+            f"`{coord}` has no [libraries] entry in {rel} "
+            f"({ctx['repo_name']}), so its catalog version key can't be resolved.")
+
+    ctx["bumped_sections"] = _bump_catalog_version(catalog, rel, key,
+                                                   ctx["patched_version"])
+    if not ctx["bumped_sections"]:
+        logger.info("catalog key %r already at/above %s; nothing to edit.",
+                    key, ctx["patched_version"])
+
+
+def _version_ref_for_coordinate(catalog_text, coord):
+    """The ``[versions]`` key a coordinate maps to via its ``[libraries]`` entry.
+
+    Catalog libraries read ``name = { group = "g", name = "a", version.ref = "key" }``;
+    we match the entry whose group+name equal ``coord`` and return its ``version.ref``.
+    Returns None if the coordinate has no library entry, or its entry pins an inline
+    ``version = "..."`` (no ref) — that literal form isn't handled here.
+    """
+    group, _, artifact = coord.partition(":")
+    entry = re.compile(
+        r'''\{[^}]*?\bgroup\s*=\s*(["'])''' + re.escape(group) + r'''\1'''
+        r'''[^}]*?\bname\s*=\s*(["'])''' + re.escape(artifact) + r'''\2'''
+        r'''[^}]*?\bversion\.ref\s*=\s*(["'])([^"']+)\3[^}]*?\}''')
+    m = entry.search(catalog_text)
+    return m.group(4).strip() if m else None
+
+
+def _versions_key_present(catalog_text, key):
+    """True if ``key`` is defined in the catalog's ``[versions]`` table."""
+    return bool(key) and _versions_assignment(key).search(catalog_text) is not None
+
+
+def _versions_assignment(key):
+    """Regex matching a ``key = "<version>"`` assignment (version group = 2)."""
+    return re.compile(
+        r'''(^\s*''' + re.escape(key) + r'''\s*=\s*")([^"]+)(")''', re.MULTILINE)
+
+
+def _bump_catalog_version(catalog, rel, key, patched):
+    """Edit ``key = "<version>"`` in the catalog to ``patched`` (minimal diff).
+
+    Returns ``["<key> (catalog)"]`` if edited, ``[]`` if the key is already
+    at/above ``patched`` (a no-change), and raises ``RemediationUnsupported`` if the
+    key isn't in ``[versions]`` (a dangling ``version.ref`` — nothing safe to edit).
+    """
+    text = _read(catalog)
+    m = _versions_assignment(key).search(text)
+    if not m:
+        raise RemediationUnsupported(
+            f"catalog version key `{key}` is not defined in {rel}.")
+    if at_or_above(m.group(2), patched):
+        return []
+    new_text = text[:m.start()] + f"{m.group(1)}{patched}{m.group(3)}" + text[m.end():]
+    _write(catalog, new_text)
+    logger.info("Bumped catalog %s: %s -> %s", key, m.group(2), patched)
+    return [f"{key} (catalog)"]
 
 
 def _apply_fix_deterministic(work_dir, ctx):
@@ -276,15 +408,49 @@ def _apply_fix_deterministic(work_dir, ctx):
 
 
 def regenerate(work_dir, ctx):
-    """No-op: Gradle plugins have no lockfile/checksums; the edit is the fix."""
-    return
+    """Rewrite dependency-license checksums for core; no-op for plugins.
+
+    Plugins have no lockfile/checksums, so the catalog/build.gradle edit is the
+    whole fix. Core repos ship a ``<module>/licenses/<artifact>-<version>.jar.sha1``
+    per dependency, guarded by the ``dependencyLicenses`` precommit; after a version
+    bump those are stale, so we run ``./gradlew updateShas`` which downloads the new
+    jars, writes the new ``.jar.sha1`` files, and deletes the orphaned old ones.
+
+    Skips the run when the edit was a no-change (nothing bumped). A gradle failure
+    is fatal (``RemediationError``): a catalog bump without matching checksums would
+    fail ``dependencyLicenses``, so we must not open a PR with stale shas.
+    """
+    if not ctx.get("is_core") or not ctx.get("bumped_sections"):
+        return
+    wrapper = os.path.join(work_dir, "gradlew")
+    if not os.path.isfile(wrapper):
+        raise RemediationError(
+            f"{ctx['repo_name']} has a version catalog but no gradlew wrapper; "
+            f"cannot regenerate .jar.sha1 checksums.")
+    logger.info("Running ./gradlew %s to regenerate .jar.sha1 checksums ...",
+                _GRADLE_TASK)
+    try:
+        result = subprocess.run(
+            ["./gradlew", _GRADLE_TASK, "--console=plain", "--no-daemon"],
+            cwd=work_dir, capture_output=True, text=True, timeout=_GRADLE_TIMEOUT,
+        )
+    except subprocess.TimeoutExpired:
+        raise RemediationError(
+            f"./gradlew {_GRADLE_TASK} timed out after {_GRADLE_TIMEOUT}s.")
+    if result.returncode != 0:
+        tail = (result.stderr or result.stdout or "")[-1500:]
+        raise RemediationError(
+            f"./gradlew {_GRADLE_TASK} failed (exit {result.returncode}): {tail}")
+    logger.info("Checksum regeneration complete.")
 
 
 def summary(ctx):
-    where = ", ".join(ctx.get("bumped_sections") or ["build.gradle"])
+    where = ", ".join(ctx.get("bumped_sections")
+                      or ["the version catalog" if ctx.get("is_core") else "build.gradle"])
+    checksums = " and regenerated .jar.sha1 checksums" if ctx.get("is_core") else ""
     return (
-        f"Bumped {ctx['coordinate']} to {ctx['patched_version']} in {where} "
-        f"and opened a pull request for {ctx['cve_id']}."
+        f"Bumped {ctx['coordinate']} to {ctx['patched_version']} in {where}"
+        f"{checksums} and opened a pull request for {ctx['cve_id']}."
     )
 
 

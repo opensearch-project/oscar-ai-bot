@@ -38,7 +38,13 @@ MODEL_ID = os.environ.get(
 MAX_TOKENS = 512
 TEMPERATURE = 0  # a classification/routing decision, not prose
 
-_ALLOWED_ACTIONS = ("edit_literal", "edit_ext_var", "out_of_scope", "none")
+# Allowed actions per mode, and which of them must name a "target" (the literal
+# version / ext-var name / catalog key to edit). out_of_scope + none never name one.
+_ACTIONS = {
+    "plugin": {"edit_literal", "edit_ext_var", "out_of_scope", "none"},
+    "catalog": {"catalog", "out_of_scope", "none"},
+}
+_TARGET_ACTIONS = {"edit_literal", "edit_ext_var", "catalog"}
 
 _client = None
 
@@ -56,10 +62,37 @@ def _runtime():
 
 
 _SYSTEM = (
-    "You route maven/Gradle CVE fixes. Given a repo's build.gradle file(s) and a "
+    "You route maven/Gradle CVE fixes. Given a repo's Gradle build files and a "
     "target coordinate + patched version, classify HOW the coordinate's version is "
     "declared. Reply with ONLY a JSON object, no markdown or prose."
 )
+
+_CATALOG_PROMPT = """\
+Target coordinate: {coordinate}
+Target version (already verified — do not change it): {patched_version}
+Currently installed: {installed_version}
+
+This repository uses a Gradle version catalog. Its [libraries] entries map a
+coordinate (group + name) to a version via version.ref, which names a key in the
+[versions] table. Find the [versions] key that drives {coordinate}'s version.
+
+gradle/libs.versions.toml:
+{gradle_sources}
+
+Choose exactly one action and return JSON of the form:
+{{"action": "<action>", "file": "gradle/libs.versions.toml",
+  "target": "<the [versions] key name, or empty for out_of_scope/none>",
+  "reason": "<one short sentence on how {coordinate} maps to a [versions] key>"}}
+
+Actions:
+- "catalog": {coordinate} has a [libraries] entry whose version.ref points at a key
+  in [versions]. "target" = that [versions] key name (e.g. "log4j"), NOT the
+  version. A key may be shared by a family of libraries — that is expected.
+- "out_of_scope": {coordinate} has no [libraries] entry (it isn't in the catalog),
+  or its entry pins an inline version rather than a version.ref. "target" empty.
+- "none": the [versions] key is already at or above {patched_version}. "target" empty.
+
+Return only the JSON object."""
 
 _PROMPT = """\
 Target coordinate: {coordinate}
@@ -90,15 +123,17 @@ Actions:
 Return only the JSON object."""
 
 
-def plan_edit(ctx, gradle_sources):
+def plan_edit(ctx, gradle_sources, mode="plugin"):
     """Return a validated edit plan dict, or ``None`` to fall back to the scanner.
 
-    ``gradle_sources`` is the build.gradle content to show the model (a string,
-    typically ``"# <path>\\n<content>"`` blocks). ``coordinate`` and
-    ``patched_version`` are intentionally not part of the plan — the caller uses
-    the verified values from ``ctx`` and re-verifies the named target exists.
+    ``gradle_sources`` is the Gradle source to show the model (build.gradle blocks
+    for ``mode='plugin'``, the version-catalog toml for ``mode='catalog'``).
+    ``coordinate`` and ``patched_version`` are intentionally not part of the plan —
+    the caller uses the verified values from ``ctx`` and re-verifies the named
+    target exists. ``mode`` selects the prompt + the set of allowed actions.
     """
-    prompt = _PROMPT.format(
+    template = _CATALOG_PROMPT if mode == "catalog" else _PROMPT
+    prompt = template.format(
         coordinate=ctx["coordinate"],
         patched_version=ctx["patched_version"],
         installed_version=ctx.get("installed_version") or "unknown",
@@ -127,13 +162,16 @@ def plan_edit(ctx, gradle_sources):
 
     logger.info("LLM planner model=%s usage=%s raw_response=%s",
                 MODEL_ID, payload.get("usage"), text)
-    plan = _validate(text)
+    plan = _validate(text, mode)
     logger.info("LLM planner plan=%s", plan)
     return plan
 
 
-def _validate(text):
-    """Parse + schema-check the model output. Return a normalized plan or None."""
+def _validate(text, mode="plugin"):
+    """Parse + schema-check the model output. Return a normalized plan or None.
+
+    ``mode`` picks the allowed action set (plugin edits vs the catalog action)."""
+    allowed = _ACTIONS.get(mode, _ACTIONS["plugin"])
     try:
         plan = json.loads(_strip_fences(text))
     except (ValueError, TypeError):
@@ -143,17 +181,17 @@ def _validate(text):
         return None
 
     action = plan.get("action")
-    if action not in _ALLOWED_ACTIONS:
+    if action not in allowed:
         logger.warning("LLM planner returned unknown action %r; falling back.", action)
         return None
 
     target = plan.get("target")
     target = target.strip() if isinstance(target, str) else ""
-    # edit actions must name what to edit; out_of_scope/none must not.
-    if action in ("edit_literal", "edit_ext_var") and not target:
+    # edit/catalog actions must name what to edit; out_of_scope/none must not.
+    if action in _TARGET_ACTIONS and not target:
         logger.warning("%s with no target; falling back.", action)
         return None
-    if action in ("out_of_scope", "none") and target:
+    if action not in _TARGET_ACTIONS and target:
         logger.warning("action %r must not name a target; falling back.", action)
         return None
 
