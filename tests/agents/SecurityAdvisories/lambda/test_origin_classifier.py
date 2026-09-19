@@ -11,8 +11,6 @@ branch scans (rich array-of-arrays) and release-tag scans (lossy flat/scalar).
 import os
 import sys
 
-import pytest
-
 _LAMBDA_PATH = os.path.join(
     os.path.dirname(__file__), '..', '..', '..', '..',
     'agents', 'SecurityAdvisories', 'lambda',
@@ -22,7 +20,6 @@ if _LAMBDA_PATH not in sys.path:
 
 from origin_classifier import (CORE_INHERITED, DIRECT,  # noqa: E402
                                TRANSITIVE, UNKNOWN, classify_origin)
-
 
 # --- direct: coordinate sits right after the configuration -------------------
 
