@@ -33,6 +33,7 @@ _ENV_TO_EVENT = {
     "PACKAGE": "package",
     "PATCHED_VERSION": "patched_version",
     "INSTALLED_VERSION": "installed_version",
+    "DECLARATION_CLASS": "declaration_class",
     "BASE_BRANCH": "base_branch",
     "SLACK_CHANNEL": "slack_channel",
     "SLACK_THREAD_TS": "slack_thread_ts",

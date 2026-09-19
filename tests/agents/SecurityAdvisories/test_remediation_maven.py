@@ -38,9 +38,10 @@ _ORIG_PLAN_EDIT = llm_planner.plan_edit
 
 @pytest.fixture(autouse=True)
 def _llm_off_by_default():
-    """Default the LLM planner OFF so tests exercise the deterministic scanner.
-    LLM-path tests override ``plan_edit`` with their own return value."""
-    with patch.object(llm_planner, 'plan_edit', return_value=None):
+    """Default the LLM OFF so tests exercise the deterministic paths. LLM-path tests
+    override ``plan_edit`` / ``write_force_edit`` with their own return value."""
+    with patch.object(llm_planner, 'plan_edit', return_value=None), \
+         patch.object(llm_planner, 'write_force_edit', return_value=None):
         yield
 
 
@@ -241,6 +242,187 @@ class TestApplyFix:
         with pytest.raises(rem.RemediationUnsupported) as exc:
             maven.apply_fix(str(tmp_path), ctx)
         assert 'not declared' in str(exc.value)
+
+    def test_transitive_undeclared_adds_force_block(self, tmp_path):
+        maven, _ = _load_maven()
+        # commons-beanutils isn't declared here; it's pulled transitively. With the
+        # transitive class, the worker pins it via a resolutionStrategy.force block.
+        _gradle(tmp_path, "dependencies {\n  implementation 'org.jsoup:jsoup:1.20.1'\n}\n")
+        ctx = _ctx(maven, package='commons-beanutils/commons-beanutils',
+                   patched='1.11.0', declaration_class='transitive')
+        maven.apply_fix(str(tmp_path), ctx)
+        text = _read(tmp_path)
+        assert 'allprojects {' in text
+        assert 'resolutionStrategy' in text
+        assert "force 'commons-beanutils:commons-beanutils:1.11.0'" in text
+        assert ctx['bumped_sections'] == ['build.gradle (force)']
+
+    def test_llm_force_edit_applied_when_verified(self, tmp_path):
+        maven, _ = _load_maven()
+        # Existing resolutionStrategy block; the (mocked) LLM folds the pin into it
+        # rather than appending a fresh block. Verified edit is applied as-is.
+        original = ("allprojects {\n  configurations.all {\n    resolutionStrategy {\n"
+                    "      force 'com.example:foo:1.0'\n    }\n  }\n}\n")
+        _gradle(tmp_path, original)
+        ctx = _ctx(maven, package='org.apache.httpcomponents.core5/httpcore5',
+                   patched='5.4.3', declaration_class='transitive')
+        edit = {
+            "old_string": "      force 'com.example:foo:1.0'",
+            "new_string": "      force 'com.example:foo:1.0'\n"
+                          "      force 'org.apache.httpcomponents.core5:httpcore5:5.4.3'",
+        }
+        with patch.object(llm_planner, 'write_force_edit', return_value=edit):
+            maven.apply_fix(str(tmp_path), ctx)
+        text = _read(tmp_path)
+        assert "httpcore5:5.4.3" in text
+        assert text.count("resolutionStrategy") == 1     # folded in, no new block
+        assert ctx['bumped_sections'] == ['build.gradle (force, llm)']
+
+    @pytest.mark.parametrize("original,old,new,expect_snippet", [
+        # string force block:  force "g:a:v"
+        ("configurations.all {\n  resolutionStrategy {\n"
+         "    force 'com.example:foo:1.0'\n  }\n}\n",
+         "    force 'com.example:foo:1.0'",
+         "    force 'com.example:foo:1.0'\n"
+         "    force 'org.apache.httpcomponents.core5:httpcore5:5.4.3'",
+         "httpcore5:5.4.3"),
+        # method force block:  force("g:a:v")
+        ("subprojects {\n  configurations.all {\n    resolutionStrategy {\n"
+         "      force(\"com.example:foo:1.0\")\n    }\n  }\n}\n",
+         "      force(\"com.example:foo:1.0\")",
+         "      force(\"com.example:foo:1.0\")\n"
+         "      force(\"org.apache.httpcomponents.core5:httpcore5:5.4.3\")",
+         'httpcore5:5.4.3'),
+        # dotted form:  resolutionStrategy.force "g:a:v"
+        ("subprojects {\n  configurations.all {\n"
+         "    resolutionStrategy.force \"com.example:foo:1.0\"\n  }\n}\n",
+         "    resolutionStrategy.force \"com.example:foo:1.0\"",
+         "    resolutionStrategy.force \"com.example:foo:1.0\"\n"
+         "    resolutionStrategy.force \"org.apache.httpcomponents.core5:httpcore5:5.4.3\"",
+         "httpcore5:5.4.3"),
+        # eachDependency / useVersion
+        ("configurations.all {\n  resolutionStrategy {\n    eachDependency { d ->\n"
+         "      if (d.requested.group == 'com.example') { d.useVersion '1.0' }\n"
+         "    }\n  }\n}\n",
+         "      if (d.requested.group == 'com.example') { d.useVersion '1.0' }",
+         "      if (d.requested.group == 'com.example') { d.useVersion '1.0' }\n"
+         "      if (d.requested.group == 'org.apache.httpcomponents.core5' && "
+         "d.requested.name == 'httpcore5') { d.useVersion '5.4.3' }",
+         "useVersion '5.4.3'"),
+    ], ids=["string_force", "method_force", "dotted_force", "each_dependency"])
+    def test_llm_force_edit_folds_into_each_idiom(self, tmp_path, original, old, new,
+                                                  expect_snippet):
+        maven, _ = _load_maven()
+        _gradle(tmp_path, original)
+        ctx = _ctx(maven, package='org.apache.httpcomponents.core5/httpcore5',
+                   patched='5.4.3', declaration_class='transitive')
+        with patch.object(llm_planner, 'write_force_edit',
+                          return_value={"old_string": old, "new_string": new}):
+            maven.apply_fix(str(tmp_path), ctx)
+        text = _read(tmp_path)
+        assert expect_snippet in text
+        # folded into the existing block — no fresh allprojects block appended
+        assert "// Pin" not in text
+        assert ctx['bumped_sections'] == ['build.gradle (force, llm)']
+
+    def test_llm_force_edit_nonunique_anchor_falls_back(self, tmp_path):
+        maven, _ = _load_maven()
+        # old_string appears twice -> ambiguous -> reject -> deterministic append.
+        original = "force 'x:y:1'\nforce 'x:y:1'\n"
+        _gradle(tmp_path, original)
+        ctx = _ctx(maven, package='org.apache.httpcomponents.core5/httpcore5',
+                   patched='5.4.3', declaration_class='transitive')
+        edit = {"old_string": "force 'x:y:1'",
+                "new_string": "force 'x:y:1'\nforce 'org.apache.httpcomponents.core5:httpcore5:5.4.3'"}
+        with patch.object(llm_planner, 'write_force_edit', return_value=edit):
+            maven.apply_fix(str(tmp_path), ctx)
+        text = _read(tmp_path)
+        assert "// Pin" in text                       # fell back to appended block
+        assert ctx['bumped_sections'] == ['build.gradle (force)']
+
+    def test_llm_force_edit_wrong_version_falls_back_to_append(self, tmp_path):
+        maven, _ = _load_maven()
+        original = "plugins { id 'java' }\n"
+        _gradle(tmp_path, original)
+        ctx = _ctx(maven, package='org.apache.httpcomponents.core5/httpcore5',
+                   patched='5.4.3', declaration_class='transitive')
+        # LLM returns a pin at the WRONG version -> verification rejects -> append.
+        edit = {
+            "old_string": "plugins { id 'java' }",
+            "new_string": "plugins { id 'java' }\n"
+                          "allprojects { configurations.all { resolutionStrategy {\n"
+                          "  force 'org.apache.httpcomponents.core5:httpcore5:9.9.9'\n"
+                          "} } }",
+        }
+        with patch.object(llm_planner, 'write_force_edit', return_value=edit):
+            maven.apply_fix(str(tmp_path), ctx)
+        text = _read(tmp_path)
+        assert "httpcore5:5.4.3" in text            # deterministic append used
+        assert "9.9.9" not in text
+        assert ctx['bumped_sections'] == ['build.gradle (force)']
+
+    def test_verify_force_edit_rules(self):
+        maven, _ = _load_maven()
+        base = "a\nb\n  force 'g:a:1.0'\n"
+        # additions-only, correct pin -> ok
+        good = "a\nb\n  force 'g:a:1.0'\n  force 'com.x:y:2.5.0'\n"
+        assert maven._verify_force_edit(base, good, "com.x:y", "2.5.0") is True
+        # removed/changed an existing line -> reject
+        changed = "a\nB\n  force 'g:a:1.0'\n  force 'com.x:y:2.5.0'\n"
+        assert maven._verify_force_edit(base, changed, "com.x:y", "2.5.0") is False
+        # added a pin for a DIFFERENT version -> reject
+        wrongver = base + "  force 'com.x:y:9.9.9'\n"
+        assert maven._verify_force_edit(base, wrongver, "com.x:y", "2.5.0") is False
+        # added a pin for ANOTHER dependency -> reject (token != patched)
+        otherdep = base + "  force 'com.x:y:2.5.0'\n  force 'other:dep:3.0.0'\n"
+        assert maven._verify_force_edit(base, otherdep, "com.x:y", "2.5.0") is False
+        # no-op edit -> reject
+        assert maven._verify_force_edit(base, base, "com.x:y", "2.5.0") is False
+
+    def test_transitive_but_actually_declared_edits_declaration(self, tmp_path):
+        maven, _ = _load_maven()
+        # Stale scan says transitive, but the dep IS declared directly on HEAD:
+        # the deterministic scan finds it and edits the literal — no force block.
+        _gradle(tmp_path, "dependencies {\n  implementation 'org.jsoup:jsoup:1.20.1'\n}\n")
+        ctx = _ctx(maven, package='org.jsoup/jsoup', patched='1.22.2',
+                   declaration_class='transitive')
+        maven.apply_fix(str(tmp_path), ctx)
+        text = _read(tmp_path)
+        assert 'jsoup:1.22.2' in text
+        assert 'allprojects {' not in text          # forced path NOT taken
+        assert ctx['bumped_sections'] == ['build.gradle']
+
+    def test_core_inherited_undeclared_is_unsupported_not_forced(self, tmp_path):
+        maven, rem = _load_maven()
+        # Transitive only via org.opensearch.* -> core-inherited: manual review, no force.
+        _gradle(tmp_path, "dependencies {\n  implementation 'org.jsoup:jsoup:1.20.1'\n}\n")
+        ctx = _ctx(maven, package='org.apache.httpcomponents.client5/httpclient5',
+                   patched='5.6.4', declaration_class='core_inherited')
+        with pytest.raises(rem.RemediationUnsupported) as exc:
+            maven.apply_fix(str(tmp_path), ctx)
+        assert 'core' in str(exc.value).lower()
+        assert 'allprojects {' not in _read(tmp_path)   # no force block written
+
+    def test_undeclared_unknown_class_stays_unsupported(self, tmp_path):
+        maven, rem = _load_maven()
+        # No declaration and no transitive signal -> unchanged unsupported behavior.
+        _gradle(tmp_path, 'force "com.google.guava:guava:31.1-jre"\n')
+        ctx = _ctx(maven)  # declaration_class defaults to 'unknown'
+        with pytest.raises(rem.RemediationUnsupported):
+            maven.apply_fix(str(tmp_path), ctx)
+
+    def test_transitive_no_root_build_gradle_unsupported(self, tmp_path):
+        maven, rem = _load_maven()
+        # Transitive, but the only build.gradle is in a submodule (no root to force
+        # in) -> unsupported rather than a misplaced block.
+        sub = tmp_path / 'plugin'
+        sub.mkdir()
+        _gradle(sub, "dependencies {\n  implementation 'org.jsoup:jsoup:1.20.1'\n}\n")
+        ctx = _ctx(maven, package='commons-beanutils/commons-beanutils',
+                   patched='1.11.0', declaration_class='transitive')
+        with pytest.raises(rem.RemediationUnsupported) as exc:
+            maven.apply_fix(str(tmp_path), ctx)
+        assert 'root build.gradle' in str(exc.value)
 
     def test_no_build_gradle_unsupported(self, tmp_path):
         maven, rem = _load_maven()
