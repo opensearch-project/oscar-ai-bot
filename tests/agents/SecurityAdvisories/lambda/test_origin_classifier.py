@@ -23,6 +23,7 @@ from origin_classifier import (CORE_INHERITED, DIRECT,  # noqa: E402
 
 # --- direct: coordinate sits right after the configuration -------------------
 
+
 def test_direct_single_declaration():
     origin = [["build.gradle", "compileOnly", "org.bouncycastle-bcpkix-fips@2.1.9"]]
     assert classify_origin(origin) == DIRECT
