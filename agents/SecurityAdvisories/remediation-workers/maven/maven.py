@@ -26,9 +26,24 @@ Plugin declaration forms handled (see cve-remediation-maven.md):
   - **in-repo ext var** — ``force "group:artifact:${foo_version}"`` where
     ``foo_version = '1.2.3'`` is defined in this repo (build.gradle / gradle.properties)
 
+Transitive dependencies (not declared anywhere, pulled in through a parent) are
+handled when the scan classified the coordinate as ``transitive`` (carried on the
+event as ``declaration_class``, from origin_classifier): rather than give up,
+``_apply_force_resolution`` pins it with a ``resolutionStrategy.force`` — folding
+into the repo's existing resolution block (LLM-write, verified) or appending a
+fresh ``allprojects { ... }`` block. Taken only when no direct declaration is found,
+so a stale ``transitive`` classification can never override an actual on-HEAD
+declaration (the scanner edits that instead).
+
 Out of scope (raised as ``RemediationUnsupported`` — a real CVE we can't
 auto-fix here, not an error):
-  - the coordinate isn't declared in any build.gradle / the catalog
+  - ``declaration_class == "core_inherited"``: undeclared and pulled transitively
+    only through ``org.opensearch*`` artifacts, so the version is owned by core and
+    must be fixed upstream (forcing it here would fight core's managed version).
+    This is the transitive twin of the ``${versions.X}`` core-inherited case below.
+  - the coordinate isn't declared in any build.gradle / the catalog AND wasn't
+    classified transitive (e.g. ``declaration_class`` is ``unknown`` — the advisory
+    package may not match what this repo resolves)
   - (plugin) the version comes from a core-inherited map (``${versions.X}``) or
     other indirection (``System.getProperty(...)``) not defined in this repo
 """
@@ -89,6 +104,10 @@ def build_context(event, write_owner, base_owner):
         "artifact": artifact,
         "patched_version": patched_version,
         "installed_version": (event.get("installed_version") or "").strip(),
+        # direct / transitive / core_inherited / unknown, from the scan's origin
+        # chain (see origin_classifier). Consulted only as a fallback when no
+        # declaration is found: transitive -> force pin; core_inherited -> manual review.
+        "declaration_class": (event.get("declaration_class") or "unknown").strip(),
         "cve_id": cve_id,
         "repo_name": repo_name,
         "write_owner": write_owner,
@@ -142,7 +161,11 @@ def _apply_build_gradle_fix(work_dir, ctx):
     """
     plan = None
     sources = _gradle_sources(work_dir, ctx["coordinate"])
-    if sources:
+    # A coordinate the scan classified as transitive/core_inherited has no
+    # declaration to locate, so skip the LLM planner (it would only return
+    # out_of_scope) and let the deterministic scanner confirm there's no direct
+    # declaration and then force (transitive) or defer to core (core_inherited).
+    if sources and ctx.get("declaration_class") not in ("transitive", "core_inherited"):
         plan = llm_planner.plan_edit(ctx, sources)
     if plan is not None:
         logger.info("Applying LLM edit plan: %s", plan)
@@ -444,11 +467,109 @@ def _apply_fix_deterministic(work_dir, ctx):
         logger.info("%s already at/above %s; nothing to edit.", coord, patched)
         return
     if not saw_declaration:
-        raise RemediationUnsupported(
+        # Undeclared: route on the scan's origin classification (see origin_classifier).
+        dc = ctx.get("declaration_class")
+        if dc == "transitive":          # third-party parent -> pin it here
+            logger.info("%s not declared directly; transitive per scan -> "
+                        "adding resolutionStrategy.force.", coord)
+            _apply_force_resolution(work_dir, ctx)
+            return
+        if dc == "core_inherited":      # org.opensearch parent -> core owns the version
+            raise RemediationUnsupported(
+                f"`{coord}` is inherited transitively from OpenSearch core. "
+                f"It should be fixed in core, not {ctx['repo_name']}.")
+        raise RemediationUnsupported(   # direct/unknown -> advisory package doesn't match
             f"`{coord}` is not declared in any build.gradle in {ctx['repo_name']} "
             f"(the advisory package may differ from what the plugin declares).")
     raise RemediationUnsupported(
         f"`{coord}` could not be remediated automatically.")
+
+
+def _apply_force_resolution(work_dir, ctx):
+    """Pin a transitive coordinate to the patched version, matching the repo's idiom.
+
+    Used only when the coordinate is NOT declared directly (classified transitive),
+    so there's no version literal/var to edit. Tries an LLM edit that folds the pin
+    into the file's existing resolution block (verified); on any failure appends a
+    fresh ``allprojects { configurations.all { resolutionStrategy { force
+    '<coord>:<patched>' } } }`` block. Raises ``RemediationUnsupported`` if there is
+    no root build.gradle. (An existing force for this coordinate is a
+    ``group:artifact:version`` literal the deterministic scanner already edits, so
+    this only runs when none exists.)
+    """
+    root = os.path.join(work_dir, "build.gradle")
+    if not os.path.isfile(root):
+        raise RemediationUnsupported(
+            f"`{ctx['coordinate']}` is transitive but {ctx['repo_name']} has no "
+            f"root build.gradle to pin it in.")
+    original = _read(root)
+
+    # Apply the LLM's {old_string,new_string} only if the anchor is unique and the
+    # result adds exactly our coordinate:patched (verified); else append below.
+    edit = llm_planner.write_force_edit(ctx, "build.gradle", original)
+    if edit:
+        old, new = edit["old_string"], edit["new_string"]
+        if original.count(old) == 1:
+            edited = original.replace(old, new, 1)
+            if _verify_force_edit(original, edited, ctx["coordinate"],
+                                  ctx["patched_version"]):
+                _write(root, edited)
+                logger.info("Applied verified LLM force edit for %s in build.gradle",
+                            ctx["coordinate"])
+                ctx["bumped_sections"] = ["build.gradle (force, llm)"]
+                return
+        logger.info("LLM force edit rejected (anchor not unique or unverified); "
+                    "appending block.")
+
+    forced = f"{ctx['coordinate']}:{ctx['patched_version']}"
+    _write(root, original.rstrip() + "\n\n" + _force_block(ctx, forced) + "\n")
+    logger.info("Appended resolutionStrategy.force for %s in build.gradle", forced)
+    ctx["bumped_sections"] = ["build.gradle (force)"]
+
+
+def _verify_force_edit(original, edited, coordinate, patched):
+    """True if ``edited`` adds ONLY a pin of ``coordinate`` to ``patched``.
+
+    Guards the LLM write so it can never do the one dangerous thing (pin a wrong
+    version, or touch another dependency):
+      - every original line must survive (additions only — nothing removed/altered);
+      - the added text must reference ``coordinate`` and ``patched``;
+      - every version-like token in the added text must equal ``patched`` (so no
+        other dependency and no other version can be introduced).
+    Any violation -> False -> caller falls back to the deterministic append.
+    """
+    from collections import Counter
+    removed = Counter(original.splitlines()) - Counter(edited.splitlines())
+    if removed:                          # an existing line was changed or deleted
+        return False
+    added = "\n".join(
+        (Counter(edited.splitlines()) - Counter(original.splitlines())).elements())
+    if not added.strip():                # no-op edit
+        return False
+    artifact = coordinate.split(":")[-1]
+    if patched not in added or (coordinate not in added and artifact not in added):
+        return False
+    # A version token is a digit-led run right after ':' / '@' / a quote. Every one
+    # in the added text must be the patched version.
+    for token in re.findall(r"""[:@'"](\d[\w.\-]*)""", added):
+        if token != patched:
+            return False
+    return True
+
+
+def _force_block(ctx, forced_coord):
+    """The resolutionStrategy.force block text pinning ``forced_coord`` repo-wide."""
+    return (
+        f"// Pin {ctx['coordinate']} to a patched version for {ctx['cve_id']} "
+        f"(transitive dependency; not declared directly).\n"
+        "allprojects {\n"
+        "    configurations.all {\n"
+        "        resolutionStrategy {\n"
+        f"            force '{forced_coord}'\n"
+        "        }\n"
+        "    }\n"
+        "}"
+    )
 
 
 def regenerate(work_dir, ctx):

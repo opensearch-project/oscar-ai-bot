@@ -24,6 +24,7 @@ On any failure (Bedrock error, empty/invalid output, schema violation) this retu
 import json
 import logging
 import os
+import time
 
 import boto3
 from botocore.config import Config as BotoConfig
@@ -38,6 +39,11 @@ MODEL_ID = os.environ.get(
 MAX_TOKENS = 2000
 TEMPERATURE = 0  # a classification/routing decision, not prose
 
+# The force-edit path returns a MINIMAL {old_string,new_string} snippet (not the
+# whole file — that was too slow and blew the read timeout), so the classify budget
+# is plenty. Overridable.
+FORCE_MAX_TOKENS = int(os.environ.get("REMEDIATION_LLM_FORCE_MAX_TOKENS", "2000"))
+
 # Allowed actions per mode, and which of them must name a "target" (the literal
 # version / ext-var name / catalog key to edit). out_of_scope + none never name one.
 _ACTIONS = {
@@ -48,6 +54,11 @@ _TARGET_ACTIONS = {"edit_literal", "edit_ext_var", "catalog"}
 
 _client = None
 
+# Bedrock read timeout (seconds), per attempt. Generous by default so a legitimately
+# slow generation isn't cut off; the worker is a background Fargate task, not a Lambda
+# with a hard ceiling. Overridable. Worst-case hang is READ_TIMEOUT * (max_attempts).
+READ_TIMEOUT = int(os.environ.get("REMEDIATION_LLM_READ_TIMEOUT", "120"))
+
 
 def _runtime():
     """Lazily construct the Bedrock client (needs a region; created on first use)."""
@@ -55,7 +66,7 @@ def _runtime():
     if _client is None:
         _client = boto3.client(
             "bedrock-runtime",
-            config=BotoConfig(read_timeout=60, connect_timeout=10,
+            config=BotoConfig(read_timeout=READ_TIMEOUT, connect_timeout=10,
                               retries={"max_attempts": 2}),
         )
     return _client
@@ -176,6 +187,100 @@ def plan_edit(ctx, gradle_sources, mode="plugin"):
     plan = _validate(text, mode)
     logger.info("LLM planner plan=%s", plan)
     return plan
+
+
+_FORCE_SYSTEM = (
+    "You produce a MINIMAL search-and-replace edit that pins one Gradle dependency to "
+    "a fixed version, matching the file's existing dependency-resolution style. Reply "
+    "with ONLY a JSON object {\"old_string\": ..., \"new_string\": ...}, no markdown, "
+    "no commentary."
+)
+
+_FORCE_PROMPT = """\
+Pin the maven dependency {coordinate} so it resolves to EXACTLY {patched_version}
+in this Gradle module. It is a TRANSITIVE dependency (not declared directly), so it
+must be added to the module's dependency-resolution config.
+
+Return a minimal search-and-replace: "old_string" is a short, UNIQUE snippet copied
+verbatim from the file, and "new_string" is that same snippet with the pin added,
+matching the file's EXISTING idiom:
+- if there is a ``resolutionStrategy {{ force "g:a:v" }}`` block (or ``force("g:a:v")``,
+  or ``resolutionStrategy.force "g:a:v"``): make old_string an existing force line in
+  it and new_string that line plus one more for {coordinate}:{patched_version}, same
+  spelling/indentation;
+- if there is a ``resolutionStrategy {{ eachDependency {{ ... }} }}`` block: extend it
+  with a matching case that sets {coordinate} to {patched_version};
+- only if there is no such block: old_string = the last line of the file, new_string =
+  that line plus a minimal
+  ``allprojects {{ configurations.all {{ resolutionStrategy {{ force 'g:a:v' }} }} }}``.
+
+STRICT RULES:
+- old_string must appear EXACTLY ONCE in the file and be copied byte-for-byte.
+- new_string must contain old_string unchanged plus ONLY the addition — do not modify,
+  remove, or reformat any existing text.
+- Pin ONLY {coordinate}, and use NO version other than {patched_version}.
+
+File `{path}`:
+{gradle_source}
+"""
+
+
+def write_force_edit(ctx, path, gradle_source):
+    """LLM: return a minimal ``{old_string, new_string}`` edit that pins ``coordinate``.
+
+    Relaxes the classify-only rule for the transitive-force case: the coordinate and
+    patched version are fixed (from ``ctx``, not the model), and the caller applies the
+    replace then VERIFIES the result adds only that pin — so the model only shapes the
+    surrounding Groovy in the file's idiom. Returns the edit dict, or ``None`` on any
+    Bedrock/parse failure (caller falls back to a deterministic appended block).
+    Emitting a small snippet (not the whole file) keeps it fast and within the read
+    timeout. Logs token usage + wall-clock time for cost/latency evaluation.
+    """
+    prompt = _FORCE_PROMPT.format(
+        coordinate=ctx["coordinate"], patched_version=ctx["patched_version"],
+        path=path, gradle_source=gradle_source,
+    )
+    start = time.perf_counter()
+    try:
+        response = _runtime().invoke_model(
+            modelId=MODEL_ID,
+            body=json.dumps({
+                "anthropic_version": "bedrock-2023-05-31",
+                "max_tokens": FORCE_MAX_TOKENS,
+                "temperature": TEMPERATURE,
+                "system": _FORCE_SYSTEM,
+                "messages": [{"role": "user", "content": prompt}],
+            }),
+        )
+        payload = json.loads(response["body"].read())
+        text = "".join(
+            block.get("text", "")
+            for block in payload.get("content", [])
+            if block.get("type") == "text"
+        ).strip()
+    except Exception as e:  # noqa: BLE001 — any Bedrock/parse failure -> fall back
+        logger.warning("LLM force-edit call failed; falling back to append: %s", e)
+        return None
+
+    elapsed = time.perf_counter() - start
+    logger.info("LLM force-edit model=%s stop_reason=%s usage=%s elapsed=%.2fs",
+                MODEL_ID, payload.get("stop_reason"), payload.get("usage"), elapsed)
+    if payload.get("stop_reason") == "max_tokens":
+        logger.warning("LLM force-edit hit max_tokens (%s); output truncated, "
+                       "falling back to append.", FORCE_MAX_TOKENS)
+        return None
+
+    try:
+        edit = json.loads(_strip_fences(text))
+    except (ValueError, TypeError):
+        logger.warning("LLM force-edit returned non-JSON; falling back to append.")
+        return None
+    if not isinstance(edit, dict):
+        return None
+    old, new = edit.get("old_string"), edit.get("new_string")
+    if not (isinstance(old, str) and isinstance(new, str)) or not old or old == new:
+        return None
+    return {"old_string": old, "new_string": new}
 
 
 def _validate(text, mode="plugin"):

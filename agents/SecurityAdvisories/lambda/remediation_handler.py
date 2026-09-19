@@ -43,6 +43,7 @@ import boto3
 import requests
 import semver
 from aws_utils import get_latest_scans_index, opensearch_request
+from origin_classifier import classify_origin
 from query_utils import connection_error, error_response
 
 logger = logging.getLogger(__name__)
@@ -205,6 +206,7 @@ def handle_remediate_cve(
         'ecosystem': one['ecosystem'],
         'package': one['package'],
         'installed_version': one.get('version', ''),
+        'declaration_class': one.get('declaration_class', 'unknown'),
     }
 
     repo_owner = resolved['repo_owner']
@@ -212,6 +214,7 @@ def handle_remediate_cve(
     ecosystem = resolved['ecosystem']
     package = resolved['package']
     installed_version = resolved.get('installed_version', '')
+    declaration_class = resolved.get('declaration_class', 'unknown')
     logger.info(
         f"[{request_id}] REMEDIATE_CVE_REPO_RESOLVED: {repo_owner}/{repo_name} "
         f"ecosystem={ecosystem!r} package={package!r} "
@@ -339,6 +342,11 @@ def handle_remediate_cve(
         'package': package,
         'patched_version': patched_version,
         'installed_version': installed_version,
+        # direct / transitive / core_inherited / unknown, from the scan's origin
+        # chain. The worker uses it only as a fallback when no declaration is found:
+        # transitive -> resolutionStrategy.force; core_inherited -> manual review;
+        # direct/unknown -> unsupported.
+        'declaration_class': declaration_class,
         # We remediate main only; the worker pushes to the fork's main.
         'base_branch': SCANS_MAIN_TAG.split('/')[-1],
         # Slack thread context so the worker replies in the originating thread
@@ -476,6 +484,7 @@ _PAYLOAD_TO_ENV = {
     'package': 'PACKAGE',
     'patched_version': 'PATCHED_VERSION',
     'installed_version': 'INSTALLED_VERSION',
+    'declaration_class': 'DECLARATION_CLASS',
     'base_branch': 'BASE_BRANCH',
     'slack_channel': 'SLACK_CHANNEL',
     'slack_thread_ts': 'SLACK_THREAD_TS',
@@ -606,6 +615,11 @@ def _affected_candidates(cve_id: str, request_id: str):
                                 # patched version when an advisory lists several
                                 # affected ranges for the same package.
                                 'vulnerabilities.package.version',
+                                # dependency-resolution paths — classified into a
+                                # direct/transitive routing signal for the worker
+                                # (transitive deps need a resolutionStrategy.force,
+                                # not a declaration edit). See classify_origin.
+                                'vulnerabilities.package.origin',
                             ],
                         },
                         'query': {'bool': {
@@ -744,10 +758,22 @@ def _matched_packages(hit: Dict[str, Any]) -> List[Dict[str, str]]:
         name = _vuln_package(src)
         if name and name not in seen:
             seen.add(name)
+            ecosystem = _vuln_ecosystem(src)
+            # classify_origin encodes maven/Gradle semantics (build.gradle chains,
+            # org.opensearch groups, resolutionStrategy.force remediation), so only
+            # apply it to maven packages; others get 'unknown' (the maven worker is
+            # the sole consumer anyway).
+            declaration_class = (
+                classify_origin(_vuln_origin(src)) if ecosystem == 'maven'
+                else 'unknown'
+            )
             packages.append({
-                'ecosystem': _vuln_ecosystem(src),
+                'ecosystem': ecosystem,
                 'package': name,
                 'version': _vuln_version(src),
+                # direct / transitive / core_inherited / unknown — routes the maven
+                # worker to a declaration edit, a force pin, or manual review.
+                'declaration_class': declaration_class,
             })
     return packages
 
@@ -773,6 +799,15 @@ def _vuln_package(vuln: Dict[str, Any]) -> str:
 def _vuln_version(vuln: Dict[str, Any]) -> str:
     """Installed version of a scan vulnerability entry (the version in the repo)."""
     return (_vuln_package_obj(vuln).get('version') or '').strip()
+
+
+def _vuln_origin(vuln: Dict[str, Any]):
+    """Raw ``package.origin`` of a scan vulnerability entry (the resolution paths).
+
+    Returned as-is (list-of-paths in the rich form, or the lossy flat/scalar form
+    on release-tag scans) for ``classify_origin`` to interpret; ``None`` when absent.
+    """
+    return _vuln_package_obj(vuln).get('origin')
 
 
 # Resolved GitHub token, cached per container (None = not resolved yet, '' =
