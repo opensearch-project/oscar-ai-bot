@@ -67,8 +67,7 @@ def _build_dsl_query(
         filters.append({'terms': {'release_type.keyword': _RELEASE_BUNDLE_TYPES}})
 
     # Sort newest-first so collapse keeps the latest scan per project. Primary key
-    # is the commit time, tiebroken by scan time — matches the advisories UI and is
-    # robust to the historical backfill that wrote non-monotonic scan timestamps.
+    # is the commit time, tiebroken by scan time — matches the advisories UI.
     sort = [
         {'timestamp.commit': {'order': 'desc'}},
         {'timestamp.scan': {'order': 'desc'}},
@@ -121,11 +120,6 @@ def _execute_query(index: str, query_body: str) -> Dict[str, Any]:
     logger.info(f'DSL_QUERY: GET {path}')
     logger.info(f'DSL_QUERY: body={query_body}')
 
-    # Truncation is detected by the caller (vulnerabilities_handler), which
-    # compares the post-collapse result count to the query size. We must not
-    # warn here on hits.total > len(hits): with a collapse the total counts
-    # pre-collapse docs while the array holds collapsed groups, so that check
-    # fires on every query even when nothing was truncated.
     return opensearch_request('GET', path, body=query_body)
 
 
@@ -308,9 +302,12 @@ def query_advisories(
             _run({'filter': [aliases_clause, {'term': {'severity': 'CRITICAL'}}]},
                  batch_set)
         else:
-            # Severity-only filter (no age): a single query.
-            _run({'filter': [aliases_clause, {'terms': {'severity': list(severity)}}]},
-                 batch_set)
+            # Severity-only filter (no age). Guard the clause so an empty set
+            # falls back to aliases-only instead of matching nothing.
+            severity_only: List[Dict[str, Any]] = [aliases_clause]
+            if severity:
+                severity_only.append({'terms': {'severity': list(severity)}})
+            _run({'filter': severity_only}, batch_set)
 
     logger.info(
         f'ADVISORIES_QUERY: Found {len(matched_cve_ids)} matching CVE(s)'

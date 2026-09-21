@@ -72,9 +72,7 @@ def get_opensearch_session():
 
 # The scans rollover alias. Reads over the alias span every ``scans-NNNNNN`` index,
 # so a ``collapse`` on ``project.name`` yields each component's latest scan doc
-# regardless of which numbered index holds it. Overridable for non-standard clusters.
-# (Replaces the old ``get_latest_scans_index()``, which pinned the single newest
-# concrete index and thus saw only the components whose latest scan landed there.)
+# regardless of which numbered index holds it.
 SCANS_INDEX = os.environ.get('SCANS_INDEX', 'scans')
 
 
