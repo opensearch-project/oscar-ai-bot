@@ -678,11 +678,11 @@ def _var_name(version_token):
 def _bump_variable(work_dir, var, patched):
     """Edit ``var = '<version>'`` assignments to ``patched`` across the repo.
 
-    Searches every build.gradle + gradle.properties and edits the assignment in
-    EACH file that defines the var (a version var can be set/redefined in more
-    than one file). Returns True if any file was edited, False if the var is
-    defined but every definition is already at/above ``patched``, or None if it
-    isn't defined anywhere in the repo.
+    Searches every build.gradle + gradle.properties and edits EVERY assignment of
+    the var — a version var can be set in more than one file AND more than once
+    within a file (e.g. redeclared per configuration). Returns True if any
+    assignment was edited, False if the var is defined but every occurrence is
+    already at/above ``patched``, or None if it isn't defined anywhere in the repo.
     """
     assign = re.compile(
         r'''(\b''' + re.escape(var) + r'''\s*=\s*)(["']?)([^"'\s]+)(["']?)''')
@@ -690,18 +690,23 @@ def _bump_variable(work_dir, var, patched):
     edited = False
     for path in _find_files(work_dir, *_GRADLE_GLOBS):
         content = _read(path)
-        m = assign.search(content)
-        if not m:
+        # Collect all assignments in this file; apply in reverse so earlier edits
+        # don't shift later spans. A var assigned several times is fully bumped.
+        edits = []
+        for m in assign.finditer(content):
+            found = True
+            current = m.group(3)
+            if at_or_above(current, patched):
+                continue
+            edits.append((m.start(), m.end(),
+                          f"{m.group(1)}{m.group(2)}{patched}{m.group(4)}"))
+        if not edits:
             continue
-        found = True
-        current = m.group(3)
-        if at_or_above(current, patched):
-            continue
-        new_content = content[:m.start()] + \
-            f"{m.group(1)}{m.group(2)}{patched}{m.group(4)}" + content[m.end():]
-        _write(path, new_content)
-        logger.info("Bumped %s: %s -> %s in %s", var, current, patched,
-                    os.path.relpath(path, work_dir))
+        for start, end, replacement in sorted(edits, reverse=True):
+            content = content[:start] + replacement + content[end:]
+        _write(path, content)
+        logger.info("Bumped %s -> %s (%d occurrence(s)) in %s", var, patched,
+                    len(edits), os.path.relpath(path, work_dir))
         edited = True
     if not found:
         return None
@@ -731,14 +736,14 @@ def _bump_versions_map(work_dir, key, patched):
     Handles the forms OpenSearch submodules use to set ``versions.<key>`` in-repo:
     a map-literal entry (``'key': '1.2.3'`` inside ``versions << [ ... ]``), a
     ``versions.key = '1.2.3'`` assignment, or ``versions['key'] = '1.2.3'``. Edits
-    each defining file. Returns True if any was edited, False if all definitions are
+    EVERY matching entry across all files (a key can be set more than once, in more
+    than one file). Returns True if any was edited, False if all definitions are
     already at/above ``patched``, or None if ``key`` isn't set by any in-repo map
     (so it's inherited from core — out of scope).
     """
     k = re.escape(key)
-    # Each pattern: (regex, index of the (quote, version, quote) triple's start).
-    # The version literal is captured so we can swap it and keep the surrounding
-    # syntax (quotes / separator) untouched.
+    # Each pattern captures the (quote, version, quote) triple so we can swap the
+    # version literal and keep the surrounding syntax (quotes / separator) untouched.
     patterns = (
         re.compile(r'''(["']''' + k + r'''["']\s*:\s*)(["'])([^"']+)(["'])'''),   # map entry
         re.compile(r'''(\bversions\.''' + k + r'''\s*=\s*)(["'])([^"']+)(["'])'''),  # versions.key =
@@ -748,23 +753,24 @@ def _bump_versions_map(work_dir, key, patched):
     edited = False
     for path in _find_files(work_dir, "**/build.gradle"):
         content = _read(path)
-        changed = False
+        # Collect every match of every pattern, then apply in reverse so earlier
+        # edits don't shift later spans (the syntaxes don't overlap, so no dup spans).
+        edits = []
         for pat in patterns:
-            m = pat.search(content)
-            if not m:
-                continue
-            found = True
-            if at_or_above(m.group(3), patched):
-                continue
-            content = (content[:m.start()]
-                       + f"{m.group(1)}{m.group(2)}{patched}{m.group(4)}"
-                       + content[m.end():])
-            logger.info("Bumped versions.%s: %s -> %s in %s", key, m.group(3),
-                        patched, os.path.relpath(path, work_dir))
-            changed = True
-        if changed:
-            _write(path, content)
-            edited = True
+            for m in pat.finditer(content):
+                found = True
+                if at_or_above(m.group(3), patched):
+                    continue
+                edits.append((m.start(), m.end(),
+                              f"{m.group(1)}{m.group(2)}{patched}{m.group(4)}"))
+        if not edits:
+            continue
+        for start, end, replacement in sorted(edits, reverse=True):
+            content = content[:start] + replacement + content[end:]
+        _write(path, content)
+        logger.info("Bumped versions.%s -> %s (%d occurrence(s)) in %s", key, patched,
+                    len(edits), os.path.relpath(path, work_dir))
+        edited = True
     if not found:
         return None
     return edited

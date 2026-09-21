@@ -466,6 +466,33 @@ class TestApplyFix:
         assert 'log4j_version=2.25.4' in _read(tmp_path, 'gradle.properties')
         assert "log4j_version = '2.25.4'" in _read(sub)
 
+    def test_variable_assigned_twice_in_one_file_all_edited(self, tmp_path):
+        # Review: a var set more than once in the SAME file must be bumped at every
+        # occurrence, not just the first.
+        maven, _ = _load_maven()
+        _gradle(tmp_path,
+                "ext { log4j_version = '2.20.0' }\n"
+                "subprojects { ext { log4j_version = '2.20.0' } }\n"
+                'dependencies {\n'
+                '  force "org.apache.logging.log4j:log4j-core:${log4j_version}"\n}\n')
+        maven.apply_fix(str(tmp_path), _ctx(maven))
+        text = _read(tmp_path)
+        assert text.count("log4j_version = '2.25.4'") == 2   # both assignments bumped
+        assert "2.20.0" not in text
+
+    def test_versions_map_key_defined_twice_in_one_file_all_edited(self, tmp_path):
+        # Same multi-occurrence fix for the module-local `versions` map form.
+        maven, _ = _load_maven()
+        _gradle(tmp_path,
+                "versions << ['log4j': '2.20.0']\n"
+                "subprojects { versions << ['log4j': '2.20.0'] }\n"
+                'dependencies {\n'
+                '  force "org.apache.logging.log4j:log4j-core:${versions.log4j}"\n}\n')
+        maven.apply_fix(str(tmp_path), _ctx(maven))
+        text = _read(tmp_path)
+        assert text.count("'log4j': '2.25.4'") == 2   # both map entries bumped
+        assert "2.20.0" not in text
+
     def test_already_patched_literal_but_corevar_still_unsupported(self, tmp_path):
         # Review #3: one declaration already-patched must NOT mask an unevaluated
         # core-inherited declaration as no_change — surface it for review.
