@@ -28,7 +28,7 @@ def _load_dsl_query_builder():
         sys.path.insert(0, _LAMBDA_PATH)
 
     mock_aws_utils = MagicMock()
-    mock_aws_utils.get_latest_scans_index.return_value = 'scans-000164'
+    mock_aws_utils.SCANS_INDEX = 'scans'
     mock_aws_utils.opensearch_request.return_value = {'hits': {'hits': []}}
 
     mock_config_module = MagicMock()

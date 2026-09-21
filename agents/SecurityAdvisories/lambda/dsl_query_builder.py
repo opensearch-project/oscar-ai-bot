@@ -19,7 +19,7 @@ import logging
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional, Set, Tuple
 
-from aws_utils import get_latest_scans_index, opensearch_request
+from aws_utils import SCANS_INDEX, opensearch_request
 from query_utils import connection_error, error_response, resolve_version_tag
 
 logger = logging.getLogger(__name__)
@@ -66,9 +66,13 @@ def _build_dsl_query(
         # for exact matching against the two release-bundle values.
         filters.append({'terms': {'release_type.keyword': _RELEASE_BUNDLE_TYPES}})
 
-    # Sort by scan timestamp descending so the newest scan per project
-    # appears first when combined with collapse.
-    sort = [{'timestamp.scan': {'order': 'desc'}}]
+    # Sort newest-first so collapse keeps the latest scan per project. Primary key
+    # is the commit time, tiebroken by scan time — matches the advisories UI and is
+    # robust to the historical backfill that wrote non-monotonic scan timestamps.
+    sort = [
+        {'timestamp.commit': {'order': 'desc'}},
+        {'timestamp.scan': {'order': 'desc'}},
+    ]
 
     # Collapse on project.name to return only the most recent scan
     # document per project. Combined with the descending sort, this
@@ -154,15 +158,9 @@ def query_vulnerabilities(
         On success: The standard OpenSearch response envelope {"hits": {"hits": [...]}}.
         On error: {"status": "error", "retryable": False, "message": "...", ...}
     """
-    # Resolve the target index
-    try:
-        index = get_latest_scans_index()
-    except RuntimeError as e:
-        logger.error(
-            f'SECURITY_ADVISORIES_DSL_QUERY_FAILED: '
-            f'Could not resolve scans index: {e}',
-        )
-        return error_response('index_resolution_error', 'Failed to resolve scans index.')
+    # Read from the scans rollover alias (spans all scans-NNNNNN); collapse then
+    # yields each component's latest doc across the whole history.
+    index = SCANS_INDEX
 
     # Resolve version tag:
     # - version provided → resolve to canonical tag format
@@ -242,8 +240,9 @@ def query_advisories(
          the provided CVE IDs. This is more resilient than matching on ``id``
          because advisory re-keying can change the ``id`` while ``aliases``
          retains all known identifiers.
-      2. Optionally filters to those with ``timestamp.publish`` older than the
-         cutoff date (when ``age_days`` is provided).
+      2. When ``age_days`` is provided, filters to advisories published at/before
+         the cutoff — EXCEPT ``CRITICAL``, which is always returned regardless of
+         recency (matches the advisories UI's neglected view).
       3. Optionally filters by severity level(s) (when ``severity`` is provided).
 
     At least one of ``age_days`` or ``severity`` must be specified for this
@@ -277,49 +276,51 @@ def query_advisories(
     matched_cve_ids: Set[str] = set()
     is_partial = False
 
-    # Batch the terms query to avoid hitting OpenSearch limits
+    def _run(bool_query: Dict[str, Any], batch_set: Set[str]) -> None:
+        """Execute one advisories bool query; add matching aliases to the result set."""
+        nonlocal is_partial
+        body = json.dumps({
+            'size': len(batch_set),
+            '_source': ['aliases'],
+            'query': {'bool': bool_query},
+        })
+        try:
+            result = _execute_query(_ADVISORIES_INDEX, body)
+        except Exception as e:
+            logger.error(f'SECURITY_ADVISORIES_ADVISORIES_QUERY_FAILED: {e}')
+            is_partial = True  # partial results; caller warns the user
+            return
+        for hit in result.get('hits', {}).get('hits', []):
+            for alias in hit.get('_source', {}).get('aliases', []):
+                if alias in batch_set:
+                    matched_cve_ids.add(alias)
+
+    # Batch the terms query to avoid hitting OpenSearch limits.
     for i in range(0, len(unique_ids), _ADVISORIES_BATCH_SIZE):
         batch = unique_ids[i:i + _ADVISORIES_BATCH_SIZE]
         batch_set = set(batch)
-
-        filter_clauses: List[Dict[str, Any]] = [
-            {'terms': {'aliases': batch}},
-        ]
+        aliases_clause = {'terms': {'aliases': batch}}
 
         if cutoff_iso:
-            filter_clauses.append({'range': {'timestamp.publish': {'lte': cutoff_iso}}})
-
-        if severity:
-            filter_clauses.append({'terms': {'severity': list(severity)}})
-
-        query_body = json.dumps({
-            'size': len(batch),
-            '_source': ['aliases'],
-            'query': {
-                'bool': {
-                    'filter': filter_clauses,
-                },
-            },
-        })
-
-        try:
-            result = _execute_query(_ADVISORIES_INDEX, query_body)
-        except Exception as e:
-            error_msg = str(e)
-            logger.error(
-                f'SECURITY_ADVISORIES_ADVISORIES_QUERY_FAILED: {error_msg}',
-            )
-            # Mark results as partial and continue with remaining batches
-            is_partial = True
-            continue
-
-        hits = result.get('hits', {}).get('hits', [])
-
-        for hit in hits:
-            aliases = hit.get('_source', {}).get('aliases', [])
-            for alias in aliases:
-                if alias in batch_set:
-                    matched_cve_ids.add(alias)
+            # Age filtering, matching the advisories UI's neglected view: CRITICAL is
+            # returned regardless of recency, everything else must clear the age
+            # cutoff. Two queries, unioned:
+            #   1. non-CRITICAL advisories published at/before the cutoff, and
+            #   2. CRITICAL advisories with NO age filter (always included).
+            non_critical: List[Dict[str, Any]] = [
+                aliases_clause,
+                {'range': {'timestamp.publish': {'lte': cutoff_iso}}},
+            ]
+            if severity:
+                non_critical.append({'terms': {'severity': list(severity)}})
+            _run({'filter': non_critical,
+                  'must_not': [{'term': {'severity': 'CRITICAL'}}]}, batch_set)
+            _run({'filter': [aliases_clause, {'term': {'severity': 'CRITICAL'}}]},
+                 batch_set)
+        else:
+            # Severity-only filter (no age): a single query.
+            _run({'filter': [aliases_clause, {'terms': {'severity': list(severity)}}]},
+                 batch_set)
 
     logger.info(
         f'ADVISORIES_QUERY: Found {len(matched_cve_ids)} matching CVE(s)'

@@ -82,7 +82,7 @@ def _make_mock_aws(hits=None):
     if hits is None:
         hits = [_scans_hit()]
     m = MagicMock()
-    m.get_latest_scans_index.return_value = 'scans-000181'
+    m.SCANS_INDEX = 'scans'
     m.opensearch_request.return_value = _scans_response(hits)
     return m
 
