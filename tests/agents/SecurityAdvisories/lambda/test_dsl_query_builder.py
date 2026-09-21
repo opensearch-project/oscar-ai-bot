@@ -23,14 +23,14 @@ _LAMBDA_PATH = os.path.join(
 
 
 def _load_dsl_query_builder(
-    mock_get_latest_scans_index=None,
+    scans_index='scans',
     mock_opensearch_request=None,
     opensearch_query_size=100,
 ):
     """Import dsl_query_builder from security_advisories lambda with mocked deps.
 
     Args:
-        mock_get_latest_scans_index: Mock or side_effect for get_latest_scans_index.
+        scans_index: Value bound as ``aws_utils.SCANS_INDEX`` (the scans alias).
         mock_opensearch_request: Mock or side_effect for opensearch_request.
         opensearch_query_size: Config value for query size.
 
@@ -41,13 +41,7 @@ def _load_dsl_query_builder(
         sys.path.insert(0, _LAMBDA_PATH)
 
     mock_aws_utils = MagicMock()
-    if mock_get_latest_scans_index is not None:
-        if isinstance(mock_get_latest_scans_index, Exception):
-            mock_aws_utils.get_latest_scans_index.side_effect = mock_get_latest_scans_index
-        else:
-            mock_aws_utils.get_latest_scans_index.return_value = mock_get_latest_scans_index
-    else:
-        mock_aws_utils.get_latest_scans_index.return_value = 'scans-000164'
+    mock_aws_utils.SCANS_INDEX = scans_index
 
     if mock_opensearch_request is not None:
         if isinstance(mock_opensearch_request, Exception):
@@ -71,43 +65,6 @@ def _load_dsl_query_builder(
         spec.loader.exec_module(mod)
 
     return mod, mock_aws_utils
-
-
-# ---------------------------------------------------------------------------
-# Test: get_latest_scans_index() RuntimeError → index_resolution_error
-# ---------------------------------------------------------------------------
-
-
-class TestIndexResolutionError:
-    """Test that RuntimeError from get_latest_scans_index produces error response."""
-
-    def test_runtime_error_returns_index_resolution_error(self):
-        """Validates: Requirement 1.7"""
-        mod, _ = _load_dsl_query_builder(
-            mock_get_latest_scans_index=RuntimeError('No scans indices found'),
-        )
-
-        result = mod.query_vulnerabilities(version='3.7', project_name='OpenSearch')
-
-        assert result['status'] == 'error'
-        assert result['type'] == 'index_resolution_error'
-        assert result['retryable'] is False
-        assert result['message'] == 'Failed to resolve scans index.'
-
-    def test_runtime_error_with_custom_message(self):
-        """Validates: Requirement 1.7"""
-        mod, _ = _load_dsl_query_builder(
-            mock_get_latest_scans_index=RuntimeError(
-                'Failed to resolve latest scans index: timeout',
-            ),
-        )
-
-        result = mod.query_vulnerabilities()
-
-        assert result['status'] == 'error'
-        assert result['type'] == 'index_resolution_error'
-        assert result['retryable'] is False
-        assert result['message'] == 'Failed to resolve scans index.'
 
 
 # ---------------------------------------------------------------------------
@@ -321,7 +278,7 @@ class TestDSLQueryStructure:
         """Validates: Requirement 1.4"""
         mock_response = {'hits': {'hits': []}}
         mod, mock_aws = _load_dsl_query_builder(
-            mock_get_latest_scans_index='scans-000200',
+            scans_index='scans',
             mock_opensearch_request=mock_response,
         )
 
@@ -329,7 +286,7 @@ class TestDSLQueryStructure:
 
         call_args = mock_aws.opensearch_request.call_args
         path = call_args[0][1]
-        assert path == '/scans-000200/_search'
+        assert path == '/scans/_search'
 
     def test_query_includes_size_field(self):
         """Validates: Requirement 1.4"""
@@ -349,7 +306,7 @@ class TestDSLQueryStructure:
         assert body['size'] == 1000
 
     def test_query_includes_sort_by_timestamp_desc(self):
-        """Validates: sort by timestamp.scan descending for collapse."""
+        """Validates: sort by [commit desc, scan desc] to pick latest per collapse."""
         mock_response = {'hits': {'hits': []}}
         mod, mock_aws = _load_dsl_query_builder(
             mock_opensearch_request=mock_response,
@@ -362,7 +319,10 @@ class TestDSLQueryStructure:
         body = json.loads(body_str)
 
         assert 'sort' in body
-        assert body['sort'] == [{'timestamp.scan': {'order': 'desc'}}]
+        assert body['sort'] == [
+            {'timestamp.commit': {'order': 'desc'}},
+            {'timestamp.scan': {'order': 'desc'}},
+        ]
 
     def test_query_includes_collapse_on_project_name(self):
         """Validates: collapse on project.name for deduplication at query level."""
@@ -392,7 +352,10 @@ class TestDSLQueryStructure:
         body = mod._build_dsl_query(resolved_tag=None, project_name=None)
 
         assert 'sort' in body
-        assert body['sort'] == [{'timestamp.scan': {'order': 'desc'}}]
+        assert body['sort'] == [
+            {'timestamp.commit': {'order': 'desc'}},
+            {'timestamp.scan': {'order': 'desc'}},
+        ]
         assert 'collapse' in body
         assert body['collapse'] == {'field': 'project.name'}
 
@@ -796,8 +759,9 @@ class TestQueryAdvisoriesAliasesExtraction:
 
         assert result == {'CVE-2024-0001'}
         assert is_partial is False
-        # Only one query should be made (1 unique ID, fits in one batch)
-        assert mock_aws.opensearch_request.call_count == 1
+        # One batch (1 unique ID), but age filtering issues two queries: the
+        # non-critical/age-filtered one and the critical/no-age one.
+        assert mock_aws.opensearch_request.call_count == 2
 
 
 class TestQueryAdvisoriesBatchFailure:
@@ -853,10 +817,13 @@ class TestQueryAdvisoriesBatchFailure:
                 age_days=30,
             )
 
-            # One batch failed, one succeeded — result should have exactly 1 match
-            assert len(result) == 1
-            # is_partial because first batch failed
+            # Age filtering issues 2 queries per batch (non-critical + critical); with
+            # 2 batches that's 4 calls, and only the first fails. The other three
+            # succeed, so each batch still contributes its match and is_partial flags
+            # the failure. (Which specific CVE ids land is nondeterministic — batching
+            # is over set(cve_ids) — so assert the count, not particular ids.)
             assert is_partial is True
+            assert len(result) == 2            # one match from each batch
         finally:
             mod._execute_query = original_execute
 
@@ -899,24 +866,36 @@ class TestQueryAdvisoriesBatchFailure:
 class TestQueryAdvisoriesQueryConstruction:
     """Test that the DSL query body is constructed correctly."""
 
-    def test_age_filter_produces_range_clause(self):
-        """When age_days is provided, a range filter on timestamp.publish is added."""
+    @staticmethod
+    def _bodies(mock_aws):
+        return [
+            json.loads(c[0][2] if len(c[0]) > 2 else c[1].get('body'))
+            for c in mock_aws.opensearch_request.call_args_list
+        ]
+
+    def test_age_filter_splits_into_non_critical_and_critical_queries(self):
+        """Age filtering issues two queries: non-critical (age-filtered, CRITICAL
+        excluded) and critical (no age filter — always returned)."""
         mock_response = {'hits': {'hits': []}}
         mod, mock_aws = _load_dsl_query_builder(mock_opensearch_request=mock_response)
 
         mod.query_advisories(cve_ids=['CVE-2024-0001'], age_days=30)
 
-        call_args = mock_aws.opensearch_request.call_args
-        body_str = call_args[0][2] if len(call_args[0]) > 2 else call_args[1].get('body')
-        body = json.loads(body_str)
+        bodies = self._bodies(mock_aws)
+        assert len(bodies) == 2
 
-        filter_clauses = body['query']['bool']['filter']
-        # Should have terms (aliases) + range (timestamp.publish)
-        assert len(filter_clauses) == 2
-        assert filter_clauses[0] == {'terms': {'aliases': ['CVE-2024-0001']}}
-        assert 'range' in filter_clauses[1]
-        assert 'timestamp.publish' in filter_clauses[1]['range']
-        assert 'lte' in filter_clauses[1]['range']['timestamp.publish']
+        # Non-critical query: aliases + range on timestamp.publish, CRITICAL excluded.
+        non_crit = next(b for b in bodies if b['query']['bool'].get('must_not'))
+        filt = non_crit['query']['bool']['filter']
+        assert {'terms': {'aliases': ['CVE-2024-0001']}} in filt
+        assert any('lte' in c.get('range', {}).get('timestamp.publish', {}) for c in filt)
+        assert non_crit['query']['bool']['must_not'] == [{'term': {'severity': 'CRITICAL'}}]
+
+        # Critical query: severity=CRITICAL and NO range (age bypassed).
+        crit = next(b for b in bodies if not b['query']['bool'].get('must_not'))
+        cfilt = crit['query']['bool']['filter']
+        assert {'term': {'severity': 'CRITICAL'}} in cfilt
+        assert all('range' not in c for c in cfilt)
 
     def test_severity_filter_produces_terms_clause(self):
         """When severity is provided, a terms filter on severity is added."""
@@ -940,8 +919,9 @@ class TestQueryAdvisoriesQueryConstruction:
         assert 'severity' in severity_clause['terms']
         assert set(severity_clause['terms']['severity']) == {'HIGH', 'CRITICAL'}
 
-    def test_both_age_and_severity_produces_three_clauses(self):
-        """When both age_days and severity are provided, three filter clauses are produced."""
+    def test_both_age_and_severity_splits_queries(self):
+        """age_days + severity: the non-critical query carries aliases + range +
+        severity (and excludes CRITICAL); the critical query is severity-only, no age."""
         mock_response = {'hits': {'hits': []}}
         mod, mock_aws = _load_dsl_query_builder(mock_opensearch_request=mock_response)
 
@@ -951,17 +931,18 @@ class TestQueryAdvisoriesQueryConstruction:
             severity={'HIGH'},
         )
 
-        call_args = mock_aws.opensearch_request.call_args
-        body_str = call_args[0][2] if len(call_args[0]) > 2 else call_args[1].get('body')
-        body = json.loads(body_str)
+        bodies = self._bodies(mock_aws)
+        assert len(bodies) == 2
 
-        filter_clauses = body['query']['bool']['filter']
-        assert len(filter_clauses) == 3
-        # aliases terms, range, severity terms
-        assert filter_clauses[0] == {'terms': {'aliases': ['CVE-2024-0001']}}
-        assert 'range' in filter_clauses[1]
-        assert 'terms' in filter_clauses[2]
-        assert 'severity' in filter_clauses[2]['terms']
+        non_crit = next(b for b in bodies if b['query']['bool'].get('must_not'))
+        filt = non_crit['query']['bool']['filter']
+        assert {'terms': {'aliases': ['CVE-2024-0001']}} in filt
+        assert any('range' in c for c in filt)
+        assert any(c.get('terms', {}).get('severity') == ['HIGH'] for c in filt)
+        assert non_crit['query']['bool']['must_not'] == [{'term': {'severity': 'CRITICAL'}}]
+
+        crit = next(b for b in bodies if not b['query']['bool'].get('must_not'))
+        assert {'term': {'severity': 'CRITICAL'}} in crit['query']['bool']['filter']
 
     def test_query_targets_advisories_index(self):
         """The query should target the 'advisories' index."""

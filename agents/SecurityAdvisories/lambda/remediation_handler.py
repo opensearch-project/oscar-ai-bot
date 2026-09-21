@@ -42,7 +42,7 @@ from typing import Any, Dict, List, Optional
 import boto3
 import requests
 import semver
-from aws_utils import get_latest_scans_index, opensearch_request
+from aws_utils import SCANS_INDEX, opensearch_request
 from origin_classifier import classify_origin
 from query_utils import connection_error, error_response
 
@@ -640,7 +640,7 @@ def _affected_candidates(cve_id: str, request_id: str):
     })
 
     response = opensearch_request(
-        'POST', f'/{get_latest_scans_index()}/_search', body,
+        'POST', f'/{SCANS_INDEX}/_search', body,
     )
     hits = response.get('hits', {}).get('hits', [])
 
