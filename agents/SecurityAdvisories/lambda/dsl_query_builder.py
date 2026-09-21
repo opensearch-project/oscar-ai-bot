@@ -121,22 +121,12 @@ def _execute_query(index: str, query_body: str) -> Dict[str, Any]:
     logger.info(f'DSL_QUERY: GET {path}')
     logger.info(f'DSL_QUERY: body={query_body}')
 
-    result = opensearch_request('GET', path, body=query_body)
-
-    # Log truncation warning when total hits exceed the returned count
-    hits = result.get('hits', {}) if isinstance(result, dict) else {}
-    if not isinstance(hits, dict):
-        hits = {}
-    total_hits = hits.get('total', {}).get('value', 0)
-    returned_count = len(hits.get('hits', []))
-    if total_hits > returned_count:
-        logger.warning(
-            f'DSL_QUERY: results truncated — '
-            f'returned {returned_count} of {total_hits} total hits '
-            f'(size limit: {_DEFAULT_QUERY_SIZE})',
-        )
-
-    return result
+    # Truncation is detected by the caller (vulnerabilities_handler), which
+    # compares the post-collapse result count to the query size. We must not
+    # warn here on hits.total > len(hits): with a collapse the total counts
+    # pre-collapse docs while the array holds collapsed groups, so that check
+    # fires on every query even when nothing was truncated.
+    return opensearch_request('GET', path, body=query_body)
 
 
 def query_vulnerabilities(
