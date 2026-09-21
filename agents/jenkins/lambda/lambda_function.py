@@ -54,9 +54,37 @@ def lambda_handler(event: Dict[str, Any], context) -> Dict[str, Any]:
             if isinstance(param, dict) and 'name' in param and 'value' in param:
                 params[param['name']] = param['value']
 
+        # Determine access tier from session attributes (default: limited)
+        session_attrs = event.get('sessionAttributes', {}) or {}
+        access_tier = session_attrs.get('access_tier', 'limited')
+
+        # Select Jenkins token based on access tier
+        try:
+            jenkins_token = config.get_token_for_access_tier(access_tier)
+        except PermissionError as e:
+            logger.warning(f"ACCESS_DENIED: access_tier={access_tier} function={function_name} reason={e}")
+            return create_response(event, {
+                'status': 'error',
+                'message': str(e),
+            })
+
+        logger.info(f"ACCESS: access_tier={access_tier} function={function_name}")
+
+        # Code-level enforcement: block disallowed functions per access tier
+        RESTRICTED_FUNCTIONS = {
+            'limited': ['trigger_job'],
+        }
+        blocked = RESTRICTED_FUNCTIONS.get(access_tier, [])
+        if function_name in blocked:
+            logger.warning(f"ACCESS_DENIED: access_tier={access_tier} attempted {function_name}")
+            return create_response(event, {
+                'status': 'error',
+                'message': 'Job triggering requires elevated access. You have read-only permissions. Contact an admin for execution privileges.',
+            })
+
         # Initialize Jenkins client with fetched job registry
         job_registry = get_job_registry()
-        jenkins_client = JenkinsClient(job_registry)
+        jenkins_client = JenkinsClient(job_registry, jenkins_token)
 
         # Route to appropriate handler
         match function_name:
