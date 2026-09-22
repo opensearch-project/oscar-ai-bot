@@ -24,6 +24,7 @@ Both OpenSearch (scans) and GitHub network calls are mocked — no live HTTP.
 """
 
 import importlib.util
+import json
 import os
 from unittest.mock import MagicMock, patch
 
@@ -83,6 +84,7 @@ def _make_mock_aws(hits=None):
         hits = [_scans_hit()]
     m = MagicMock()
     m.SCANS_INDEX = 'scans'
+    m.SCANS_RECENCY_WINDOW = 'now-7d'
     m.opensearch_request.return_value = _scans_response(hits)
     return m
 
@@ -286,6 +288,13 @@ class TestListAffectedRepositories:
         assert 'bundle_opensearch' in body
         assert 'bundle_opensearch_dashboards' in body
         assert 'origin/main' in body
+
+    def test_query_bounded_by_scan_recency(self):
+        mod, mock_aws = _load_remediation_handler()
+        mod.handle_list_affected_repositories({'cve_id': 'CVE-2023-45857'}, 'la4b')
+        _method, _path, body = mock_aws.opensearch_request.call_args[0]
+        filters = json.loads(body)['query']['bool']['filter']
+        assert {'range': {'timestamp.scan': {'gte': 'now-7d'}}} in filters
 
     def test_does_no_github_calls(self):
         mod, _ = _load_remediation_handler()
