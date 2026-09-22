@@ -16,11 +16,10 @@ Functions:
 
 import json
 import logging
-import os
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional, Set, Tuple
 
-from aws_utils import SCANS_INDEX, opensearch_request
+from aws_utils import SCANS_INDEX, SCANS_RECENCY_WINDOW, opensearch_request
 from query_utils import connection_error, error_response, resolve_version_tag
 
 logger = logging.getLogger(__name__)
@@ -33,9 +32,6 @@ _DEFAULT_QUERY_SIZE = 1000
 # query to these returns only the OpenSearch and OpenSearch-Dashboards release
 # bundles, excluding non-bundle components (build tooling, out-of-bundle repos).
 _RELEASE_BUNDLE_TYPES = ['bundle_opensearch', 'bundle_opensearch_dashboards']
-
-# Recency floor on ``timestamp.scan``.
-_SCAN_RECENCY_WINDOW = os.environ.get('SCANS_RECENCY_WINDOW', 'now-7d')
 
 
 def _build_dsl_query(
@@ -71,7 +67,7 @@ def _build_dsl_query(
         filters.append({'terms': {'release_type.keyword': _RELEASE_BUNDLE_TYPES}})
 
     # Always bound by scan recency so can_match can skip older indices.
-    filters.append({'range': {'timestamp.scan': {'gte': _SCAN_RECENCY_WINDOW}}})
+    filters.append({'range': {'timestamp.scan': {'gte': SCANS_RECENCY_WINDOW}}})
 
     # Sort newest-first so collapse keeps the latest scan per project. Primary key
     # is the commit time, tiebroken by scan time — matches the advisories UI.

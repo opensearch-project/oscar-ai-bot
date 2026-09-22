@@ -75,6 +75,9 @@ def get_opensearch_session():
 # regardless of which numbered index holds it.
 SCANS_INDEX = os.environ.get('SCANS_INDEX', 'scans')
 
+# Recency floor on ``timestamp.scan``.
+SCANS_RECENCY_WINDOW = os.environ.get('SCANS_RECENCY_WINDOW', 'now-7d')
+
 
 def opensearch_request(method, path, body=None):
     """Make SigV4-signed HTTP request to OpenSearch.

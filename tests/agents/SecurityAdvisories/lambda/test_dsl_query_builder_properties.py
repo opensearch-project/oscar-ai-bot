@@ -29,6 +29,7 @@ def _load_dsl_query_builder():
 
     mock_aws_utils = MagicMock()
     mock_aws_utils.SCANS_INDEX = 'scans'
+    mock_aws_utils.SCANS_RECENCY_WINDOW = 'now-7d'
     mock_aws_utils.opensearch_request.return_value = {'hits': {'hits': []}}
 
     mock_config_module = MagicMock()

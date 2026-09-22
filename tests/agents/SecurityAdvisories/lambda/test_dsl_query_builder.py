@@ -41,6 +41,7 @@ def _load_dsl_query_builder(
 
     mock_aws_utils = MagicMock()
     mock_aws_utils.SCANS_INDEX = scans_index
+    mock_aws_utils.SCANS_RECENCY_WINDOW = 'now-7d'
 
     if mock_opensearch_request is not None:
         if isinstance(mock_opensearch_request, Exception):
