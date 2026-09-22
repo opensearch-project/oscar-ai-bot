@@ -11,6 +11,8 @@ tested with the npm suite.
 """
 
 import importlib.util
+import io
+import json
 import os
 from unittest.mock import patch
 
@@ -31,9 +33,10 @@ _llm_spec = importlib.util.spec_from_file_location(
 llm_planner = importlib.util.module_from_spec(_llm_spec)
 _llm_spec.loader.exec_module(llm_planner)
 
-# The real plan_edit, captured before the autouse fixture patches it out — lets a
-# test drive the actual Bedrock parse path with only the client mocked.
+# The real plan_edit / write_force_edit, captured before the autouse fixture patches
+# them out — lets a test drive the actual Bedrock parse path with only the client mocked.
 _ORIG_PLAN_EDIT = llm_planner.plan_edit
+_ORIG_WRITE_FORCE_EDIT = llm_planner.write_force_edit
 
 
 @pytest.fixture(autouse=True)
@@ -875,3 +878,157 @@ class TestMavenPlannerValidate:
     def test_catalog_action_missing_target_returns_none(self):
         assert llm_planner._validate(
             '{"action":"catalog","target":""}', mode='catalog') is None
+
+
+# ---------------------------------------------------------------------------
+# llm_planner internals — direct coverage for write_force_edit, the plan_edit
+# Bedrock-failure path, the _validate non-dict edge, _strip_fences, and _runtime.
+# These call the captured originals (the autouse fixture patches the module attrs).
+# ---------------------------------------------------------------------------
+
+
+def _fake_bedrock(payload=None, raise_exc=None):
+    """Stand-in Bedrock client: invoke_model returns *payload* wrapped like the real
+    API body, or raises *raise_exc*."""
+    def invoke_model(self, **kw):
+        if raise_exc is not None:
+            raise raise_exc
+        return {'body': io.BytesIO(json.dumps(payload).encode())}
+    return type('FakeBedrock', (), {'invoke_model': invoke_model})()
+
+
+def _text_payload(text, stop_reason='end_turn'):
+    return {'stop_reason': stop_reason, 'usage': {},
+            'content': [{'type': 'text', 'text': text}]}
+
+
+class TestWriteForceEdit:
+    """write_force_edit relaxes classify-only for the transitive pin: it must return a
+    usable {old_string,new_string} on clean output and None on every failure mode, so
+    the caller falls back to the deterministic appended block."""
+
+    _CTX = {'coordinate': 'org.jsoup:jsoup', 'patched_version': '1.23.1'}
+
+    def _run(self, payload=None, raise_exc=None, caplog=None):
+        with patch.object(llm_planner, '_runtime',
+                          return_value=_fake_bedrock(payload, raise_exc)):
+            return _ORIG_WRITE_FORCE_EDIT(self._CTX, 'build.gradle', 'force "a:b:1.0"')
+
+    def test_valid_edit_returned(self):
+        edit = {'old_string': 'force "a:b:1.0"',
+                'new_string': 'force "a:b:1.0"\n  force "org.jsoup:jsoup:1.23.1"'}
+        assert self._run(_text_payload(json.dumps(edit))) == edit
+
+    def test_bedrock_error_returns_none(self):
+        assert self._run(raise_exc=RuntimeError('boom')) is None
+
+    def test_max_tokens_returns_none_and_warns(self, caplog):
+        edit = json.dumps({'old_string': 'a', 'new_string': 'ab'})
+        with caplog.at_level('WARNING'):
+            assert self._run(_text_payload(edit, stop_reason='max_tokens')) is None
+        assert any('max_tokens' in r.message for r in caplog.records)
+
+    def test_non_json_returns_none(self):
+        assert self._run(_text_payload('not json at all')) is None
+
+    def test_non_dict_json_returns_none(self):
+        assert self._run(_text_payload('[1, 2, 3]')) is None
+
+    def test_old_equals_new_returns_none(self):
+        assert self._run(_text_payload(
+            json.dumps({'old_string': 'same', 'new_string': 'same'}))) is None
+
+    def test_empty_old_string_returns_none(self):
+        assert self._run(_text_payload(
+            json.dumps({'old_string': '', 'new_string': 'x'}))) is None
+
+    def test_non_string_fields_return_none(self):
+        assert self._run(_text_payload(
+            json.dumps({'old_string': 1, 'new_string': 2}))) is None
+
+    def test_fenced_json_is_stripped(self):
+        edit = {'old_string': 'a', 'new_string': 'ab'}
+        text = '```json\n' + json.dumps(edit) + '\n```'
+        assert self._run(_text_payload(text)) == edit
+
+
+class TestPlanEditBedrockFailure:
+    """plan_edit swallows any Bedrock/parse error and returns None (scanner fallback)."""
+
+    def test_bedrock_error_returns_none(self):
+        ctx = {'coordinate': 'g:a', 'patched_version': '2.0', 'installed_version': '1.0'}
+        with patch.object(llm_planner, '_runtime',
+                          return_value=_fake_bedrock(raise_exc=RuntimeError('boom'))):
+            assert _ORIG_PLAN_EDIT(ctx, 'sources') is None
+
+
+class TestValidateAndStripFencesEdges:
+    def test_validate_non_dict_json_returns_none(self):
+        # valid JSON, but a bare int -> not a dict -> None
+        assert llm_planner._validate('123') is None
+
+    def test_strip_fences_plain_json_object(self):
+        assert llm_planner._strip_fences('```json\n{"a": 1}\n```') == '{"a": 1}'
+
+    def test_strip_fences_language_tag_without_separator(self):
+        # Defensive branch: when the language tag survives the first-line split, the
+        # leading "json" is stripped too.
+        assert llm_planner._strip_fences('```\njson{"a": 1}') == '{"a": 1}'
+
+
+class TestRuntimeClientLazyInit:
+    def test_lazily_constructs_and_caches_client(self):
+        llm_planner._client = None
+        sentinel = object()
+        with patch.object(llm_planner.boto3, 'client', return_value=sentinel) as mk:
+            first = llm_planner._runtime()
+            second = llm_planner._runtime()
+        assert first is sentinel and second is sentinel
+        assert mk.call_count == 1  # constructed once, then cached
+        llm_planner._client = None  # reset so other tests re-init cleanly
+
+
+# ---------------------------------------------------------------------------
+# shared/remediation.py — the maven-new "unsupported" path (an out-of-scope
+# declaration is a real CVE that just isn't auto-fixable → manual review, not
+# an error). Covers _execute's RemediationUnsupported handler + its Slack text.
+# ---------------------------------------------------------------------------
+
+
+class TestRemediationUnsupportedPath:
+    def test_execute_returns_unsupported_when_apply_fix_raises(self):
+        _, rem = _load_maven()
+        ctx = {'base_owner': 'v-e-e-m-a', 'repo_name': 'reporting',
+               'base_branch': 'main', 'cve_id': 'CVE-2026-0001'}
+
+        class _Strategy:
+            sparse_paths = None
+
+            def build_context(self, event, write_owner, base_owner):
+                return ctx
+
+            def apply_fix(self, work_dir, c):
+                raise rem.RemediationUnsupported('inherited from core; needs review')
+
+            def regenerate(self, work_dir, c):  # not reached
+                pass
+
+        with patch.object(rem, '_resolve_token', return_value='tok'), \
+                patch.object(rem, 'WRITE_OWNER', 'v-e-e-m-a'), \
+                patch.object(rem, 'BASE_OWNER', 'v-e-e-m-a'), \
+                patch.object(rem, '_clone', return_value=None):
+            result = rem._execute({'cve_id': 'CVE-2026-0001'}, _Strategy())
+
+        assert result['status'] == 'unsupported'
+        assert result['cve_id'] == 'CVE-2026-0001'
+        assert 'needs review' in result['message']
+
+    def test_slack_message_for_unsupported(self):
+        _, rem = _load_maven()
+        msg = rem._format_slack_message({
+            'status': 'unsupported', 'cve_id': 'CVE-2026-0001',
+            'message': 'inherited from core.',
+        })
+        assert 'CVE-2026-0001' in msg
+        assert 'inherited from core.' in msg
+        assert 'Manual review' in msg
