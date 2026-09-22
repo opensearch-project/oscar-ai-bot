@@ -381,10 +381,17 @@ def _commit_and_open_pr(work_dir, ctx, token):
     remote = f"https://x-access-token@github.com/{write_owner}/{repo_name}.git"
     env = _git_env(token)
 
-    _run(["git", "-C", work_dir, "config", "user.name",
-          os.environ["REMEDIATION_GIT_NAME"]], "git config name")
-    _run(["git", "-C", work_dir, "config", "user.email",
-          os.environ["REMEDIATION_GIT_EMAIL"]], "git config email")
+    git_name = os.environ.get("REMEDIATION_GIT_NAME")
+    git_email = os.environ.get("REMEDIATION_GIT_EMAIL")
+    if not git_name or not git_email:
+        raise RemediationError(
+            "REMEDIATION_GIT_NAME and REMEDIATION_GIT_EMAIL must be set for the "
+            "commit identity (DCO Signed-off-by)."
+        )
+    _run(["git", "-C", work_dir, "config", "user.name", git_name],
+         "git config name")
+    _run(["git", "-C", work_dir, "config", "user.email", git_email],
+         "git config email")
     _run(["git", "-C", work_dir, "checkout", "-b", branch_name],
          "git checkout -b")
     # -A stages adds, modifications AND deletions.
