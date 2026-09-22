@@ -94,6 +94,7 @@ class OscarLambdaStack(Stack):
         # to it via ecs.run_task.
         self.remediation_cluster: Optional[ecs.Cluster] = None
         self.remediation_npm_task_def: Optional[ecs.FargateTaskDefinition] = None
+        self.remediation_maven_task_def: Optional[ecs.FargateTaskDefinition] = None
         self._create_remediation_ecs()
 
         # Agent lambdas
@@ -419,7 +420,9 @@ class OscarLambdaStack(Stack):
             "worker",
             container_name="worker",
             image=ecs.ContainerImage.from_asset(
-                directory="agents/SecurityAdvisories/remediation-workers/npm",
+                # Context is the workers dir so the image can COPY shared/ + npm/.
+                directory="agents/SecurityAdvisories/remediation-workers",
+                file="npm/Dockerfile",
                 platform=ecr_assets.Platform.LINUX_AMD64,
             ),
             # Bypass the Lambda runtime client baked into the base image and run
@@ -439,6 +442,52 @@ class OscarLambdaStack(Stack):
             ),
         )
         self.remediation_npm_task_def = task_def
+
+        # maven worker (unified plugin + core): the plugin path is a build.gradle
+        # text edit; the core path bumps the version catalog and runs a real gradle
+        # build to regenerate .jar.sha1 checksums (see maven.py). Reuses the same
+        # cluster + task/execution roles. x86_64 to match the CI runner + npm worker
+        # (arm64 fails to build on the x64 runner).
+        maven_task_def = ecs.FargateTaskDefinition(
+            self, "RemediationMavenTaskDef",
+            family=f"oscar-remediation-maven-{self.env_name}",
+            # Sized for the heavier of the two paths this worker handles: the core
+            # path runs ``./gradlew updateShas`` over OpenSearch core (buildSrc
+            # compile + configuring the whole multi-project build + downloading
+            # every dependency jar), which needs real CPU/RAM. The plugin path (a
+            # text edit) fits easily within the same envelope.
+            cpu=4096,                 # 4 vCPU (speeds the gradle build)
+            memory_limit_mib=8192,    # 8 GB (OpenSearch gradle build is memory-hungry)
+            ephemeral_storage_gib=50,  # core clone + gradle dist + dependency jars
+            runtime_platform=ecs.RuntimePlatform(
+                cpu_architecture=ecs.CpuArchitecture.X86_64,
+                operating_system_family=ecs.OperatingSystemFamily.LINUX,
+            ),
+            task_role=task_role,
+            execution_role=execution_role,
+        )
+        maven_task_def.add_container(
+            "worker",
+            container_name="worker",
+            image=ecs.ContainerImage.from_asset(
+                directory="agents/SecurityAdvisories/remediation-workers",
+                file="maven/Dockerfile",
+                platform=ecr_assets.Platform.LINUX_AMD64,
+            ),
+            entry_point=["/var/lang/bin/python"],
+            command=["/var/task/main.py"],
+            environment=self._remediation_worker_env(),
+            logging=ecs.LogDriver.aws_logs(
+                stream_prefix="maven",
+                log_group=logs.LogGroup(
+                    self, "RemediationMavenLogGroup",
+                    log_group_name=f"/ecs/oscar-remediation-maven-{self.env_name}",
+                    retention=logs.RetentionDays.TWO_WEEKS,
+                    removal_policy=RemovalPolicy.DESTROY,
+                ),
+            ),
+        )
+        self.remediation_maven_task_def = maven_task_def
 
     def _wire_remediation_dispatch(self) -> None:
         """Point the SecurityAdvisories agent Lambda at the Fargate worker.
@@ -463,6 +512,11 @@ class OscarLambdaStack(Stack):
         sa_fn.add_environment(
             "NPM_REMEDIATION_TASKDEF", self.remediation_npm_task_def.task_definition_arn
         )
+        if self.remediation_maven_task_def:
+            sa_fn.add_environment(
+                "MAVEN_REMEDIATION_TASKDEF",
+                self.remediation_maven_task_def.task_definition_arn,
+            )
         sa_fn.add_environment(
             "REMEDIATION_ECS_CLUSTER", self.remediation_cluster.cluster_name
         )

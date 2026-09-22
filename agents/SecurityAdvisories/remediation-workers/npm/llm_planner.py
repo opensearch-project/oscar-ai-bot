@@ -126,8 +126,13 @@ def plan_edit(ctx, package_json_text, in_lockfile):
         logger.warning("LLM planner call failed; falling back to router: %s", e)
         return None
 
-    logger.info("LLM planner model=%s usage=%s raw_response=%s",
-                MODEL_ID, payload.get("usage"), text)
+    logger.info("LLM planner model=%s stop_reason=%s usage=%s raw_response=%s",
+                MODEL_ID, payload.get("stop_reason"), payload.get("usage"), text)
+    if payload.get("stop_reason") == "max_tokens":
+        # Truncated JSON -> _validate fails -> router fallback; log it so a too-low
+        # MAX_TOKENS doesn't look like a silent parse failure.
+        logger.warning("LLM planner hit max_tokens (%s); output truncated, "
+                       "falling back to router.", MAX_TOKENS)
     plan = _validate(text)
     logger.info("LLM planner plan=%s", plan)
     return plan

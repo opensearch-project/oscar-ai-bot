@@ -945,6 +945,41 @@ class TestSelectCandidate:
         assert mod._select_candidate(self._CANDIDATES, '   ') is None
 
 
+class TestMatchedPackagesDeclarationClass:
+    """_matched_packages classifies each package's origin into declaration_class."""
+
+    @staticmethod
+    def _hit(origin, ecosystem='maven'):
+        return {'inner_hits': {'vulnerabilities': {'hits': {'hits': [
+            {'_source': {'id': 'CVE-2026-1', 'package': {
+                'ecosystem': ecosystem, 'name': 'g/a', 'version': '1.0', 'origin': origin}}},
+        ]}}}}
+
+    def test_transitive_origin_classified_transitive(self):
+        mod, _ = _load_remediation_handler()
+        origin = [['build.gradle', 'runtimeClasspath', 'p-parent@1.0', 'g-a@1.0']]
+        pkgs = mod._matched_packages(self._hit(origin))
+        assert pkgs[0]['declaration_class'] == 'transitive'
+
+    def test_direct_origin_classified_direct(self):
+        mod, _ = _load_remediation_handler()
+        origin = [['build.gradle', 'implementation', 'g-a@1.0']]
+        pkgs = mod._matched_packages(self._hit(origin))
+        assert pkgs[0]['declaration_class'] == 'direct'
+
+    def test_missing_origin_classified_unknown(self):
+        mod, _ = _load_remediation_handler()
+        pkgs = mod._matched_packages(self._hit(None))
+        assert pkgs[0]['declaration_class'] == 'unknown'
+
+    def test_non_maven_not_classified(self):
+        mod, _ = _load_remediation_handler()
+        # A transitive-looking origin on an npm package must NOT get maven semantics.
+        origin = [['build.gradle', 'runtimeClasspath', 'p-parent@1.0', 'g-a@1.0']]
+        pkgs = mod._matched_packages(self._hit(origin, ecosystem='npm'))
+        assert pkgs[0]['declaration_class'] == 'unknown'
+
+
 # ---------------------------------------------------------------------------
 # Dispatch to the ecosystem remediation container Lambda
 # ---------------------------------------------------------------------------
@@ -1041,6 +1076,9 @@ class TestDispatch:
         assert env['PATCHED_VERSION'] == '4.0.6'
         assert env['INSTALLED_VERSION'] == '4.0.4'
         assert env['BASE_BRANCH'] == 'main'
+        # declaration_class threaded through to the worker (unknown here: the
+        # default npm fixture carries no origin chain).
+        assert env['DECLARATION_CLASS'] == 'unknown'
         # Slack thread context carried through for the worker's reply
         assert env['SLACK_CHANNEL'] == 'C0123'
         assert env['SLACK_THREAD_TS'] == '1699999999.0001'

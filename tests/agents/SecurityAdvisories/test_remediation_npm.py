@@ -19,10 +19,13 @@ from unittest.mock import patch
 
 import pytest
 
-_NPM_PATH = os.path.join(
+_WORKERS_PATH = os.path.join(
     os.path.dirname(__file__), '..', '..', '..',
-    'agents', 'SecurityAdvisories', 'remediation-workers', 'npm',
+    'agents', 'SecurityAdvisories', 'remediation-workers',
 )
+_NPM_PATH = os.path.join(_WORKERS_PATH, 'npm')
+# The shared remediation flow now lives in remediation-workers/shared/.
+_SHARED_PATH = os.path.join(_WORKERS_PATH, 'shared')
 
 # Put the worker dir on sys.path so npm.py's ``import llm_planner`` resolves to a
 # single stable module we can patch.
@@ -46,7 +49,7 @@ def _llm_off_by_default():
 def _load_npm():
     """Load npm.py with its ``remediation`` dependency injected."""
     rem_spec = importlib.util.spec_from_file_location(
-        'remediation', os.path.join(_NPM_PATH, 'remediation.py'))
+        'remediation', os.path.join(_SHARED_PATH, 'remediation.py'))
     rem = importlib.util.module_from_spec(rem_spec)
     rem_spec.loader.exec_module(rem)
     with patch.dict('sys.modules', {'remediation': rem}):
@@ -244,11 +247,13 @@ class TestVersionHelpers:
         assert npm._version_prefix('4.0.4') == ''
 
     def test_at_or_above(self):
+        # at_or_above now comes from the shared remediation module (imported into
+        # npm's namespace); npm no longer defines its own copy.
         npm, _ = _load_npm()
-        assert npm._at_or_above('4.0.8', '4.0.6') is True
-        assert npm._at_or_above('4.0.6', '4.0.6') is True
-        assert npm._at_or_above('4.0.4', '4.0.6') is False
-        assert npm._at_or_above('^4.0.4', '4.0.6') is False  # operator ignored
+        assert npm.at_or_above('4.0.8', '4.0.6') is True
+        assert npm.at_or_above('4.0.6', '4.0.6') is True
+        assert npm.at_or_above('4.0.4', '4.0.6') is False
+        assert npm.at_or_above('^4.0.4', '4.0.6') is False  # operator ignored
 
 
 # ---------------------------------------------------------------------------
@@ -765,6 +770,27 @@ class TestLlmPlannerValidate:
 
     def test_rejects_edit_without_sections(self):
         assert llm_planner._validate('{"action": "edit_and_install", "sections": []}') is None
+
+    def test_truncated_output_warns_and_falls_back(self, caplog):
+        # stop_reason=max_tokens -> the JSON is cut off, so _validate fails and
+        # plan_edit returns None (router fallback). We must log it as a WARNING
+        # naming max_tokens rather than fail silently like any other parse error.
+        import io
+        import json as _json
+        payload = {
+            'stop_reason': 'max_tokens',
+            'usage': {'input_tokens': 1200, 'output_tokens': llm_planner.MAX_TOKENS},
+            'content': [{'type': 'text', 'text': '{"action": "upgra'}],  # truncated
+        }
+        fake = type('C', (), {'invoke_model': lambda self, **kw: {
+            'body': io.BytesIO(_json.dumps(payload).encode())}})()
+        ctx = {'package_name': 'qs', 'patched_version': '6.5.3',
+               'installed_version': '6.5.0'}
+        with patch.object(llm_planner, '_runtime', return_value=fake), \
+                caplog.at_level('WARNING'):
+            assert _REAL_PLAN_EDIT(ctx, '{}', False) is None
+        assert any('max_tokens' in r.message and r.levelname == 'WARNING'
+                   for r in caplog.records)
 
     def test_rejects_sections_on_non_edit_action(self):
         assert llm_planner._validate('{"action": "none", "sections": ["resolutions"]}') is None
