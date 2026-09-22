@@ -29,6 +29,8 @@ def template():
     # Required by the remediation Fargate worker env (fail-closed in _remediation_worker_env).
     os.environ["REMEDIATION_WRITE_OWNER"] = "test-owner"
     os.environ["REMEDIATION_BASE_OWNER"] = "test-owner"
+    os.environ["REMEDIATION_GIT_NAME"] = "test-bot"
+    os.environ["REMEDIATION_GIT_EMAIL"] = "test-bot@users.noreply.github.com"
 
     # Skip Docker bundling — CDK will use placeholder code assets
     app = App(context={"aws:cdk:bundling-stacks": []})
@@ -150,6 +152,8 @@ def _synth_with_identity():
     # Required by the remediation Fargate worker env (fail-closed in _remediation_worker_env).
     os.environ["REMEDIATION_WRITE_OWNER"] = "test-owner"
     os.environ["REMEDIATION_BASE_OWNER"] = "test-owner"
+    os.environ["REMEDIATION_GIT_NAME"] = "test-bot"
+    os.environ["REMEDIATION_GIT_EMAIL"] = "test-bot@users.noreply.github.com"
 
     app = App(context={"aws:cdk:bundling-stacks": []})
 
@@ -327,6 +331,11 @@ class TestReleaseNotifierLambda:
         """The verdict lives in the metrics Lambda, so the notifier is pointless without it."""
         os.environ["CDK_DEFAULT_ACCOUNT"] = "123456789012"
         os.environ["CDK_DEFAULT_REGION"] = "us-east-1"
+        # Required by the remediation Fargate worker env (fail-closed in _remediation_worker_env).
+        os.environ["REMEDIATION_WRITE_OWNER"] = "test-owner"
+        os.environ["REMEDIATION_BASE_OWNER"] = "test-owner"
+        os.environ["REMEDIATION_GIT_NAME"] = "test-bot"
+        os.environ["REMEDIATION_GIT_EMAIL"] = "test-bot@users.noreply.github.com"
         app = App(context={"aws:cdk:bundling-stacks": []})
         agents = [JenkinsAgent()]
 

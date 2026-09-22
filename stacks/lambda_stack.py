@@ -316,15 +316,20 @@ class OscarLambdaStack(Stack):
         # prod sets BASE_OWNER to the upstream org and WRITE_OWNER to the bot fork.
         write_owner = os.environ.get("REMEDIATION_WRITE_OWNER")
         base_owner = os.environ.get("REMEDIATION_BASE_OWNER")
-        if not write_owner or not base_owner:
+        git_name = os.environ.get("REMEDIATION_GIT_NAME")
+        git_email = os.environ.get("REMEDIATION_GIT_EMAIL")
+        if not write_owner or not base_owner or not git_name or not git_email:
             raise ValueError(
-                "REMEDIATION_WRITE_OWNER (push-target fork) and "
-                "REMEDIATION_BASE_OWNER (clone/PR-target repo) must both be set. "
-                "Set them in the deploy env / .env."
+                "REMEDIATION_WRITE_OWNER (push-target fork), "
+                "REMEDIATION_BASE_OWNER (clone/PR-target repo), "
+                "REMEDIATION_GIT_NAME and REMEDIATION_GIT_EMAIL (commit identity) "
+                "must all be set. Set them in the deploy env / .env."
             )
         env = {
             "REMEDIATION_WRITE_OWNER": write_owner,
             "REMEDIATION_BASE_OWNER": base_owner,
+            "REMEDIATION_GIT_NAME": git_name,
+            "REMEDIATION_GIT_EMAIL": git_email,
             # Unbuffered stdout so logs reach CloudWatch: a short Fargate task
             # exits before block-buffered Python output flushes to the awslogs
             # driver, otherwise leaving an empty log stream.
