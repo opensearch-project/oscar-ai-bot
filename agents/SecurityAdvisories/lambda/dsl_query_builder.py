@@ -16,6 +16,7 @@ Functions:
 
 import json
 import logging
+import os
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional, Set, Tuple
 
@@ -33,6 +34,9 @@ _DEFAULT_QUERY_SIZE = 1000
 # bundles, excluding non-bundle components (build tooling, out-of-bundle repos).
 _RELEASE_BUNDLE_TYPES = ['bundle_opensearch', 'bundle_opensearch_dashboards']
 
+# Recency floor on ``timestamp.scan``.
+_SCAN_RECENCY_WINDOW = os.environ.get('SCANS_RECENCY_WINDOW', 'now-7d')
+
 
 def _build_dsl_query(
     resolved_tag: Optional[str] = None,
@@ -41,8 +45,8 @@ def _build_dsl_query(
 ) -> Dict[str, Any]:
     """Build the OpenSearch Query DSL body.
 
-    Constructs a bool/filter query with term clauses for the provided
-    parameters, or a match_all query if no filters are specified.
+    Constructs a bool/filter query with term clauses for the provided parameters
+    plus a ``timestamp.scan`` recency floor (always present).
 
     Args:
         resolved_tag: Resolved version tag for project.tag filter.
@@ -66,6 +70,9 @@ def _build_dsl_query(
         # for exact matching against the two release-bundle values.
         filters.append({'terms': {'release_type.keyword': _RELEASE_BUNDLE_TYPES}})
 
+    # Always bound by scan recency so can_match can skip older indices.
+    filters.append({'range': {'timestamp.scan': {'gte': _SCAN_RECENCY_WINDOW}}})
+
     # Sort newest-first so collapse keeps the latest scan per project. Primary key
     # is the commit time, tiebroken by scan time — matches the advisories UI.
     sort = [
@@ -78,28 +85,12 @@ def _build_dsl_query(
     # guarantees one result per project — the latest scan.
     collapse = {'field': 'project.name'}
 
-    if filters:
-        query = {
-            'size': _DEFAULT_QUERY_SIZE,
-            'sort': sort,
-            'collapse': collapse,
-            'query': {
-                'bool': {
-                    'filter': filters,
-                },
-            },
-        }
-    else:
-        query = {
-            'size': _DEFAULT_QUERY_SIZE,
-            'sort': sort,
-            'collapse': collapse,
-            'query': {
-                'match_all': {},
-            },
-        }
-
-    return query
+    return {
+        'size': _DEFAULT_QUERY_SIZE,
+        'sort': sort,
+        'collapse': collapse,
+        'query': {'bool': {'filter': filters}},
+    }
 
 
 def _execute_query(index: str, query_body: str) -> Dict[str, Any]:

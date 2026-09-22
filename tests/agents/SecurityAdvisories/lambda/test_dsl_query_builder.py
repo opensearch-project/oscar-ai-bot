@@ -187,8 +187,9 @@ class TestDSLQueryStructure:
 
         assert 'bool' in body['query']
         filters = body['query']['bool']['filter']
-        assert len(filters) == 1
-        assert filters[0] == {'term': {'project.tag': 'origin/3.7'}}
+        assert len(filters) == 2  # tag + always-present scan-recency range
+        assert {'term': {'project.tag': 'origin/3.7'}} in filters
+        assert any('timestamp.scan' in f.get('range', {}) for f in filters)
 
     def test_project_name_only_produces_name_filter_without_tag(self):
         """Validates: Requirement 1.4 — project_name alone returns all versions."""
@@ -205,8 +206,9 @@ class TestDSLQueryStructure:
 
         assert 'bool' in body['query']
         filters = body['query']['bool']['filter']
-        assert len(filters) == 1
+        assert len(filters) == 2  # name + always-present scan-recency range
         assert {'term': {'project.name': 'OpenSearch Dashboards'}} in filters
+        assert any('timestamp.scan' in f.get('range', {}) for f in filters)
 
     def test_both_params_produce_combined_filter(self):
         """Validates: Requirement 1.4"""
@@ -223,10 +225,11 @@ class TestDSLQueryStructure:
 
         assert 'bool' in body['query']
         filters = body['query']['bool']['filter']
-        assert len(filters) == 2
+        assert len(filters) == 3  # tag + name + always-present scan-recency range
         # Three-part semver resolves to origin/major.minor
         assert {'term': {'project.tag': 'origin/2.19'}} in filters
         assert {'term': {'project.name': 'OpenSearch'}} in filters
+        assert any('timestamp.scan' in f.get('range', {}) for f in filters)
 
     def test_release_components_adds_release_type_filter(self):
         """release_components=True scopes the query to the two release bundles."""
@@ -339,23 +342,22 @@ class TestDSLQueryStructure:
         assert 'collapse' in body
         assert body['collapse'] == {'field': 'project.name'}
 
-    def test_match_all_query_includes_sort_and_collapse(self):
-        """Validates: even match_all queries include sort and collapse."""
+    def test_no_param_query_still_bounds_by_scan_recency(self):
+        """With no tag/name filters the query is still bool/filter with the
+        always-present scan-recency range (no match_all), plus sort and collapse."""
         mock_response = {'hits': {'hits': []}}
         mod, mock_aws = _load_dsl_query_builder(
             mock_opensearch_request=mock_response,
         )
 
-        # Both params default to origin/main, resulting in bool/filter, but let's
-        # directly test the internal _build_dsl_query with no filters
         body = mod._build_dsl_query(resolved_tag=None, project_name=None)
 
-        assert 'sort' in body
+        filters = body['query']['bool']['filter']
+        assert filters == [{'range': {'timestamp.scan': {'gte': 'now-7d'}}}]
         assert body['sort'] == [
             {'timestamp.commit': {'order': 'desc'}},
             {'timestamp.scan': {'order': 'desc'}},
         ]
-        assert 'collapse' in body
         assert body['collapse'] == {'field': 'project.name'}
 
 
