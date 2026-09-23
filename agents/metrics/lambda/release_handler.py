@@ -348,6 +348,7 @@ def handle_list_active_releases(params: Dict[str, Any], request_id: str = 'unkno
                 days_to_rc, days_to_release, source.get('status'), rc_state['rc_created']
             ),
             'release_manager': source.get('release_manager'),
+            'release_manager_gh_handle': source.get('release_manager_gh_handle'),
             'release_issue': source.get('release_issue'),
             **rc_state,
         })
@@ -415,6 +416,7 @@ def handle_get_release_window(params: Dict[str, Any], request_id: str = 'unknown
             days_to_rc, days_to_release, source.get('status'), rc_state['rc_created']
         ),
         'release_manager': source.get('release_manager'),
+        'release_manager_gh_handle': source.get('release_manager_gh_handle'),
         'release_issue': source.get('release_issue'),
         **rc_state,
     }

@@ -20,7 +20,7 @@ Jenkins parameter, while the table stores the casing GitHub reported.
 
 import logging
 import os
-from typing import Dict, Optional, Set
+from typing import Any, Dict, Optional, Set
 
 import boto3
 
@@ -125,17 +125,46 @@ def load_handle_map() -> Dict[str, str]:
     return mapping
 
 
-def render_release_manager(handle: Optional[str], handle_map: Optional[Dict[str, str]] = None) -> str:
-    """Render the release manager as a Slack mention, falling back to their profile link.
+def render_release_manager(
+    manager: Any,
+    handle_map: Optional[Dict[str, str]] = None,
+    gh_handle: Any = None,
+) -> str:
+    """Render the release manager(s) as Slack mentions, falling back to naming them.
 
-    The fallback applies until the release manager has run /oscar-link-github, and in any
-    deployment that has no identity table.
+    A release can have more than one manager, so the schedule index stores both fields as arrays
+    (see ReleaseSchedule.groovy): release_manager holds the names as the schedule page prints
+    them, and release_manager_gh_handle the GitHub handles scraped from the same links, in the
+    same order. Each manager is resolved on their own - one who has not linked their GitHub
+    account must not cost the others their mention.
+
+    A name is only shown for a manager who cannot be mentioned: a handle is an identifier, not
+    something a reader should have to translate. Where the handles are missing entirely (an older
+    schedule doc, or a cell with no profile links) every manager falls back to their name.
     """
-    normalized = normalize_handle(handle)
-    if not normalized:
-        return ''
+    names = _as_list(manager)
+    handles = _as_list(gh_handle)
 
-    slack_user_id = (handle_map or {}).get(normalized.lower())
-    if slack_user_id:
-        return f'<@{slack_user_id}>'
-    return f'<{GITHUB_PROFILE_URL}/{normalized}|@{normalized}>'
+    # Pairing is positional, so a mismatched length means the parser could not resolve every
+    # manager and there is no way to tell whose handle is whose. Naming everyone is wrong-free;
+    # guessing the alignment would tag the wrong person.
+    if handles and len(handles) != len(names):
+        handles = []
+
+    rendered = []
+    for index, name in enumerate(names):
+        handle = normalize_handle(handles[index]) if handles else ''
+        slack_user_id = (handle_map or {}).get(handle.lower()) if handle else None
+        label = f'<@{slack_user_id}>' if slack_user_id else str(name).strip()
+        # The schedule is scraped, so the same person can appear twice in one cell.
+        if label and label not in rendered:
+            rendered.append(label)
+
+    return ', '.join(rendered)
+
+
+def _as_list(value: Any) -> list:
+    """Normalize a scalar, None or list-valued schedule field to a list."""
+    if value is None:
+        return []
+    return list(value) if isinstance(value, (list, tuple)) else [value]
