@@ -1085,9 +1085,14 @@ class TestCoreHelpers:
         maven, _ = _load_maven()
 
         class _Resp:
-            def __enter__(self): return self
-            def __exit__(self, *a): return False
-            def read(self): return b"catalog-bytes"
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                return False
+
+            def read(self):
+                return b"catalog-bytes"
 
         with patch("urllib.request.urlopen", return_value=_Resp()):
             assert maven._real_http_get("https://example.test/catalog") == "catalog-bytes"
