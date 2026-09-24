@@ -469,3 +469,600 @@ class TestWeeklyValidation:
         assert result["expired"] == 0
         assert result["error"] == "channel_fetch_failed"
         mock_table.update_item.assert_not_called()
+
+
+class TestOAuthEdgeCases:
+
+    @patch("requests.post")
+    def test_token_exchange_network_error(self, mock_post):
+        """requests.RequestException during token exchange returns 400."""
+        import requests as req
+        mock_post.side_effect = req.RequestException("Connection reset")
+
+        state = _make_signed_state("U123", "T01INTERNAL")
+
+        with patch("boto3.resource") as mock_resource, \
+             patch("boto3.client") as mock_client:
+
+            mock_resource.return_value.Table.return_value = MagicMock()
+            mock_secrets = MagicMock()
+            mock_secrets.get_secret_value.return_value = {
+                "SecretString": json.dumps(TEST_SECRETS)
+            }
+            mock_client.return_value = mock_secrets
+
+            lambda_function = _load_identity_lambda()
+            lambda_function._oauth_creds = None
+            result = lambda_function.lambda_handler(
+                {"queryStringParameters": {"code": "abc", "state": state}}, None
+            )
+
+        assert result["statusCode"] == 400
+        assert "authorization failed" in result["body"]
+
+    @patch("requests.post")
+    @patch("requests.get")
+    def test_missing_github_handle_returns_400(self, mock_get, mock_post):
+        """GitHub profile with no login returns 400."""
+        mock_post_resp = MagicMock()
+        mock_post_resp.json.return_value = {"access_token": "gho_test"}
+        mock_post_resp.raise_for_status.return_value = None
+        mock_post.return_value = mock_post_resp
+        mock_get.return_value = MagicMock(json=lambda: {"login": "", "id": None})
+
+        state = _make_signed_state("U123", "T01INTERNAL")
+
+        with patch("boto3.resource") as mock_resource, \
+             patch("boto3.client") as mock_client:
+
+            mock_resource.return_value.Table.return_value = MagicMock()
+            mock_secrets = MagicMock()
+            mock_secrets.get_secret_value.return_value = {
+                "SecretString": json.dumps(TEST_SECRETS)
+            }
+            mock_client.return_value = mock_secrets
+
+            lambda_function = _load_identity_lambda()
+            lambda_function._oauth_creds = None
+            result = lambda_function.lambda_handler(
+                {"queryStringParameters": {"code": "abc", "state": state}}, None
+            )
+
+        assert result["statusCode"] == 400
+        assert "Could not retrieve GitHub profile" in result["body"]
+
+    def test_no_identity_table_returns_400(self, monkeypatch):
+        """When IDENTITY_TABLE_NAME is empty, returns 400."""
+        monkeypatch.setenv("IDENTITY_TABLE_NAME", "")
+        state = _make_signed_state("U123", "T01INTERNAL")
+
+        with patch("boto3.resource"), \
+             patch("boto3.client") as mock_client:
+
+            mock_secrets = MagicMock()
+            mock_secrets.get_secret_value.return_value = {
+                "SecretString": json.dumps(TEST_SECRETS)
+            }
+            mock_client.return_value = mock_secrets
+
+            lambda_function = _load_identity_lambda()
+            lambda_function._oauth_creds = None
+            result = lambda_function.lambda_handler(
+                {"queryStringParameters": {"code": "abc", "state": state}}, None
+            )
+
+        assert result["statusCode"] == 400
+        assert "not configured" in result["body"]
+
+
+class TestMaintainerSync:
+
+    def test_missing_config_returns_error(self, monkeypatch):
+        """Missing METRICS_CROSS_ACCOUNT_ROLE_ARN returns config error."""
+        monkeypatch.delenv("METRICS_CROSS_ACCOUNT_ROLE_ARN", raising=False)
+        monkeypatch.delenv("METRICS_SECRET_NAME", raising=False)
+
+        with patch("boto3.resource"), \
+             patch("boto3.client") as mock_client:
+
+            mock_secrets = MagicMock()
+            mock_secrets.get_secret_value.return_value = {
+                "SecretString": json.dumps(TEST_SECRETS)
+            }
+            mock_client.return_value = mock_secrets
+
+            lambda_function = _load_identity_lambda()
+            lambda_function._oauth_creds = None
+            result = lambda_function.lambda_handler(
+                {"source": "aws.events", "action": "maintainer_sync"}, None
+            )
+
+        assert result["error"] == "missing config"
+
+    def test_missing_opensearch_host_returns_error(self, monkeypatch):
+        """OPENSEARCH_HOST not in secret returns error."""
+        monkeypatch.setenv("METRICS_CROSS_ACCOUNT_ROLE_ARN", "arn:aws:iam::123:role/test")
+        monkeypatch.setenv("METRICS_SECRET_NAME", "test-metrics-secret")
+
+        with patch("boto3.resource"), \
+             patch("boto3.client") as mock_client:
+
+            mock_secrets = MagicMock()
+            mock_secrets.get_secret_value.side_effect = [
+                {"SecretString": json.dumps(TEST_SECRETS)},
+                {"SecretString": json.dumps({})},
+            ]
+            mock_client.return_value = mock_secrets
+
+            lambda_function = _load_identity_lambda()
+            lambda_function._oauth_creds = None
+            result = lambda_function.lambda_handler(
+                {"source": "aws.events", "action": "maintainer_sync"}, None
+            )
+
+        assert result["error"] == "missing opensearch_host"
+
+    def test_no_identity_table_returns_error(self, monkeypatch):
+        """Missing identity table returns error."""
+        monkeypatch.setenv("METRICS_CROSS_ACCOUNT_ROLE_ARN", "arn:aws:iam::123:role/test")
+        monkeypatch.setenv("METRICS_SECRET_NAME", "test-metrics-secret")
+        monkeypatch.setenv("IDENTITY_TABLE_NAME", "")
+
+        with patch("boto3.resource"), \
+             patch("boto3.client") as mock_client:
+
+            mock_secrets = MagicMock()
+            mock_secrets.get_secret_value.return_value = {
+                "SecretString": json.dumps({"OPENSEARCH_HOST": "https://os.example.com"})
+            }
+            mock_client.return_value = mock_secrets
+
+            lambda_function = _load_identity_lambda()
+            lambda_function._oauth_creds = None
+            result = lambda_function.lambda_handler(
+                {"source": "aws.events", "action": "maintainer_sync"}, None
+            )
+
+        assert result["error"] == "no identity table"
+
+    def test_sts_assume_role_failure(self, monkeypatch):
+        """STS assume role failure returns error."""
+        monkeypatch.setenv("METRICS_CROSS_ACCOUNT_ROLE_ARN", "arn:aws:iam::123:role/test")
+        monkeypatch.setenv("METRICS_SECRET_NAME", "test-metrics-secret")
+
+        with patch("boto3.resource") as mock_resource, \
+             patch("boto3.client") as mock_client:
+
+            mock_table = MagicMock()
+            mock_resource.return_value.Table.return_value = mock_table
+
+            mock_secrets = MagicMock()
+            mock_secrets.get_secret_value.return_value = {
+                "SecretString": json.dumps({"OPENSEARCH_HOST": "https://os.example.com"})
+            }
+            mock_sts = MagicMock()
+            mock_sts.assume_role.side_effect = Exception("AccessDenied")
+
+            def client_factory(service, **kwargs):
+                if service == "secretsmanager":
+                    return mock_secrets
+                if service == "sts":
+                    return mock_sts
+                return MagicMock()
+
+            mock_client.side_effect = client_factory
+
+            lambda_function = _load_identity_lambda()
+            lambda_function._oauth_creds = None
+            result = lambda_function.lambda_handler(
+                {"source": "aws.events", "action": "maintainer_sync"}, None
+            )
+
+        assert result["error"] == "sts_assume_role_failed"
+
+    @patch("requests.post")
+    @patch("botocore.auth.SigV4Auth")
+    def test_successful_sync(self, mock_sigv4, mock_requests_post, monkeypatch):
+        """Successful maintainer sync updates records."""
+        monkeypatch.setenv("METRICS_CROSS_ACCOUNT_ROLE_ARN", "arn:aws:iam::123:role/test")
+        monkeypatch.setenv("METRICS_SECRET_NAME", "test-metrics-secret")
+
+        os_response = MagicMock()
+        os_response.json.return_value = {
+            "aggregations": {
+                "maintainers": {
+                    "buckets": [
+                        {"key": "alice", "doc_count": 5},
+                        {"key": "bob", "doc_count": 3},
+                    ]
+                }
+            }
+        }
+        os_response.raise_for_status.return_value = None
+        mock_requests_post.return_value = os_response
+
+        with patch("boto3.resource") as mock_resource, \
+             patch("boto3.client") as mock_client, \
+             patch("boto3.Session") as mock_session:
+
+            mock_table = MagicMock()
+            mock_table.scan.return_value = {
+                "Items": [
+                    {"github_id": 1, "github_handle": "alice", "is_org_maintainer": False},
+                    {"github_id": 2, "github_handle": "charlie", "is_org_maintainer": True},
+                ],
+            }
+            mock_resource.return_value.Table.return_value = mock_table
+
+            mock_secrets = MagicMock()
+            mock_secrets.get_secret_value.return_value = {
+                "SecretString": json.dumps({"OPENSEARCH_HOST": "https://os.example.com"})
+            }
+            mock_sts = MagicMock()
+            mock_sts.assume_role.return_value = {
+                "Credentials": {
+                    "AccessKeyId": "AK",
+                    "SecretAccessKey": "SK",
+                    "SessionToken": "ST",
+                }
+            }
+
+            def client_factory(service, **kwargs):
+                if service == "secretsmanager":
+                    return mock_secrets
+                if service == "sts":
+                    return mock_sts
+                return MagicMock()
+
+            mock_client.side_effect = client_factory
+            mock_session.return_value = MagicMock()
+
+            lambda_function = _load_identity_lambda()
+            lambda_function._oauth_creds = None
+            result = lambda_function.lambda_handler(
+                {"source": "aws.events", "action": "maintainer_sync"}, None
+            )
+
+        assert result["synced"] == 2
+        assert mock_table.update_item.call_count == 2
+
+    @patch("requests.post")
+    @patch("botocore.auth.SigV4Auth")
+    def test_zero_maintainers_aborts(self, mock_sigv4, mock_requests_post, monkeypatch):
+        """Zero maintainers from OpenSearch aborts to prevent false negatives."""
+        monkeypatch.setenv("METRICS_CROSS_ACCOUNT_ROLE_ARN", "arn:aws:iam::123:role/test")
+        monkeypatch.setenv("METRICS_SECRET_NAME", "test-metrics-secret")
+
+        os_response = MagicMock()
+        os_response.json.return_value = {
+            "aggregations": {"maintainers": {"buckets": []}}
+        }
+        os_response.raise_for_status.return_value = None
+        mock_requests_post.return_value = os_response
+
+        with patch("boto3.resource") as mock_resource, \
+             patch("boto3.client") as mock_client, \
+             patch("boto3.Session") as mock_session:
+
+            mock_table = MagicMock()
+            mock_resource.return_value.Table.return_value = mock_table
+
+            mock_secrets = MagicMock()
+            mock_secrets.get_secret_value.return_value = {
+                "SecretString": json.dumps({"OPENSEARCH_HOST": "https://os.example.com"})
+            }
+            mock_sts = MagicMock()
+            mock_sts.assume_role.return_value = {
+                "Credentials": {"AccessKeyId": "AK", "SecretAccessKey": "SK", "SessionToken": "ST"}
+            }
+
+            def client_factory(service, **kwargs):
+                if service == "secretsmanager":
+                    return mock_secrets
+                if service == "sts":
+                    return mock_sts
+                return MagicMock()
+
+            mock_client.side_effect = client_factory
+            mock_session.return_value = MagicMock()
+
+            lambda_function = _load_identity_lambda()
+            lambda_function._oauth_creds = None
+            result = lambda_function.lambda_handler(
+                {"source": "aws.events", "action": "maintainer_sync"}, None
+            )
+
+        assert result["error"] == "no_maintainers_found"
+
+    @patch("requests.post")
+    def test_opensearch_query_failure(self, mock_requests_post, monkeypatch):
+        """OpenSearch query failure returns error."""
+        monkeypatch.setenv("METRICS_CROSS_ACCOUNT_ROLE_ARN", "arn:aws:iam::123:role/test")
+        monkeypatch.setenv("METRICS_SECRET_NAME", "test-metrics-secret")
+
+        mock_requests_post.side_effect = Exception("Connection refused")
+
+        with patch("boto3.resource") as mock_resource, \
+             patch("boto3.client") as mock_client, \
+             patch("boto3.Session") as mock_session:
+
+            mock_table = MagicMock()
+            mock_resource.return_value.Table.return_value = mock_table
+
+            mock_secrets = MagicMock()
+            mock_secrets.get_secret_value.return_value = {
+                "SecretString": json.dumps({"OPENSEARCH_HOST": "https://os.example.com"})
+            }
+            mock_sts = MagicMock()
+            mock_sts.assume_role.return_value = {
+                "Credentials": {"AccessKeyId": "AK", "SecretAccessKey": "SK", "SessionToken": "ST"}
+            }
+
+            def client_factory(service, **kwargs):
+                if service == "secretsmanager":
+                    return mock_secrets
+                if service == "sts":
+                    return mock_sts
+                return MagicMock()
+
+            mock_client.side_effect = client_factory
+            mock_session.return_value = MagicMock()
+
+            lambda_function = _load_identity_lambda()
+            lambda_function._oauth_creds = None
+            result = lambda_function.lambda_handler(
+                {"source": "aws.events", "action": "maintainer_sync"}, None
+            )
+
+        assert result["error"] == "opensearch_query_failed"
+
+
+class TestValidationEdgeCases:
+
+    def test_no_channels_configured(self):
+        """Missing CHANNEL_ALLOW_LIST returns error."""
+        secrets_no_channels = {k: v for k, v in TEST_SECRETS.items() if k != "CHANNEL_ALLOW_LIST"}
+
+        with patch("boto3.resource"), \
+             patch("boto3.client") as mock_client:
+
+            mock_secrets = MagicMock()
+            mock_secrets.get_secret_value.return_value = {
+                "SecretString": json.dumps(secrets_no_channels)
+            }
+            mock_client.return_value = mock_secrets
+
+            lambda_function = _load_identity_lambda()
+            lambda_function._oauth_creds = None
+            result = lambda_function.lambda_handler(
+                {"source": "aws.events"}, None
+            )
+
+        assert result["error"] == "no channels configured"
+
+    def test_no_identity_table_for_validation(self, monkeypatch):
+        """Missing identity table during validation returns error."""
+        monkeypatch.setenv("IDENTITY_TABLE_NAME", "")
+
+        with patch("boto3.resource"), \
+             patch("boto3.client") as mock_client:
+
+            mock_secrets = MagicMock()
+            mock_secrets.get_secret_value.return_value = {
+                "SecretString": json.dumps(TEST_SECRETS)
+            }
+            mock_client.return_value = mock_secrets
+
+            lambda_function = _load_identity_lambda()
+            lambda_function._oauth_creds = None
+            result = lambda_function.lambda_handler(
+                {"source": "aws.events"}, None
+            )
+
+        assert result["error"] == "no identity table"
+
+    @patch("requests.get")
+    def test_zero_valid_users_aborts(self, mock_get):
+        """Active mappings but zero valid users aborts without expiring."""
+        mock_get.return_value = MagicMock(json=lambda: {
+            "ok": True, "members": [], "response_metadata": {"next_cursor": ""},
+        })
+
+        with patch("boto3.resource") as mock_resource, \
+             patch("boto3.client") as mock_client:
+
+            mock_table = MagicMock()
+            mock_table.scan.return_value = {
+                "Items": [{"github_id": 111, "slack_user_id": "U123"}],
+            }
+            mock_resource.return_value.Table.return_value = mock_table
+
+            mock_secrets = MagicMock()
+            mock_secrets.get_secret_value.return_value = {
+                "SecretString": json.dumps(TEST_SECRETS)
+            }
+            mock_client.return_value = mock_secrets
+
+            lambda_function = _load_identity_lambda()
+            lambda_function._oauth_creds = None
+            result = lambda_function.lambda_handler(
+                {"source": "aws.events"}, None
+            )
+
+        assert result["error"] == "no_valid_users_resolved"
+        mock_table.update_item.assert_not_called()
+
+    @patch("requests.get")
+    def test_pagination_in_channel_members(self, mock_get):
+        """Cursor-based pagination fetches all members."""
+        page1 = MagicMock(
+            status_code=200,
+            json=lambda: {
+                "ok": True,
+                "members": ["U001"],
+                "response_metadata": {"next_cursor": "cursor2"},
+            },
+        )
+        page2 = MagicMock(
+            status_code=200,
+            json=lambda: {
+                "ok": True,
+                "members": ["U123"],
+                "response_metadata": {"next_cursor": ""},
+            },
+        )
+        mock_get.side_effect = [page1, page2, page1, page2]
+
+        with patch("boto3.resource") as mock_resource, \
+             patch("boto3.client") as mock_client:
+
+            mock_table = MagicMock()
+            mock_table.scan.return_value = {
+                "Items": [{"github_id": 111, "slack_user_id": "U123"}],
+            }
+            mock_resource.return_value.Table.return_value = mock_table
+
+            mock_secrets = MagicMock()
+            mock_secrets.get_secret_value.return_value = {
+                "SecretString": json.dumps(TEST_SECRETS)
+            }
+            mock_client.return_value = mock_secrets
+
+            lambda_function = _load_identity_lambda()
+            lambda_function._oauth_creds = None
+            result = lambda_function.lambda_handler(
+                {"source": "aws.events"}, None
+            )
+
+        assert result["expired"] == 0
+
+    @patch("requests.get")
+    def test_non_json_response_aborts(self, mock_get):
+        """Non-JSON response from Slack aborts validation."""
+        bad_resp = MagicMock(status_code=200)
+        bad_resp.json.side_effect = ValueError("No JSON")
+        mock_get.return_value = bad_resp
+
+        with patch("boto3.resource") as mock_resource, \
+             patch("boto3.client") as mock_client:
+
+            mock_table = MagicMock()
+            mock_table.scan.return_value = {
+                "Items": [{"github_id": 111, "slack_user_id": "U123"}],
+            }
+            mock_resource.return_value.Table.return_value = mock_table
+
+            mock_secrets = MagicMock()
+            mock_secrets.get_secret_value.return_value = {
+                "SecretString": json.dumps(TEST_SECRETS)
+            }
+            mock_client.return_value = mock_secrets
+
+            lambda_function = _load_identity_lambda()
+            lambda_function._oauth_creds = None
+            result = lambda_function.lambda_handler(
+                {"source": "aws.events"}, None
+            )
+
+        assert result["error"] == "channel_fetch_failed"
+        mock_table.update_item.assert_not_called()
+
+    @patch("time.sleep", return_value=None)
+    @patch("requests.get")
+    def test_rate_limit_retries_exhausted(self, mock_get, _mock_sleep):
+        """Rate limit retries exhausted aborts validation."""
+        rate_limited = MagicMock(status_code=429, headers={"Retry-After": "0"})
+        mock_get.return_value = rate_limited
+
+        with patch("boto3.resource") as mock_resource, \
+             patch("boto3.client") as mock_client:
+
+            mock_table = MagicMock()
+            mock_table.scan.return_value = {
+                "Items": [{"github_id": 111, "slack_user_id": "U123"}],
+            }
+            mock_resource.return_value.Table.return_value = mock_table
+
+            mock_secrets = MagicMock()
+            mock_secrets.get_secret_value.return_value = {
+                "SecretString": json.dumps(TEST_SECRETS)
+            }
+            mock_client.return_value = mock_secrets
+
+            lambda_function = _load_identity_lambda()
+            lambda_function._oauth_creds = None
+            result = lambda_function.lambda_handler(
+                {"source": "aws.events"}, None
+            )
+
+        assert result["error"] == "channel_fetch_failed"
+        mock_table.update_item.assert_not_called()
+
+    @patch("requests.get")
+    def test_conditional_check_failure_during_expiry(self, mock_get):
+        """ConditionalCheckFailedException during expiry is silently handled."""
+        mock_get.return_value = MagicMock(json=lambda: {
+            "ok": True, "members": ["U999"], "response_metadata": {"next_cursor": ""},
+        })
+
+        with patch("boto3.resource") as mock_resource, \
+             patch("boto3.client") as mock_client:
+
+            ccfe = type('ConditionalCheckFailedException', (Exception,), {})
+
+            mock_dynamo_resource = mock_resource.return_value
+            mock_dynamo_resource.meta.client.exceptions.ConditionalCheckFailedException = ccfe
+
+            mock_table = MagicMock()
+            mock_table.scan.return_value = {
+                "Items": [{"github_id": 111, "slack_user_id": "U123"}],
+            }
+            mock_table.update_item.side_effect = ccfe("Already expired")
+            mock_dynamo_resource.Table.return_value = mock_table
+
+            mock_secrets = MagicMock()
+            mock_secrets.get_secret_value.return_value = {
+                "SecretString": json.dumps(TEST_SECRETS)
+            }
+            mock_client.return_value = mock_secrets
+
+            lambda_function = _load_identity_lambda()
+            lambda_function._oauth_creds = None
+            result = lambda_function.lambda_handler(
+                {"source": "aws.events"}, None
+            )
+
+        assert result["expired"] == 0
+
+    @patch("requests.get")
+    def test_validation_scan_pagination(self, mock_get):
+        """Paginated scan collects all active mappings."""
+        mock_get.return_value = MagicMock(json=lambda: {
+            "ok": True, "members": ["U123", "U456"],
+            "response_metadata": {"next_cursor": ""},
+        })
+
+        with patch("boto3.resource") as mock_resource, \
+             patch("boto3.client") as mock_client:
+
+            mock_table = MagicMock()
+            mock_table.scan.side_effect = [
+                {"Items": [{"github_id": 1, "slack_user_id": "U123"}], "LastEvaluatedKey": {"github_id": 1}},
+                {"Items": [{"github_id": 2, "slack_user_id": "U456"}]},
+            ]
+            mock_resource.return_value.Table.return_value = mock_table
+
+            mock_secrets = MagicMock()
+            mock_secrets.get_secret_value.return_value = {
+                "SecretString": json.dumps(TEST_SECRETS)
+            }
+            mock_client.return_value = mock_secrets
+
+            lambda_function = _load_identity_lambda()
+            lambda_function._oauth_creds = None
+            result = lambda_function.lambda_handler(
+                {"source": "aws.events"}, None
+            )
+
+        assert result["expired"] == 0
+        assert mock_table.scan.call_count == 2

@@ -66,9 +66,15 @@ def _get_table() -> Optional[object]:
     return dynamodb.Table(IDENTITY_TABLE_NAME)
 
 
+METRICS_CROSS_ACCOUNT_ROLE_ARN = os.environ.get("METRICS_CROSS_ACCOUNT_ROLE_ARN", "")
+METRICS_SECRET_NAME = os.environ.get("METRICS_SECRET_NAME", "")
+
+
 def lambda_handler(event, context):
-    # Route: EventBridge scheduled event → run validation
+    # Route: EventBridge scheduled events
     if event.get("source") == "aws.events":
+        if event.get("action") == "maintainer_sync":
+            return _handle_maintainer_sync()
         return _handle_validation()
 
     # Route: API Gateway OAuth callback
@@ -149,6 +155,137 @@ def lambda_handler(event, context):
     logger.info(f"IDENTITY_LINKED: slack_user={slack_user_id} workspace={workspace_id} github={github_handle} github_id={github_id} affiliation={affiliation}")
 
     return _html(200, "Successfully linked your GitHub account.")
+
+
+def _get_opensearch_host() -> str:
+    """Read OPENSEARCH_HOST from the metrics secret (same secret the metrics agent uses)."""
+    if not METRICS_SECRET_NAME:
+        return ""
+    try:
+        raw = secrets_client.get_secret_value(SecretId=METRICS_SECRET_NAME)
+        data = json.loads(raw["SecretString"])
+        return data.get("OPENSEARCH_HOST", "")
+    except Exception as e:
+        logger.error(f"MAINTAINER_SYNC: Failed to read metrics secret: {e}")
+        return ""
+
+
+def _handle_maintainer_sync():
+    """Daily sync: query OpenSearch metrics cluster for org-wide maintainer data."""
+    if not METRICS_CROSS_ACCOUNT_ROLE_ARN or not METRICS_SECRET_NAME:
+        logger.error("MAINTAINER_SYNC: METRICS_CROSS_ACCOUNT_ROLE_ARN or METRICS_SECRET_NAME not configured")
+        return {"synced": 0, "error": "missing config"}
+
+    opensearch_host = _get_opensearch_host()
+    if not opensearch_host:
+        logger.error("MAINTAINER_SYNC: OPENSEARCH_HOST not found in metrics secret")
+        return {"synced": 0, "error": "missing opensearch_host"}
+
+    table = _get_table()
+    if not table:
+        return {"synced": 0, "error": "no identity table"}
+
+    try:
+        sts = boto3.client("sts")
+        assumed = sts.assume_role(
+            RoleArn=METRICS_CROSS_ACCOUNT_ROLE_ARN,
+            RoleSessionName="oscar-maintainer-sync",
+            DurationSeconds=900,
+        )
+        creds = assumed["Credentials"]
+        session = boto3.Session(
+            aws_access_key_id=creds["AccessKeyId"],
+            aws_secret_access_key=creds["SecretAccessKey"],
+            aws_session_token=creds["SessionToken"],
+        )
+    except Exception as e:
+        logger.error(f"MAINTAINER_SYNC: Failed to assume metrics role: {e}")
+        return {"synced": 0, "error": "sts_assume_role_failed"}
+
+    region = os.environ.get("AWS_REGION", "us-east-1")
+    query = {
+        "size": 0,
+        "query": {
+            "range": {
+                "current_date": {
+                    "gte": "now-7d/d",
+                },
+            },
+        },
+        "aggs": {
+            "maintainers": {
+                "terms": {"field": "github_login.keyword", "size": 10000},
+            },
+        },
+    }
+
+    try:
+        from botocore.auth import SigV4Auth
+        from botocore.awsrequest import AWSRequest
+
+        host = opensearch_host.replace("https://", "")
+        url = f"https://{host}/maintainer-inactivity-*/_search"
+        aws_request = AWSRequest(
+            method="POST",
+            url=url,
+            data=json.dumps(query),
+            headers={"Content-Type": "application/json"},
+        )
+        SigV4Auth(session.get_credentials(), "es", region).add_auth(aws_request)
+
+        resp = requests.post(
+            url,
+            data=aws_request.body,
+            headers=dict(aws_request.headers),
+            timeout=30,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+    except Exception as e:
+        logger.error(f"MAINTAINER_SYNC: OpenSearch query failed: {e}")
+        return {"synced": 0, "error": "opensearch_query_failed"}
+
+    buckets = data.get("aggregations", {}).get("maintainers", {}).get("buckets", [])
+    active_maintainers = {b["key"].lower() for b in buckets if b.get("key")}
+    logger.info(f"MAINTAINER_SYNC: Found {len(active_maintainers)} active maintainers in metrics cluster")
+
+    if not active_maintainers:
+        logger.warning("MAINTAINER_SYNC: Zero maintainers found — skipping update to prevent false negatives")
+        return {"synced": 0, "error": "no_maintainers_found"}
+
+    now = datetime.now(timezone.utc).isoformat()
+    updated = 0
+    scan_kwargs = {
+        "ProjectionExpression": "github_id, github_handle, is_org_maintainer, maintainer_synced_at",
+    }
+    while True:
+        response = table.scan(**scan_kwargs)
+        for item in response.get("Items", []):
+            handle = (item.get("github_handle") or "").lower()
+            is_maintainer = handle in active_maintainers
+            current_flag = item.get("is_org_maintainer", False)
+            if bool(current_flag) != is_maintainer:
+                table.update_item(
+                    Key={"github_id": item["github_id"]},
+                    UpdateExpression="SET is_org_maintainer = :m, maintainer_synced_at = :ts",
+                    ExpressionAttributeValues={":m": is_maintainer, ":ts": now},
+                )
+                updated += 1
+            elif not item.get("maintainer_synced_at"):
+                table.update_item(
+                    Key={"github_id": item["github_id"]},
+                    UpdateExpression="SET is_org_maintainer = :m, maintainer_synced_at = :ts",
+                    ExpressionAttributeValues={":m": is_maintainer, ":ts": now},
+                )
+                updated += 1
+
+        last_key = response.get("LastEvaluatedKey")
+        if not last_key:
+            break
+        scan_kwargs["ExclusiveStartKey"] = last_key
+
+    logger.info(f"MAINTAINER_SYNC: Updated {updated} records")
+    return {"synced": updated}
 
 
 class ChannelMembersFetchError(Exception):

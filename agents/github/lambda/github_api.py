@@ -3,7 +3,7 @@
 
 """Direct GitHub REST API client for operations not supported by the MCP server.
 
-Used for: transfer_issue, add_comment, bulk_comment, get_repo_maintainers.
+Used for: transfer_issue, bulk_comment, get_repo_maintainers.
 """
 
 import json
@@ -100,16 +100,6 @@ def transfer_issue(
     })
 
 
-def add_comment(
-    token: str, owner: str, repo: str, issue_number: int, body: str,
-) -> str:
-    """Add a comment to an issue or pull request."""
-    _screen_outbound_body(body)
-    result = post(token, f"/repos/{owner}/{repo}/issues/{issue_number}/comments",
-                  json_body={"body": body})
-    return json.dumps(result)
-
-
 def bulk_comment(
     token: str, owner: str, issue_targets: List[tuple], body: str,
 ) -> str:
@@ -135,6 +125,43 @@ def bulk_comment(
         "total": len(issue_targets),
         "succeeded": sum(1 for r in results if r["status"] == "success"),
     })
+
+
+def create_ref(
+    token: str, owner: str, repo: str, ref_type: str, name: str, commit_sha: str,
+) -> str:
+    """Create a Git ref (tag or branch) pointing to a specific commit.
+
+    ref_type: "tags" or "heads"
+    """
+    ref = f"refs/{ref_type}/{name}"
+    result = post(token, f"/repos/{owner}/{repo}/git/refs", json_body={
+        "ref": ref,
+        "sha": commit_sha,
+    })
+    label = "tag" if ref_type == "tags" else "branch"
+    return json.dumps({
+        "status": "success",
+        label: name,
+        "commit_sha": commit_sha,
+        "ref": result.get("ref", ref),
+        "url": result.get("url", ""),
+        "repo": f"{owner}/{repo}",
+    })
+
+
+def create_tag(
+    token: str, owner: str, repo: str, tag_name: str, commit_sha: str,
+) -> str:
+    """Create a lightweight Git tag pointing to a specific commit."""
+    return create_ref(token, owner, repo, "tags", tag_name, commit_sha)
+
+
+def create_branch(
+    token: str, owner: str, repo: str, branch_name: str, commit_sha: str,
+) -> str:
+    """Create a new branch pointing to a specific commit."""
+    return create_ref(token, owner, repo, "heads", branch_name, commit_sha)
 
 
 _MAINTAINERS_LINK_RE = re.compile(
