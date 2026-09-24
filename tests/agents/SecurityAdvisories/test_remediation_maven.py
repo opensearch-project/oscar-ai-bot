@@ -1061,6 +1061,24 @@ class TestCoreHelpers:
         assert maven._core_managed_version(
             'com.fasterxml.jackson.core:jackson-databind') is None
 
+    def test_core_catalog_fetched_once_across_coords(self):
+        # memoized: many coordinate lookups in one run share a single catalog fetch
+        # (matters for batched runs resolving many CVEs).
+        maven, _ = _load_maven()
+        catalog = ('[versions]\njackson_databind = "2.22.2"\nnetty = "4.2.0"\n'
+                   '[libraries]\n'
+                   'jackson-databind = { group = "com.fasterxml.jackson.core", '
+                   'name = "jackson-databind", version.ref = "jackson_databind" }\n'
+                   'netty-common = { group = "io.netty", name = "netty-common", '
+                   'version.ref = "netty" }\n')
+        calls = []
+        maven._http_get = lambda *a, **k: (calls.append(1), catalog)[1]
+        assert maven._core_managed_version(
+            'com.fasterxml.jackson.core:jackson-databind') == '2.22.2'
+        assert maven._core_managed_version('io.netty:netty-common') == '4.2.0'
+        assert maven._core_managed_version('com.example:absent') is None
+        assert len(calls) == 1   # one fetch for all three lookups
+
     def test_versions_map_key(self):
         maven, _ = _load_maven()
         assert maven._versions_map_key('${versions.thrift}') == 'thrift'

@@ -40,6 +40,7 @@ transitive (advisory package may not match this repo); and version indirection w
 can't edit (``System.getProperty(...)`` etc.).
 """
 
+import functools
 import glob
 import logging
 import os
@@ -344,16 +345,27 @@ def _http_get(url, timeout=_CORE_CATALOG_TIMEOUT):
         return resp.read().decode("utf-8", "replace")
 
 
+@functools.lru_cache(maxsize=1)
+def _core_catalog_text():
+    """Core's version catalog, fetched once per process (memoized), or ``None`` on
+    failure. Memoized so a batched run resolving many coordinates fetches it once
+    rather than per coordinate.
+    """
+    try:
+        return _http_get(_CORE_CATALOG_URL)
+    except Exception as e:  # noqa: BLE001 - any fetch/network error -> unknown (None)
+        logger.warning("core catalog fetch failed: %s", e)
+        return None
+
+
 def _core_managed_version(coord):
     """The version OpenSearch core manages for ``coord`` (via its catalog's
     ``[libraries]`` group+name -> ``version.ref`` -> ``[versions]``), or ``None`` when
-    core doesn't manage it or the lookup fails. Best-effort read-only GET; on None the
-    caller falls back to a literal pin, never a wrong decline.
+    core doesn't manage it or the lookup fails. On None the caller falls back to a
+    literal pin, never a wrong decline.
     """
-    try:
-        text = _http_get(_CORE_CATALOG_URL)
-    except Exception as e:  # noqa: BLE001 - any fetch/network error -> unknown (None)
-        logger.warning("core catalog lookup failed for %s: %s", coord, e)
+    text = _core_catalog_text()
+    if not text:
         return None
     ref = _version_ref_for_coordinate(text, coord)
     if not ref:
