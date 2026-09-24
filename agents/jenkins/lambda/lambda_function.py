@@ -54,9 +54,19 @@ def lambda_handler(event: Dict[str, Any], context) -> Dict[str, Any]:
             if isinstance(param, dict) and 'name' in param and 'value' in param:
                 params[param['name']] = param['value']
 
-        # Determine access tier from session attributes (default: limited)
+        # Determine access tier from session attributes (set server-side by the
+        # oscar-agent from the caller's GitHub identity). A user is privileged
+        # for Jenkins if they are a global admin OR listed under agents.jenkins.
+        # Being privileged for a different agent does NOT grant Jenkins access.
+        # Falls back to a directly-provided access_tier (e.g. legacy callers,
+        # global-tier agents). Fail closed: absent/unknown attributes -> limited.
         session_attrs = event.get('sessionAttributes', {}) or {}
-        access_tier = session_attrs.get('access_tier', 'limited')
+        if 'is_global_admin' in session_attrs or 'authorized_agents' in session_attrs:
+            is_global = session_attrs.get('is_global_admin') == 'true'
+            authorized_agents = [a for a in session_attrs.get('authorized_agents', '').split(',') if a]
+            access_tier = 'privileged' if (is_global or 'jenkins' in authorized_agents) else 'limited'
+        else:
+            access_tier = session_attrs.get('access_tier', 'limited')
 
         # Select Jenkins token based on access tier
         try:

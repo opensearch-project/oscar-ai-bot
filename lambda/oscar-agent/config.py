@@ -48,7 +48,21 @@ class Config:
         self.slack_bot_token = secrets.get('SLACK_BOT_TOKEN', '')
         self.slack_signing_secret = secrets.get('SLACK_SIGNING_SECRET', '')
         self.dm_authorized_users = [u.strip() for u in secrets.get('DM_AUTHORIZED_USERS', '').split(',') if u.strip()]
-        self.fully_authorized_users = [u.strip() for u in secrets.get('FULLY_AUTHORIZED_USERS', '').split(',') if u.strip()]
+        # Authorization config (JSON, keyed by GitHub handle):
+        #   {"global": ["gh-handle", ...], "agents": {"jenkins": ["gh-handle", ...]}}
+        # global        -> privileged for every agent
+        # agents.<name> -> privileged for that agent only
+        # Fail closed: malformed/missing JSON yields no privileged users.
+        raw_auth = secrets.get('FULLY_AUTHORIZED_USERS', '{}')
+        try:
+            _auth = json.loads(raw_auth) if raw_auth else {}
+            if not isinstance(_auth, dict):
+                raise ValueError("FULLY_AUTHORIZED_USERS must be a JSON object")
+        except (ValueError, TypeError) as e:
+            logger.error(f"FULLY_AUTHORIZED_USERS is not valid JSON; denying all privileged access: {e}")
+            _auth = {}
+        self.global_admins = _auth.get('global', []) or []
+        self.agent_tiers = _auth.get('agents', {}) or {}
         self.channel_allow_list = [c.strip() for c in secrets.get('CHANNEL_ALLOW_LIST', '').split(',') if c.strip()]
         self.github_oauth_client_id = secrets.get('GITHUB_OAUTH_CLIENT_ID', '')
         self.oauth_callback_url = secrets.get('OAUTH_CALLBACK_URL', '')

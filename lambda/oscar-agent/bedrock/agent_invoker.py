@@ -78,11 +78,24 @@ class BedrockAgentCore:
             agent_id = self.privileged_agent_id
             alias_id = self.privileged_agent_alias_id
 
-        access_tier = "privileged" if privilege else "limited"
-
-        attrs = {'access_tier': access_tier}
+        # Routing privilege selects the supervisor agent: a user privileged for
+        # ANY agent (global or agent-level) is routed to the privileged
+        # supervisor. Per-agent enforcement still happens in each agent Lambda.
+        attrs = {}
         if session_attributes:
             attrs.update(session_attributes)
+
+        # Global access tier drives agents that read a single coarse tier
+        # (e.g. SecurityAdvisories). Only GLOBAL admins are privileged here;
+        # an agent-level user (e.g. jenkins-only) is NOT globally privileged and
+        # must not gain privilege on other agents. Falls back to the routing
+        # privilege when the global flag is absent (e.g. non-Slack callers).
+        is_global_admin = attrs.get('is_global_admin')
+        if is_global_admin is not None:
+            access_tier = "privileged" if is_global_admin == 'true' else "limited"
+        else:
+            access_tier = "privileged" if privilege else "limited"
+        attrs['access_tier'] = access_tier
 
         request = {
             'agentId': agent_id,
