@@ -660,6 +660,9 @@ def _verify_force_edit(original, edited, coordinate, patched, expected_token=Non
       - the added text references ``coordinate`` and ``expected_token``;
       - no literal version other than ``patched`` is introduced (a version token is a
         digit-led run after ':' / '@' / quote; a ``${...}`` var isn't one);
+      - no maven ``group:artifact`` coordinate other than the target appears — blocks
+        an extra ``coord:${var}`` pin the digit-led check can't see (e.g. the LLM
+        "helpfully" pinning sibling family artifacts in var mode);
       - a ``${...}`` GString pin must be DOUBLE-quoted (else it won't interpolate).
     Any violation -> False -> caller falls back to the deterministic append.
     """
@@ -679,6 +682,12 @@ def _verify_force_edit(original, edited, coordinate, patched, expected_token=Non
     # (a ${...} var isn't digit-led, so it's exempt — quoting checked below).
     for token in re.findall(r"""[:@'"](\d[\w.\-]*)""", added):
         if token != patched:
+            return False
+    # Every maven coordinate (``"group:artifact:"``) in the addition must be the
+    # target — rejects an extra dependency pinned via a var (literal extras are
+    # already caught above).
+    for m in re.finditer(r"""["']([\w.\-]+:[\w.\-]+):""", added):
+        if m.group(1) != coordinate:
             return False
     if "${" in expected and f'"{coordinate}:{expected}"' not in added:  # GString needs "..."
         return False
