@@ -21,7 +21,8 @@ from lambda_function import format_parameters_as_bullets  # noqa: E402
 
 _JENKINS_ENV = {
     'JENKINS_URL': 'https://test-jenkins.example.com',
-    'JENKINSFILE_GITHUB_REPO': 'https://github.com/test/repo',
+    'JENKINSFILE_GITHUB_REPO': 'test-org/test-repo',
+    'JENKINS_SECRET_NAME': 'test-secret',
 }
 
 
@@ -38,33 +39,24 @@ class TestJenkinsCredentials(unittest.TestCase):
     def setUp(self):
         _reset_config_cache()
 
-    @patch('jenkins_client.config')
-    def test_load_credentials_success(self, mock_config):
+    def test_load_credentials_success(self):
         """Test successful credential loading."""
-        mock_config.jenkins_api_token = 'testuser:testtoken'
-
-        creds = JenkinsCredentials()
+        creds = JenkinsCredentials('testuser:testtoken')
         auth = creds.get_auth()
 
         self.assertEqual(creds.get_username(), 'testuser')
         self.assertIsNotNone(auth)
 
-    @patch('jenkins_client.config')
-    def test_load_credentials_invalid_format(self, mock_config):
+    def test_load_credentials_invalid_format(self):
         """Test credential loading with invalid format."""
-        mock_config.jenkins_api_token = 'invalidtoken'
-
-        creds = JenkinsCredentials()
+        creds = JenkinsCredentials('invalidtoken')
 
         with self.assertRaises(Exception):
             creds.get_auth()
 
-    @patch('jenkins_client.config')
-    def test_load_credentials_missing_token(self, mock_config):
+    def test_load_credentials_missing_token(self):
         """Test credential loading with missing token."""
-        mock_config.jenkins_api_token = None
-
-        creds = JenkinsCredentials()
+        creds = JenkinsCredentials('')
 
         with self.assertRaises(Exception):
             creds.get_auth()
@@ -181,14 +173,16 @@ class TestJobDefinitions(unittest.TestCase):
 class TestJenkinsClient(unittest.TestCase):
     """Test Jenkins client functionality."""
 
-    @patch('jenkins_client.config')
-    def setUp(self, mock_config):
+    @patch('config.JenkinsConfig._load_jenkins_secret', return_value={'jenkins_api_token': 'testuser:testtoken', 'jenkins_readonly_token': 'readonly:rotoken', 'github_token': ''})
+    def setUp(self, mock_secret):
         """Set up test client with a test registry."""
-        mock_config.jenkins_api_token = 'testuser:testtoken'
-        mock_config.request_timeout = 30
-        mock_config.verify_ssl = True
+        os.environ.update(_JENKINS_ENV)
+        _reset_config_cache()
         self.registry = _build_test_registry()
-        self.client = JenkinsClient(self.registry)
+        self.client = JenkinsClient(self.registry, 'testuser:testtoken')
+
+    def tearDown(self):
+        _reset_config_cache()
 
     def test_get_job_info_success(self):
         """Test successful job info retrieval."""
@@ -249,6 +243,7 @@ class TestLambdaHandler(unittest.TestCase):
                 {'name': 'job_name', 'value': 'docker-scan'},
                 {'name': 'IMAGE_FULL_NAME', 'value': 'alpine:3.19'},
             ],
+            'sessionAttributes': {'access_tier': 'privileged'},
         }
 
         result = lambda_handler(event, None)
@@ -270,6 +265,7 @@ class TestLambdaHandler(unittest.TestCase):
                 {'name': 'IMAGE_FULL_NAME', 'value': 'alpine:3.19'},
                 {'name': 'confirmed', 'value': 'false'},
             ],
+            'sessionAttributes': {'access_tier': 'privileged'},
         }
 
         result = lambda_handler(event, None)
@@ -335,8 +331,7 @@ class TestTwoPersonApproval(unittest.TestCase):
         for name, value in extra_params.items():
             params.append({'name': name, 'value': value})
         event = {'function': 'trigger_job', 'parameters': params}
-        if session_attrs is not None:
-            event['sessionAttributes'] = session_attrs
+        event['sessionAttributes'] = session_attrs if session_attrs is not None else {'access_tier': 'privileged'}
         return event
 
     @patch('lambda_function.JenkinsClient')
@@ -347,7 +342,7 @@ class TestTwoPersonApproval(unittest.TestCase):
         mock_config.enable_2pr = True
         mock_get_registry.return_value = _build_test_registry()
 
-        result = lambda_handler(self._trigger_event(session_attrs={}), None)
+        result = lambda_handler(self._trigger_event(session_attrs={'access_tier': 'privileged'}), None)
         body = result['response']['functionResponse']['responseBody']['TEXT']['body']
         self.assertIn('SECURITY ERROR', body)
         mock_client_cls.return_value.trigger_job.assert_not_called()
@@ -361,6 +356,7 @@ class TestTwoPersonApproval(unittest.TestCase):
         mock_get_registry.return_value = _build_test_registry()
 
         event = self._trigger_event(session_attrs={
+            'access_tier': 'privileged',
             'requester_user_id': 'U_SAME', 'approver_user_id': 'U_SAME',
         })
         result = lambda_handler(event, None)
@@ -381,6 +377,7 @@ class TestTwoPersonApproval(unittest.TestCase):
         mock_client.trigger_job.return_value = {'status': 'success', 'workflow_url': 'https://j/job/docker-scan/1/'}
 
         event = self._trigger_event(session_attrs={
+            'access_tier': 'privileged',
             'requester_user_id': 'U_REQ', 'approver_user_id': 'U_APP',
         })
         result = lambda_handler(event, None)
@@ -541,3 +538,101 @@ class TestJenkinsfileDiscovery(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+@patch.dict(os.environ, _JENKINS_ENV)
+class TestAccessControl(unittest.TestCase):
+    """Test access tier token selection and enforcement."""
+
+    def setUp(self):
+        _reset_config_cache()
+
+    @patch('lambda_function.get_job_registry')
+    @patch('lambda_function.config')
+    def test_limited_user_gets_readonly_token(self, mock_config, mock_get_registry):
+        """Test that limited access tier selects readonly token."""
+        from lambda_function import lambda_handler
+
+        mock_config.get_token_for_access_tier.return_value = 'readonly-user:readonly-token'
+        mock_get_registry.return_value = _build_test_registry()
+
+        event = {
+            'function': 'list_jobs',
+            'parameters': [],
+            'sessionAttributes': {'access_tier': 'limited'},
+        }
+
+        lambda_handler(event, None)
+        mock_config.get_token_for_access_tier.assert_called_with('limited')
+
+    @patch('lambda_function.get_job_registry')
+    @patch('lambda_function.config')
+    def test_privileged_user_gets_admin_token(self, mock_config, mock_get_registry):
+        """Test that privileged access tier selects admin token."""
+        from lambda_function import lambda_handler
+
+        mock_config.get_token_for_access_tier.return_value = 'admin-user:admin-token'
+        mock_get_registry.return_value = _build_test_registry()
+
+        event = {
+            'function': 'list_jobs',
+            'parameters': [],
+            'sessionAttributes': {'access_tier': 'privileged'},
+        }
+
+        lambda_handler(event, None)
+        mock_config.get_token_for_access_tier.assert_called_with('privileged')
+
+    @patch('lambda_function.get_job_registry')
+    @patch('lambda_function.config')
+    def test_missing_access_tier_defaults_to_limited(self, mock_config, mock_get_registry):
+        """Test that missing access_tier defaults to limited (fail safe)."""
+        from lambda_function import lambda_handler
+
+        mock_config.get_token_for_access_tier.return_value = 'readonly-user:readonly-token'
+        mock_get_registry.return_value = _build_test_registry()
+
+        event = {
+            'function': 'list_jobs',
+            'parameters': [],
+            'sessionAttributes': {},
+        }
+
+        lambda_handler(event, None)
+        mock_config.get_token_for_access_tier.assert_called_with('limited')
+
+    @patch('lambda_function.get_job_registry')
+    @patch('lambda_function.config')
+    def test_no_session_attributes_defaults_to_limited(self, mock_config, mock_get_registry):
+        """Test that missing sessionAttributes defaults to limited."""
+        from lambda_function import lambda_handler
+
+        mock_config.get_token_for_access_tier.return_value = 'readonly-user:readonly-token'
+        mock_get_registry.return_value = _build_test_registry()
+
+        event = {
+            'function': 'list_jobs',
+            'parameters': [],
+        }
+
+        lambda_handler(event, None)
+        mock_config.get_token_for_access_tier.assert_called_with('limited')
+
+    @patch('lambda_function.get_job_registry')
+    @patch('lambda_function.config')
+    def test_permission_error_returns_access_denied(self, mock_config, mock_get_registry):
+        """Test that PermissionError from config returns error response."""
+        from lambda_function import lambda_handler
+
+        mock_config.get_token_for_access_tier.side_effect = PermissionError("Read-only access is not configured. Access denied.")
+        mock_get_registry.return_value = _build_test_registry()
+
+        event = {
+            'function': 'get_build_status',
+            'parameters': [],
+            'sessionAttributes': {'access_tier': 'limited'},
+        }
+
+        result = lambda_handler(event, None)
+        response_body = result['response']['functionResponse']['responseBody']['TEXT']['body']
+        self.assertIn('Access denied', response_body)

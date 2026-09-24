@@ -101,8 +101,8 @@ class TestAgentRegistration:
         names = [p.name for p in ALL_AGENTS]
         assert len(names) == len(set(names)), f"Duplicate agent names: {names}"
 
-    def test_jenkins_is_privileged_only(self):
-        assert JenkinsAgent().get_access_level() == "privileged"
+    def test_jenkins_access_level(self):
+        assert JenkinsAgent().get_access_level() == "both"
 
     def test_metrics_access_level(self):
         assert MetricsAgent().get_access_level() == "both"
