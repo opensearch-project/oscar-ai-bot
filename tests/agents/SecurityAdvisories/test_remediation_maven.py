@@ -64,6 +64,8 @@ def _load_maven():
     # Unit tests never hit the network: stub the core-catalog fetch to fail, so
     # _core_managed_version returns None (-> literal force / plain unsupported)
     # unless a test explicitly patches mav._core_managed_version / mav._http_get.
+    # Keep the real _http_get accessible for its own direct test.
+    mav._real_http_get = mav._http_get
     mav._http_get = lambda *a, **k: (_ for _ in ()).throw(RuntimeError("no network in tests"))
     return mav, rem
 
@@ -650,6 +652,19 @@ class TestApplyFix:
         with pytest.raises(rem.RemediationUnsupported):
             maven.apply_fix(str(tmp_path), _ctx(maven))
 
+    def test_transitive_bare_core_var_forces_literal(self, tmp_path):
+        # transitive dep referenced via a bare ${var} not defined in-repo (core-
+        # inherited) -> recorded as a core_force_var; force falls back to literal
+        # (core lookup stubbed unavailable). Exercises the bare-var force_var path.
+        maven, _ = _load_maven()
+        _gradle(tmp_path, 'dependencies {\n  force "com.x:y:${some_core_var}"\n}\n')
+        ctx = _ctx(maven, package='com.x/y', patched='2.0.0',
+                   declaration_class='transitive', origin_files=['build.gradle'])
+        maven.apply_fix(str(tmp_path), ctx)
+        text = _read(tmp_path)
+        assert 'com.x:y:2.0.0' in text                     # literal force appended
+        assert ctx['bumped_sections'] == ['build.gradle (force)']
+
     def test_literal_and_var_same_file_both_applied(self, tmp_path):
         # Regression (review #1): a literal edit and a same-file ${var} bump must
         # both survive — the var bump must not be clobbered by the literal write.
@@ -1064,6 +1079,18 @@ class TestCoreHelpers:
         maven, _ = _load_maven()  # _http_get already stubbed to raise in _load_maven
         assert maven._core_managed_version(
             'com.fasterxml.jackson.core:jackson-databind') is None
+
+    def test_http_get_reads_and_decodes(self):
+        # the real _http_get (network shim) reads the response body and decodes it.
+        maven, _ = _load_maven()
+
+        class _Resp:
+            def __enter__(self): return self
+            def __exit__(self, *a): return False
+            def read(self): return b"catalog-bytes"
+
+        with patch("urllib.request.urlopen", return_value=_Resp()):
+            assert maven._real_http_get("https://example.test/catalog") == "catalog-bytes"
 
     def test_core_catalog_fetched_once_across_coords(self):
         # memoized: many coordinate lookups in one run share a single catalog fetch
