@@ -418,9 +418,15 @@ class TestApplyFix:
         sneaky = base + f'  force "com.x:y:{tok}"\n  force "z:w:9.9.9"\n'
         assert maven._verify_force_edit(base, sneaky, "com.x:y", "2.5.0",
                                         expected_token=tok) is False
-        # sneaks in ANOTHER dep pinned via a var (no literal token) -> reject
+        # sneaks in ANOTHER dep pinned via a var (colon form) -> reject (coord regex)
         sneaky_var = base + f'  force "com.x:y:{tok}"\n  force "z:w:{tok}"\n'
         assert maven._verify_force_edit(base, sneaky_var, "com.x:y", "2.5.0",
+                                        expected_token=tok) is False
+        # extra dep via eachDependency useVersion (var) — no foreign g:a: colon, so the
+        # coord regex misses it; the "exactly one pin statement" check rejects it.
+        sneaky_each = base + (f'  force "com.x:y:{tok}"\n'
+                              f'  if (d.name == \'z\') {{ d.useVersion "{tok}" }}\n')
+        assert maven._verify_force_edit(base, sneaky_each, "com.x:y", "2.5.0",
                                         expected_token=tok) is False
 
     def test_transitive_but_actually_declared_edits_declaration(self, tmp_path):

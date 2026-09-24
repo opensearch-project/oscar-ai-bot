@@ -663,6 +663,9 @@ def _verify_force_edit(original, edited, coordinate, patched, expected_token=Non
       - no maven ``group:artifact`` coordinate other than the target appears — blocks
         an extra ``coord:${var}`` pin the digit-led check can't see (e.g. the LLM
         "helpfully" pinning sibling family artifacts in var mode);
+      - exactly ONE pin statement (``force``/``useVersion``) is added — a form-agnostic
+        backstop for the above: an extra dep pinned via named-args or ``eachDependency``
+        (which the coordinate regex above can't parse) still trips this;
       - a ``${...}`` GString pin must be DOUBLE-quoted (else it won't interpolate).
     Any violation -> False -> caller falls back to the deterministic append.
     """
@@ -689,6 +692,10 @@ def _verify_force_edit(original, edited, coordinate, patched, expected_token=Non
     for m in re.finditer(r"""["']([\w.\-]+:[\w.\-]+):""", added):
         if m.group(1) != coordinate:
             return False
+    # Exactly one pin statement — form-agnostic backstop for an extra dep added via
+    # named-args / eachDependency (which the coordinate regex above can't parse).
+    if len(re.findall(r"""\b(?:force|useVersion)\b\s*[("']""", added)) != 1:
+        return False
     if "${" in expected and f'"{coordinate}:{expected}"' not in added:  # GString needs "..."
         return False
     return True
