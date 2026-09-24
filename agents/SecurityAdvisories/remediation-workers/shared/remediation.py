@@ -39,16 +39,6 @@ import boto3
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 
-# Commit author/committer identity. OpenSearch repos enforce DCO, so we always
-# commit with -s; git derives the Signed-off-by trailer from these, which DCO
-# requires to match the author. Overridable via env so prod can set the real bot
-# account (e.g. opensearch-ci-bot) — matching the push token — without a code
-# change; dev uses the placeholder below.
-GIT_USER_NAME = os.environ.get("REMEDIATION_GIT_NAME", "OSCAR AI Bot")
-GIT_USER_EMAIL = os.environ.get(
-    "REMEDIATION_GIT_EMAIL", "oscar-ai-bot@users.noreply.github.com"
-)
-
 WORK_DIR = "/tmp/repo"
 
 # WRITE_OWNER: the fork we push the fix branch to. BASE_OWNER: the repo we clone
@@ -391,9 +381,16 @@ def _commit_and_open_pr(work_dir, ctx, token):
     remote = f"https://x-access-token@github.com/{write_owner}/{repo_name}.git"
     env = _git_env(token)
 
-    _run(["git", "-C", work_dir, "config", "user.name", GIT_USER_NAME],
+    git_name = os.environ.get("REMEDIATION_GIT_NAME")
+    git_email = os.environ.get("REMEDIATION_GIT_EMAIL")
+    if not git_name or not git_email:
+        raise RemediationError(
+            "REMEDIATION_GIT_NAME and REMEDIATION_GIT_EMAIL must be set for the "
+            "commit identity (DCO Signed-off-by)."
+        )
+    _run(["git", "-C", work_dir, "config", "user.name", git_name],
          "git config name")
-    _run(["git", "-C", work_dir, "config", "user.email", GIT_USER_EMAIL],
+    _run(["git", "-C", work_dir, "config", "user.email", git_email],
          "git config email")
     _run(["git", "-C", work_dir, "checkout", "-b", branch_name],
          "git checkout -b")

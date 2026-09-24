@@ -232,6 +232,8 @@ def stacks():
     # Required by the remediation Fargate worker env (fail-closed in _remediation_worker_env).
     os.environ["REMEDIATION_WRITE_OWNER"] = "test-owner"
     os.environ["REMEDIATION_BASE_OWNER"] = "test-owner"
+    os.environ["REMEDIATION_GIT_NAME"] = "test-bot"
+    os.environ["REMEDIATION_GIT_EMAIL"] = "test-bot@users.noreply.github.com"
 
     app = App(context={"aws:cdk:bundling-stacks": []})
 
@@ -594,6 +596,8 @@ def agents_template():
     # Required by the remediation Fargate worker env (fail-closed in _remediation_worker_env).
     os.environ["REMEDIATION_WRITE_OWNER"] = "test-owner"
     os.environ["REMEDIATION_BASE_OWNER"] = "test-owner"
+    os.environ["REMEDIATION_GIT_NAME"] = "test-bot"
+    os.environ["REMEDIATION_GIT_EMAIL"] = "test-bot@users.noreply.github.com"
 
     app = App(context={"aws:cdk:bundling-stacks": []})
 

@@ -680,6 +680,16 @@ class TestPostSlackMessage:
 class TestCloneAndCommit:
     """git clone / commit / gh pr create, with subprocess mocked."""
 
+    @pytest.fixture(autouse=True)
+    def _git_identity(self):
+        # _commit_and_open_pr reads the DCO commit identity from the env (set by
+        # the CDK worker env in prod). Provide it for the mocked git flow here.
+        with patch.dict(os.environ, {
+            'REMEDIATION_GIT_NAME': 'test-bot',
+            'REMEDIATION_GIT_EMAIL': 'test-bot@users.noreply.github.com',
+        }):
+            yield
+
     def _ctx(self):
         return {'write_owner': 'v-e-e-m-a', 'base_owner': 'v-e-e-m-a',
                 'repo_name': 'r', 'branch_name': 'oscar/cve-x-p', 'base_branch': 'main',
