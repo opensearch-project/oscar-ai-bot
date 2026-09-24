@@ -53,17 +53,20 @@ class _FakeResp:
 
 def _scans_hit(repo='https://github.com/opensearch-project/OpenSearch-Dashboards.git',
                name='OpenSearch Dashboards', ecosystem='npm',
-               cve='CVE-2023-45857', pkg='axios', version=''):
+               cve='CVE-2023-45857', pkg='axios', version='', origin=None):
     """A scans hit shaped like the real response: project in _source, and the
-    matched vulnerability delivered via nested inner_hits."""
+    matched vulnerability delivered via nested inner_hits. ``origin`` (maven
+    resolution paths) is included on the package when provided."""
+    package = {'ecosystem': ecosystem, 'name': pkg, 'version': version}
+    if origin is not None:
+        package['origin'] = origin
     return {
         '_source': {'project': {'repo': repo, 'name': name, 'tag': 'origin/main'}},
         'inner_hits': {
             'vulnerabilities': {
                 'hits': {
                     'hits': [
-                        {'_source': {'id': cve, 'package': {
-                            'ecosystem': ecosystem, 'name': pkg, 'version': version}}},
+                        {'_source': {'id': cve, 'package': package}},
                     ],
                 },
             },
@@ -988,6 +991,35 @@ class TestMatchedPackagesDeclarationClass:
         pkgs = mod._matched_packages(self._hit(origin, ecosystem='npm'))
         assert pkgs[0]['declaration_class'] == 'unknown'
 
+    def test_raw_origin_carried_for_maven(self):
+        # the worker needs the raw resolution paths (force-target + ancestor walk),
+        # not just the reduced declaration_class.
+        mod, _ = _load_remediation_handler()
+        origin = [['build.gradle', 'runtimeClasspath', 'p-parent@1.0', 'g-a@1.0']]
+        pkgs = mod._matched_packages(self._hit(origin))
+        assert pkgs[0]['origin'] == origin
+
+    def test_origin_dropped_for_non_maven(self):
+        # origin is a maven-only signal; npm packages carry None (nothing to reason on).
+        mod, _ = _load_remediation_handler()
+        origin = [['build.gradle', 'runtimeClasspath', 'p-parent@1.0', 'g-a@1.0']]
+        pkgs = mod._matched_packages(self._hit(origin, ecosystem='npm'))
+        assert pkgs[0]['origin'] is None
+
+    def test_origin_build_files_distills_distinct_gradle_files(self):
+        # the payload ships the DISTINCT build.gradle files (element 0), deduped,
+        # not the full paths — keeps the ECS override under 8 KiB for big graphs.
+        mod, _ = _load_remediation_handler()
+        origin = [
+            ['a/build.gradle', 'runtimeClasspath', 'p@1', 'g-a@1'],
+            ['a/build.gradle', 'compileClasspath', 'q@1', 'g-a@1'],   # dup file
+            ['b/build.gradle', 'runtimeClasspath', 'g-a@1'],
+            ['io.netty-netty-bom@4.2.18.Final'],                     # not a file path
+        ]
+        assert mod._origin_build_files(origin) == ['a/build.gradle', 'b/build.gradle']
+        assert mod._origin_build_files(None) == []          # flat/scalar / absent
+        assert mod._origin_build_files('scalar') == []
+
 
 # ---------------------------------------------------------------------------
 # Dispatch to the ecosystem remediation container Lambda
@@ -1088,9 +1120,37 @@ class TestDispatch:
         # declaration_class threaded through to the worker (unknown here: the
         # default npm fixture carries no origin chain).
         assert env['DECLARATION_CLASS'] == 'unknown'
+        # origin distilled to build.gradle files; empty list when no origin.
+        assert env['ORIGIN_FILES'] == '[]'
         # Slack thread context carried through for the worker's reply
         assert env['SLACK_CHANNEL'] == 'C0123'
         assert env['SLACK_THREAD_TS'] == '1699999999.0001'
+
+    def test_payload_carries_distilled_origin_files(self):
+        # a maven CVE ships only the DISTINCT build.gradle files (distilled from
+        # origin) to the worker — not the full resolution paths — to stay under the
+        # ECS container-override size limit. Two paths, one file -> one entry.
+        origin = [
+            ['test/fixtures/hdfs-fixture/build.gradle', 'runtimeClasspath',
+             'org.eclipse.jetty-jetty-server@9.4.58', 'org.eclipse.jetty-jetty-http@9.4.58'],
+            ['test/fixtures/hdfs-fixture/build.gradle', 'compileClasspath',
+             'org.eclipse.jetty-jetty-client@9.4.58', 'org.eclipse.jetty-jetty-http@9.4.58'],
+        ]
+        mod, _ = _load_remediation_handler(mock_aws=_make_mock_aws(hits=[_scans_hit(
+            repo='https://github.com/opensearch-project/OpenSearch.git', name='OpenSearch',
+            ecosystem='maven', cve='CVE-2026-9', pkg='org.eclipse.jetty/jetty-http',
+            version='1.0.0', origin=origin)]))
+        _install_fake_github(mod, advisories=_advisory('maven', 'org.eclipse.jetty:jetty-http',
+                                                       '2.0.0'))
+        env_cfg = dict(self._ENV, MAVEN_REMEDIATION_TASKDEF='oscar-remediation-maven-dev')
+        client = _install_fake_ecs(mod)
+        with patch.dict(os.environ, env_cfg, clear=False):
+            out = mod.handle_remediate_cve(
+                {'cve_id': 'CVE-2026-9', 'repo_name': 'OpenSearch'}, 'td')
+        assert out['status'] == 'remediation_started'
+        env = _override_env(client)
+        assert env['DECLARATION_CLASS'] == 'transitive'
+        assert json.loads(env['ORIGIN_FILES']) == ['test/fixtures/hdfs-fixture/build.gradle']
 
     def test_missing_slack_context_dispatches_with_empty_thread(self):
         # invoked outside Slack (no session attributes) -> still dispatches, with

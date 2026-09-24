@@ -20,32 +20,24 @@ dependency versions:
     is no lockfile/checksum, so ``regenerate`` is a no-op — the text edit is the
     whole fix.
 
-Plugin declaration forms handled (see cve-remediation-maven.md):
+Plugin declaration forms handled:
   - **force literal** — ``resolutionStrategy { force "group:artifact:1.2.3" }``
   - **direct-dep literal** — ``implementation "group:artifact:1.2.3"``
   - **in-repo ext var** — ``force "group:artifact:${foo_version}"`` where
     ``foo_version = '1.2.3'`` is defined in this repo (build.gradle / gradle.properties)
 
-Transitive dependencies (not declared anywhere, pulled in through a parent) are
-handled when the scan classified the coordinate as ``transitive`` (carried on the
-event as ``declaration_class``, from origin_classifier): rather than give up,
-``_apply_force_resolution`` pins it with a ``resolutionStrategy.force`` — folding
-into the repo's existing resolution block (LLM-write, verified) or appending a
-fresh ``allprojects { ... }`` block. Taken only when no direct declaration is found,
-so a stale ``transitive`` classification can never override an actual on-HEAD
-declaration (the scanner edits that instead).
+Transitive dependencies (not declared anywhere, classified ``transitive`` by
+origin_classifier) are pinned with a ``resolutionStrategy.force`` in the module that
+resolves them: origin names the resolving build.gradle(s) — a single one is pinned
+there (submodule scope, matching security#6550), several (or unusable origin) fall
+back to a root ``allprojects`` cascade. Only when no direct declaration is found, so
+a stale ``transitive`` classification can't override an on-HEAD declaration.
+Per-owner multi-module pinning is deferred.
 
-Out of scope (raised as ``RemediationUnsupported`` — a real CVE we can't
-auto-fix here, not an error):
-  - ``declaration_class == "core_inherited"``: undeclared and pulled transitively
-    only through ``org.opensearch*`` artifacts, so the version is owned by core and
-    must be fixed upstream (forcing it here would fight core's managed version).
-    This is the transitive twin of the ``${versions.X}`` core-inherited case below.
-  - the coordinate isn't declared in any build.gradle / the catalog AND wasn't
-    classified transitive (e.g. ``declaration_class`` is ``unknown`` — the advisory
-    package may not match what this repo resolves)
-  - (plugin) the version comes from a core-inherited map (``${versions.X}``) or
-    other indirection (``System.getProperty(...)``) not defined in this repo
+Out of scope (raised as ``RemediationUnsupported`` — a real CVE we can't auto-fix,
+not an error): ``core_inherited`` (owned by core, fix upstream); undeclared and not
+transitive (advisory package may not match this repo); and version indirection we
+can't edit (``System.getProperty(...)`` etc.).
 """
 
 import glob
@@ -76,6 +68,14 @@ _CATALOG_REL = os.path.join("gradle", "libs.versions.toml")
 # downloads), so the timeout is generous but still bounds a hung build.
 _GRADLE_TASK = "updateShas"
 _GRADLE_TIMEOUT = 900
+
+# OpenSearch core's version catalog on main — source of truth for versions plugins
+# inherit via ``${versions.X}``. Read-only lookup; see _core_managed_version.
+_CORE_CATALOG_URL = (
+    "https://raw.githubusercontent.com/opensearch-project/OpenSearch/"
+    "main/gradle/libs.versions.toml"
+)
+_CORE_CATALOG_TIMEOUT = 15
 
 
 def build_context(event, write_owner, base_owner):
@@ -108,6 +108,9 @@ def build_context(event, write_owner, base_owner):
         # chain (see origin_classifier). Consulted only as a fallback when no
         # declaration is found: transitive -> force pin; core_inherited -> manual review.
         "declaration_class": (event.get("declaration_class") or "unknown").strip(),
+        # Distinct build.gradle files the coordinate resolves in (distilled from the
+        # scan origin by the Lambda; [] when absent/non-maven). Picks the force target.
+        "origin_files": event.get("origin_files") or [],
         "cve_id": cve_id,
         "repo_name": repo_name,
         "write_owner": write_owner,
@@ -334,6 +337,45 @@ def _versions_key_present(catalog_text, key):
     return bool(key) and _versions_assignment(key).search(catalog_text) is not None
 
 
+def _http_get(url, timeout=_CORE_CATALOG_TIMEOUT):
+    """GET ``url`` and return the body as text. Isolated so tests can stub it."""
+    import urllib.request
+    with urllib.request.urlopen(url, timeout=timeout) as resp:  # nosec B310 - https literal
+        return resp.read().decode("utf-8", "replace")
+
+
+def _core_managed_version(coord):
+    """The version OpenSearch core manages for ``coord`` (via its catalog's
+    ``[libraries]`` group+name -> ``version.ref`` -> ``[versions]``), or ``None`` when
+    core doesn't manage it or the lookup fails. Best-effort read-only GET; on None the
+    caller falls back to a literal pin, never a wrong decline.
+    """
+    try:
+        text = _http_get(_CORE_CATALOG_URL)
+    except Exception as e:  # noqa: BLE001 - any fetch/network error -> unknown (None)
+        logger.warning("core catalog lookup failed for %s: %s", coord, e)
+        return None
+    ref = _version_ref_for_coordinate(text, coord)
+    if not ref:
+        return None
+    m = _versions_assignment(ref).search(text)
+    return m.group(2).strip() if m else None
+
+
+def _core_inherited_unsupported(ctx, coord, fallback_msg):
+    """``RemediationUnsupported`` for a core-inherited coordinate, naming core's
+    managed version when core is confirmed below patched ("fix must come from core");
+    else ``fallback_msg`` (lookup unavailable, core doesn't manage it, or core patched).
+    """
+    core_version = _core_managed_version(coord)
+    if core_version is not None and not at_or_above(core_version, ctx["patched_version"]):
+        return RemediationUnsupported(
+            f"`{coord}` is inherited from OpenSearch core, which uses the vulnerable "
+            f"version {core_version} (below the patched {ctx['patched_version']}). "
+            f"Remediation must come from core, not {ctx['repo_name']}.")
+    return RemediationUnsupported(fallback_msg)
+
+
 def _versions_assignment(key):
     """Regex matching a ``key = "<version>"`` assignment (version group = 2)."""
     return re.compile(
@@ -382,6 +424,9 @@ def _apply_fix_deterministic(work_dir, ctx):
     unsupported_reasons = []
     vars_to_bump = set()
     versions_map_keys = set()
+    # In-repo core-inherited version refs, as (reuse_token, catalog_key) pairs — the
+    # transitive-force path can re-assert one instead of a literal.
+    core_force_vars = []
     already_patched = False
     saw_declaration = False
 
@@ -435,6 +480,7 @@ def _apply_fix_deterministic(work_dir, ctx):
             unsupported_reasons.append(
                 f"`{coord}` version comes from `${{{var}}}`, which isn't defined "
                 f"in this repository (likely inherited from OpenSearch core).")
+            core_force_vars.append((f"${{{var}}}", var))
         elif result:
             bumped.append(f"{var} (variable)")
         else:
@@ -448,6 +494,7 @@ def _apply_fix_deterministic(work_dir, ctx):
             unsupported_reasons.append(
                 f"`{coord}` version comes from `${{versions.{key}}}`, which isn't "
                 f"defined in this repository (likely inherited from OpenSearch core).")
+            core_force_vars.append((f"${{versions.{key}}}", key))
         elif result:
             bumped.append(f"versions.{key} (variable)")
         else:
@@ -456,10 +503,36 @@ def _apply_fix_deterministic(work_dir, ctx):
     ctx["bumped_sections"] = bumped
     if bumped:
         return
-    # Prefer surfacing an out-of-scope declaration for review over reporting
-    # no_change: another declaration being already-patched does NOT prove the
-    # core-inherited/indirect one is safe.
+
+    dc = ctx.get("declaration_class")
+    # A `transitive` coordinate (third-party parent) with nothing editable in-repo is
+    # force-pinned in the resolving module — whether genuinely undeclared or only
+    # "declared" via a core-managed `${versions.X}` a submodule BOM overrides (the
+    # security#6550 pattern). So core-var refs don't block the force. `not
+    # already_patched` keeps a stale transitive scan from forcing over an on-HEAD
+    # declaration that's already >= patched (that stays no_change below).
+    if dc == "transitive" and not already_patched:
+        logger.info("%s transitive with nothing editable in-repo -> force in the "
+                    "resolving module.", coord)
+        # Offer any in-repo core-var ref to the force (re-assert the patched core
+        # version, gated on it resolving >= patched; see _apply_force_resolution).
+        ctx["force_var"] = core_force_vars[0] if core_force_vars else None
+        _apply_force_resolution(work_dir, ctx)
+        return
+    if dc == "core_inherited":      # org.opensearch parent -> core owns the version
+        raise _core_inherited_unsupported(
+            ctx, coord,
+            f"`{coord}` is inherited transitively from OpenSearch core. "
+            f"It should be fixed in core, not {ctx['repo_name']}.")
+
+    # Not transitive/core_inherited (direct/unknown). Prefer surfacing an
+    # out-of-scope declaration for review over reporting no_change: another
+    # declaration being already-patched does NOT prove the core-inherited/indirect
+    # one is safe. When the blocker is a core-managed `${versions.X}` (core_force_vars
+    # populated), enrich with core's actual version (see _core_inherited_unsupported).
     if unsupported_reasons:
+        if core_force_vars:
+            raise _core_inherited_unsupported(ctx, coord, unsupported_reasons[0])
         raise RemediationUnsupported(unsupported_reasons[0])
     if already_patched:
         # Declared but already >= patched (a fix landed since the scan). The
@@ -467,17 +540,6 @@ def _apply_fix_deterministic(work_dir, ctx):
         logger.info("%s already at/above %s; nothing to edit.", coord, patched)
         return
     if not saw_declaration:
-        # Undeclared: route on the scan's origin classification (see origin_classifier).
-        dc = ctx.get("declaration_class")
-        if dc == "transitive":          # third-party parent -> pin it here
-            logger.info("%s not declared directly; transitive per scan -> "
-                        "adding resolutionStrategy.force.", coord)
-            _apply_force_resolution(work_dir, ctx)
-            return
-        if dc == "core_inherited":      # org.opensearch parent -> core owns the version
-            raise RemediationUnsupported(
-                f"`{coord}` is inherited transitively from OpenSearch core. "
-                f"It should be fixed in core, not {ctx['repo_name']}.")
         raise RemediationUnsupported(   # direct/unknown -> advisory package doesn't match
             f"`{coord}` is not declared in any build.gradle in {ctx['repo_name']} "
             f"(the advisory package may differ from what the plugin declares).")
@@ -486,59 +548,111 @@ def _apply_fix_deterministic(work_dir, ctx):
 
 
 def _apply_force_resolution(work_dir, ctx):
-    """Pin a transitive coordinate to the patched version, matching the repo's idiom.
+    """Pin a transitive coordinate to the patched version in the resolving module.
 
-    Used only when the coordinate is NOT declared directly (classified transitive),
-    so there's no version literal/var to edit. Tries an LLM edit that folds the pin
-    into the file's existing resolution block (verified); on any failure appends a
-    fresh ``allprojects { configurations.all { resolutionStrategy { force
-    '<coord>:<patched>' } } }`` block. Raises ``RemediationUnsupported`` if there is
-    no root build.gradle. (An existing force for this coordinate is a
-    ``group:artifact:version`` literal the deterministic scanner already edits, so
-    this only runs when none exists.)
+    Reached only when the coordinate isn't declared directly. Origin names the
+    resolving build.gradle(s): a single one is pinned there (submodule scope,
+    matching security#6550); several distinct files, or no usable origin, fall back
+    to a root ``allprojects`` force that cascades (precedented — alerting/sql). Raises
+    ``RemediationUnsupported`` only when there's no root build.gradle. Per-owner
+    multi-module pinning is deferred (root cascade is the current behavior).
+
+    The pin is an LLM edit folded into the file's existing resolution block (verified);
+    on any failure a fresh block is appended.
     """
-    root = os.path.join(work_dir, "build.gradle")
-    if not os.path.isfile(root):
-        raise RemediationUnsupported(
-            f"`{ctx['coordinate']}` is transitive but {ctx['repo_name']} has no "
-            f"root build.gradle to pin it in.")
-    original = _read(root)
+    resolving = _resolving_build_files(work_dir, ctx.get("origin_files"))
+    if len(resolving) == 1:
+        target_rel = resolving[0]
+    else:
+        # No single resolving module (several, or no usable origin) -> root
+        # build.gradle, whose allprojects force cascades to every subproject.
+        target_rel = "build.gradle"
+        if not os.path.isfile(os.path.join(work_dir, target_rel)):
+            raise RemediationUnsupported(
+                f"`{ctx['coordinate']}` is transitive but {ctx['repo_name']} has no "
+                f"root build.gradle to pin it in.")
+    target = os.path.join(work_dir, target_rel)
+    original = _read(target)
 
-    # Apply the LLM's {old_string,new_string} only if the anchor is unique and the
-    # result adds exactly our coordinate:patched (verified); else append below.
-    edit = llm_planner.write_force_edit(ctx, "build.gradle", original)
+    # Version to pin to: a core-managed ${versions.X} (reused when core >= patched)
+    # or the literal patched version; may raise if core itself is vulnerable.
+    force_token = _resolve_force_token(ctx)
+    forced = f"{ctx['coordinate']}:{force_token}"
+
+    # Let the LLM fold the pin into an existing resolution block (maintainer idiom:
+    # one line into the module's configurations.all). It's told the exact token and to
+    # double-quote a GString; _verify_force_edit confirms adds-only + right token +
+    # double-quoting. On any failure, append a fresh block (correctly quoted).
+    edit = llm_planner.write_force_edit(ctx, target_rel, original, version=force_token)
     if edit:
         old, new = edit["old_string"], edit["new_string"]
         if original.count(old) == 1:
             edited = original.replace(old, new, 1)
             if _verify_force_edit(original, edited, ctx["coordinate"],
-                                  ctx["patched_version"]):
-                _write(root, edited)
-                logger.info("Applied verified LLM force edit for %s in build.gradle",
-                            ctx["coordinate"])
-                ctx["bumped_sections"] = ["build.gradle (force, llm)"]
+                                  ctx["patched_version"], expected_token=force_token):
+                _write(target, edited)
+                logger.info("Applied verified LLM force edit for %s (%s) in %s",
+                            ctx["coordinate"], force_token, target_rel)
+                ctx["bumped_sections"] = [f"{target_rel} (force, llm)"]
                 return
         logger.info("LLM force edit rejected (anchor not unique or unverified); "
-                    "appending block.")
+                    "appending block to %s.", target_rel)
 
-    forced = f"{ctx['coordinate']}:{ctx['patched_version']}"
-    _write(root, original.rstrip() + "\n\n" + _force_block(ctx, forced) + "\n")
-    logger.info("Appended resolutionStrategy.force for %s in build.gradle", forced)
-    ctx["bumped_sections"] = ["build.gradle (force)"]
+    _write(target, original.rstrip() + "\n\n" + _force_block(ctx, forced, target_rel) + "\n")
+    logger.info("Appended resolutionStrategy.force for %s in %s", forced, target_rel)
+    ctx["bumped_sections"] = [f"{target_rel} (force)"]
 
 
-def _verify_force_edit(original, edited, coordinate, patched):
-    """True if ``edited`` adds ONLY a pin of ``coordinate`` to ``patched``.
+def _resolve_force_token(ctx):
+    """The version token to pin a transitive coordinate to.
 
-    Guards the LLM write so it can never do the one dangerous thing (pin a wrong
-    version, or touch another dependency):
-      - every original line must survive (additions only — nothing removed/altered);
-      - the added text must reference ``coordinate`` and ``patched``;
-      - every version-like token in the added text must equal ``patched`` (so no
-        other dependency and no other version can be introduced).
+    Reuses an in-repo core-managed ``${versions.X}`` (``ctx['force_var']``) when core
+    resolves it >= patched (maintainer idiom, auto-tracks core); raises
+    ``RemediationUnsupported`` if core manages the coordinate but is itself below
+    patched (fix belongs in core); else the literal patched version (always fixes).
+    """
+    coord = ctx["coordinate"]
+    patched = ctx["patched_version"]
+    core_version = _core_managed_version(coord)
+    if core_version is not None and not at_or_above(core_version, patched):
+        raise RemediationUnsupported(
+            f"`{coord}` is managed by OpenSearch core, which uses the vulnerable "
+            f"version {core_version} (below the patched {patched}). Remediation must "
+            f"come from core, not {ctx['repo_name']}.")
+    force_var = ctx.get("force_var")
+    if force_var and core_version is not None and at_or_above(core_version, patched):
+        return force_var[0]          # ${versions.X}: core is patched -> re-assert it
+    return patched                   # literal
+
+
+def _resolving_build_files(work_dir, origin_files):
+    """The distinct ``origin_files`` (build.gradle relpaths, distilled from origin by
+    the Lambda) that actually exist in the clone, sorted. Presence is confirmed so a
+    stale/renamed module can't target a nonexistent file; empty when origin was
+    absent/flat.
+    """
+    files = set()
+    for rel in origin_files or []:
+        if (isinstance(rel, str) and rel.endswith("build.gradle")
+                and os.path.isfile(os.path.join(work_dir, rel))):
+            files.add(rel)
+    return sorted(files)
+
+
+def _verify_force_edit(original, edited, coordinate, patched, expected_token=None):
+    """True if ``edited`` adds ONLY a pin of ``coordinate`` to ``expected_token`` (the
+    literal ``patched``, or a core-managed ``${versions.X}`` the caller re-asserts).
+
+    Guards the LLM write so it can't pin a wrong version or touch another dependency:
+      - additions only (every original line survives);
+      - the added text references ``coordinate`` and ``expected_token``;
+      - no literal version other than ``patched`` is introduced (a version token is a
+        digit-led run after ':' / '@' / quote; a ``${...}`` var isn't one);
+      - a ``${...}`` GString pin must be DOUBLE-quoted (else it won't interpolate).
     Any violation -> False -> caller falls back to the deterministic append.
     """
     from collections import Counter
+    expected = expected_token or patched
     removed = Counter(original.splitlines()) - Counter(edited.splitlines())
     if removed:                          # an existing line was changed or deleted
         return False
@@ -547,26 +661,47 @@ def _verify_force_edit(original, edited, coordinate, patched):
     if not added.strip():                # no-op edit
         return False
     artifact = coordinate.split(":")[-1]
-    if patched not in added or (coordinate not in added and artifact not in added):
+    if expected not in added or (coordinate not in added and artifact not in added):
         return False
-    # A version token is a digit-led run right after ':' / '@' / a quote. Every one
-    # in the added text must be the patched version.
+    # Every literal (digit-led) version token in the addition must be `patched`
+    # (a ${...} var isn't digit-led, so it's exempt — quoting checked below).
     for token in re.findall(r"""[:@'"](\d[\w.\-]*)""", added):
         if token != patched:
             return False
+    if "${" in expected and f'"{coordinate}:{expected}"' not in added:  # GString needs "..."
+        return False
     return True
 
 
-def _force_block(ctx, forced_coord):
-    """The resolutionStrategy.force block text pinning ``forced_coord`` repo-wide."""
-    return (
+def _force_block(ctx, forced_coord, target_rel="build.gradle"):
+    """The resolutionStrategy.force block text pinning ``forced_coord``.
+
+    Root build.gradle wraps the pin in ``allprojects`` (cascades to subprojects); a
+    submodule uses a bare ``configurations.all`` (already scoped; matches
+    security#6550). Double-quoted when ``forced_coord`` embeds a ``${...}`` GString
+    (only interpolates in double quotes), single-quoted for a literal.
+    """
+    q = '"' if "${" in forced_coord else "'"
+    comment = (
         f"// Pin {ctx['coordinate']} to a patched version for {ctx['cve_id']} "
         f"(transitive dependency; not declared directly).\n"
-        "allprojects {\n"
-        "    configurations.all {\n"
-        "        resolutionStrategy {\n"
-        f"            force '{forced_coord}'\n"
-        "        }\n"
+    )
+    if target_rel == "build.gradle":
+        return (
+            comment
+            + "allprojects {\n"
+            "    configurations.all {\n"
+            "        resolutionStrategy {\n"
+            f"            force {q}{forced_coord}{q}\n"
+            "        }\n"
+            "    }\n"
+            "}"
+        )
+    return (
+        comment
+        + "configurations.all {\n"
+        "    resolutionStrategy {\n"
+        f"        force {q}{forced_coord}{q}\n"
         "    }\n"
         "}"
     )

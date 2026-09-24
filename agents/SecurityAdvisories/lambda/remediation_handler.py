@@ -207,6 +207,8 @@ def handle_remediate_cve(
         'package': one['package'],
         'installed_version': one.get('version', ''),
         'declaration_class': one.get('declaration_class', 'unknown'),
+        # raw origin paths (maven only) — distilled to build.gradle files for the payload.
+        'origin': one.get('origin'),
     }
 
     repo_owner = resolved['repo_owner']
@@ -347,6 +349,10 @@ def handle_remediate_cve(
         # transitive -> resolutionStrategy.force; core_inherited -> manual review;
         # direct/unknown -> unsupported.
         'declaration_class': declaration_class,
+        # Distinct build.gradle files the coordinate resolves in (distilled from
+        # origin, JSON-encoded) — all the worker needs for force-target selection,
+        # and small enough to stay under the ECS container-override 8 KiB limit.
+        'origin_files': json.dumps(_origin_build_files(resolved.get('origin'))),
         # We remediate main only; the worker pushes to the fork's main.
         'base_branch': SCANS_MAIN_TAG.split('/')[-1],
         # Slack thread context so the worker replies in the originating thread
@@ -485,6 +491,7 @@ _PAYLOAD_TO_ENV = {
     'patched_version': 'PATCHED_VERSION',
     'installed_version': 'INSTALLED_VERSION',
     'declaration_class': 'DECLARATION_CLASS',
+    'origin_files': 'ORIGIN_FILES',
     'base_branch': 'BASE_BRANCH',
     'slack_channel': 'SLACK_CHANNEL',
     'slack_thread_ts': 'SLACK_THREAD_TS',
@@ -776,6 +783,9 @@ def _matched_packages(hit: Dict[str, Any]) -> List[Dict[str, str]]:
                 # direct / transitive / core_inherited / unknown — routes the maven
                 # worker to a declaration edit, a force pin, or manual review.
                 'declaration_class': declaration_class,
+                # raw resolution paths (maven only); distilled to build.gradle files
+                # for the payload (_origin_build_files) to pick the force target.
+                'origin': _vuln_origin(src) if ecosystem == 'maven' else None,
             })
     return packages
 
@@ -810,6 +820,22 @@ def _vuln_origin(vuln: Dict[str, Any]):
     on release-tag scans) for ``classify_origin`` to interpret; ``None`` when absent.
     """
     return _vuln_package_obj(vuln).get('origin')
+
+
+def _origin_build_files(origin) -> List[str]:
+    """Distinct build.gradle files a coordinate resolves in (element 0 of each rich
+    ``origin`` path) — all the maven worker needs for force-target selection. Sending
+    this instead of the full array-of-arrays keeps the ECS container-override payload
+    under its 8 KiB limit for large resolution graphs. ``[]`` for flat form/non-maven.
+    """
+    if not isinstance(origin, list):
+        return []
+    files = set()
+    for path in origin:
+        if (isinstance(path, list) and path and isinstance(path[0], str)
+                and path[0].endswith('build.gradle')):
+            files.add(path[0])
+    return sorted(files)
 
 
 # Resolved GitHub token, cached per container (None = not resolved yet, '' =
