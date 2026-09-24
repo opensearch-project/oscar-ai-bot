@@ -37,6 +37,7 @@ Functions:
 import json
 import logging
 import os
+import re
 from typing import Any, Dict, List, Optional
 
 import boto3
@@ -1087,6 +1088,109 @@ def _normalize_pkg_name(name: str) -> str:
     this is a no-op for them (npm scopes like ``@scope/name`` are preserved).
     """
     return (name or '').strip().lower().replace(':', '/')
+
+
+def _patched_sort_key(version: str):
+    """Comparable key for choosing the higher of two patched versions.
+
+    Prefers a semver parse; falls back to the leading numeric release tuple for
+    maven-style versions semver can't parse (e.g. ``9.4.63.v20250814``,
+    ``12.0.36``). Returns ``(1, semver)`` for semver parses and ``(0, tuple)``
+    for the numeric fallback so semver always sorts as the more-precise form
+    within its own space; unparseable versions return ``(-1, ())`` and lose.
+
+    Only meaningful for comparing two patched versions of the SAME package, which
+    range-aware derivation guarantees are on the same maintenance line — so this
+    is a within-line ``max``, never a cross-major decision. See
+    cve-remediation-batch.md.
+    """
+    try:
+        return (1, semver.Version.parse(version))
+    except (ValueError, TypeError):
+        pass
+    m = re.search(r'(\d+(?:\.\d+)*)', version or '')
+    if m:
+        try:
+            return (0, tuple(int(p) for p in m.group(1).split('.')))
+        except ValueError:
+            pass
+    return (-1, ())
+
+
+def _max_patched(a: str, b: str) -> str:
+    """The higher of two patched-version strings (see ``_patched_sort_key``).
+
+    Ties / both-unparseable keep ``a`` (stable — callers fold left over the
+    contributing CVEs in encounter order).
+    """
+    return b if _patched_sort_key(b) > _patched_sort_key(a) else a
+
+
+def _build_cve_batch(
+    entries: List[Dict[str, Any]], request_id: str,
+) -> List[Dict[str, Any]]:
+    """Level-1 dedup: collapse per-CVE resolutions to one entry per package.
+
+    ``entries`` is the raw per-CVE list for ONE project — each item is a resolved
+    remediation ``{gh_package, patched_version, cve_id, ecosystem,
+    declaration_class, origin_files}`` (``gh_package`` is GitHub's canonical name
+    from ``_derive_patched_version``; ``origin_files`` already distilled). Groups
+    by canonical package (``_normalize_pkg_name`` — unifies the scans ``group/artifact``
+    vs advisory ``group:artifact`` forms and lower-cases, so distinct packages are
+    NOT falsely merged), takes ``max(patched_version)`` within the group, and keeps
+    every contributing ``cve_ids`` (sorted, deduped) for PR/commit attribution.
+
+    Entries missing a canonical package or a patched version are dropped (nothing
+    to bump). Package-level fields (ecosystem/declaration_class/origin_files) are
+    taken from the max-version contributor — for the same package in one repo they
+    are identical anyway (same installed coordinate).
+
+    Returns the deduped batch — the ``CVE_BATCH`` payload the worker iterates.
+    Level-2 (regroup by the planner's resolved edit target, e.g. a shared catalog
+    key) happens in the worker, post-classification. See cve-remediation-batch.md.
+    """
+    grouped: Dict[str, Dict[str, Any]] = {}
+    for e in entries:
+        gh_package = (e.get('gh_package') or '').strip()
+        patched = (e.get('patched_version') or '').strip()
+        cve_id = (e.get('cve_id') or '').strip()
+        if not gh_package or not patched:
+            continue
+        key = _normalize_pkg_name(gh_package)
+        cur = grouped.get(key)
+        if cur is None:
+            grouped[key] = {
+                'package': gh_package,
+                'patched_version': patched,
+                'cve_ids': {cve_id} if cve_id else set(),
+                'ecosystem': e.get('ecosystem', ''),
+                'declaration_class': e.get('declaration_class', ''),
+                'origin_files': e.get('origin_files') or [],
+            }
+            continue
+        if cve_id:
+            cur['cve_ids'].add(cve_id)
+        winner = _max_patched(cur['patched_version'], patched)
+        if winner != cur['patched_version']:
+            # the new CVE carries the higher patch -> adopt its package-level fields
+            cur['patched_version'] = winner
+            cur['ecosystem'] = e.get('ecosystem', cur['ecosystem'])
+            cur['declaration_class'] = e.get('declaration_class', cur['declaration_class'])
+            cur['origin_files'] = e.get('origin_files') or cur['origin_files']
+
+    batch = []
+    for g in grouped.values():
+        g['cve_ids'] = sorted(g['cve_ids'])
+        batch.append(g)
+    # deterministic order for stable payloads / test assertions
+    batch.sort(key=lambda g: g['package'])
+
+    logger.info(
+        f"[{request_id}] BUILD_CVE_BATCH: {len(entries)} resolution(s) -> "
+        f"{len(batch)} package(s); "
+        + str([f"{g['package']}@{g['patched_version']}({len(g['cve_ids'])} cve)" for g in batch])
+    )
+    return batch
 
 
 def _find_existing_pr(

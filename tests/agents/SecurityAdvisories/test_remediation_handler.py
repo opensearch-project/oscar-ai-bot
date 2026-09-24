@@ -1239,3 +1239,103 @@ class TestGithubToken:
         with patch.dict(os.environ, {'GH_TOKEN_SECRET_NAME': 'sa-tok'}, clear=True):
             headers = mod._github_headers()
         assert 'Authorization' not in headers
+
+
+class TestBuildCveBatch:
+    """Level-1 dedup: per-CVE resolutions -> one entry per package, max patched,
+    all contributing cve_ids retained. Pure logic (no OpenSearch/GitHub calls)."""
+
+    @staticmethod
+    def _entry(gh_package, patched, cve_id, ecosystem='maven',
+               declaration_class='direct', origin_files=None):
+        return {
+            'gh_package': gh_package,
+            'patched_version': patched,
+            'cve_id': cve_id,
+            'ecosystem': ecosystem,
+            'declaration_class': declaration_class,
+            'origin_files': origin_files or [],
+        }
+
+    def test_same_package_two_cves_takes_max_and_keeps_both_ids(self):
+        mod, _ = _load_remediation_handler()
+        batch = mod._build_cve_batch([
+            self._entry('org.apache.logging.log4j:log4j-core', '2.17.0', 'CVE-2026-1'),
+            self._entry('org.apache.logging.log4j:log4j-core', '2.17.1', 'CVE-2026-5'),
+        ], 'req')
+        assert len(batch) == 1
+        assert batch[0]['package'] == 'org.apache.logging.log4j:log4j-core'
+        assert batch[0]['patched_version'] == '2.17.1'
+        assert batch[0]['cve_ids'] == ['CVE-2026-1', 'CVE-2026-5']
+
+    def test_max_independent_of_encounter_order(self):
+        mod, _ = _load_remediation_handler()
+        batch = mod._build_cve_batch([
+            self._entry('g:a', '2.17.1', 'CVE-B'),
+            self._entry('g:a', '2.17.0', 'CVE-A'),
+        ], 'req')
+        assert batch[0]['patched_version'] == '2.17.1'
+        assert batch[0]['cve_ids'] == ['CVE-A', 'CVE-B']
+
+    def test_distinct_packages_not_merged(self):
+        mod, _ = _load_remediation_handler()
+        batch = mod._build_cve_batch([
+            self._entry('g:a', '1.0.0', 'CVE-1'),
+            self._entry('g:b', '2.0.0', 'CVE-2'),
+        ], 'req')
+        assert [b['package'] for b in batch] == ['g:a', 'g:b']  # sorted
+
+    def test_canonical_keying_unifies_slash_and_colon_forms(self):
+        # scans writes group/artifact, advisory writes group:artifact -> same package
+        mod, _ = _load_remediation_handler()
+        batch = mod._build_cve_batch([
+            self._entry('org.foo:bar', '1.2.3', 'CVE-1'),
+            self._entry('org.foo/bar', '1.2.4', 'CVE-2'),
+        ], 'req')
+        assert len(batch) == 1
+        assert batch[0]['patched_version'] == '1.2.4'
+        assert batch[0]['cve_ids'] == ['CVE-1', 'CVE-2']
+
+    def test_drops_entries_missing_package_or_version(self):
+        mod, _ = _load_remediation_handler()
+        batch = mod._build_cve_batch([
+            self._entry('', '1.0.0', 'CVE-1'),
+            self._entry('g:a', '', 'CVE-2'),
+            self._entry('g:b', '3.0.0', 'CVE-3'),
+        ], 'req')
+        assert [b['package'] for b in batch] == ['g:b']
+
+    def test_max_handles_non_semver_maven_versions(self):
+        mod, _ = _load_remediation_handler()
+        batch = mod._build_cve_batch([
+            self._entry('g:a', '12.0.35', 'CVE-1'),
+            self._entry('g:a', '12.0.36', 'CVE-2'),
+        ], 'req')
+        assert batch[0]['patched_version'] == '12.0.36'
+
+    def test_max_prefers_semver_over_lossy_numeric_when_ordered(self):
+        # 9.4.63.v20250814 (non-semver) vs 9.4.100 -> numeric tuple compare wins 9.4.100
+        mod, _ = _load_remediation_handler()
+        assert mod._max_patched('9.4.63.v20250814', '9.4.100') == '9.4.100'
+        assert mod._max_patched('9.4.100', '9.4.63.v20250814') == '9.4.100'
+
+    def test_package_level_fields_follow_the_max_contributor(self):
+        mod, _ = _load_remediation_handler()
+        batch = mod._build_cve_batch([
+            self._entry('g:a', '1.0.0', 'CVE-1', origin_files=['old/build.gradle']),
+            self._entry('g:a', '2.0.0', 'CVE-2', origin_files=['new/build.gradle']),
+        ], 'req')
+        assert batch[0]['origin_files'] == ['new/build.gradle']
+
+    def test_empty_input_returns_empty_batch(self):
+        mod, _ = _load_remediation_handler()
+        assert mod._build_cve_batch([], 'req') == []
+
+    def test_duplicate_cve_id_not_double_counted(self):
+        mod, _ = _load_remediation_handler()
+        batch = mod._build_cve_batch([
+            self._entry('g:a', '1.0.0', 'CVE-1'),
+            self._entry('g:a', '1.0.1', 'CVE-1'),
+        ], 'req')
+        assert batch[0]['cve_ids'] == ['CVE-1']
+        assert batch[0]['patched_version'] == '1.0.1'
