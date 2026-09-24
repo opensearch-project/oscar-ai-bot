@@ -200,6 +200,44 @@ def get_action_groups(lambda_arn: str) -> List[bedrock.CfnAgent.AgentActionGroup
                             "body": _param("string", "Comment body text (supports markdown)", True),
                         },
                     ),
+                    bedrock.CfnAgent.FunctionProperty(
+                        name="create_tag",
+                        description=(
+                            "Create a lightweight Git tag on a specific commit in a repository. "
+                            "Requires explicit user confirmation before execution. "
+                            "The commit can be a full or abbreviated SHA. "
+                            "Tag names typically follow semver (e.g., '3.12.0')."
+                        ),
+                        parameters={
+                            "repo": _param("string", "Repository name", True),
+                            "tag_name": _param("string", "Name for the tag (e.g., '3.12.0')", True),
+                            "commit_sha": _param(
+                                "string",
+                                "Commit SHA (full or abbreviated) or branch name to tag. "
+                                "If omitted, the HEAD of the default branch is used.",
+                                False,
+                            ),
+                        },
+                    ),
+                    bedrock.CfnAgent.FunctionProperty(
+                        name="create_branch",
+                        description=(
+                            "Create a new branch from a specific commit in a repository. "
+                            "Requires explicit user confirmation before execution. "
+                            "The commit can be a full or abbreviated SHA; abbreviated SHAs "
+                            "are resolved to the full SHA automatically."
+                        ),
+                        parameters={
+                            "repo": _param("string", "Repository name", True),
+                            "branch_name": _param("string", "Name for the branch (e.g., '3.12')", True),
+                            "commit_sha": _param(
+                                "string",
+                                "Commit SHA (full or abbreviated) or branch name to branch from. "
+                                "If omitted, the HEAD of the default branch is used.",
+                                False,
+                            ),
+                        },
+                    ),
                 ]
             ),
         ),

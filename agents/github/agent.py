@@ -43,7 +43,33 @@ class GitHubAgent(OscarAgent):
         return get_action_groups(lambda_arn)
 
     def get_agent_instruction(self):
-        return AGENT_INSTRUCTION.format(org=GITHUB_ORG)
+        enable_2pr = os.environ.get("ENABLE_2PR", "false").lower() == "true"
+        if enable_2pr:
+            two_person_review_section = (
+                "TWO-PERSON REVIEW (MANDATORY FOR ALL WRITE OPERATIONS):\n"
+                "- When you receive a write request, present a summary and include [CONFIRMATION_REQUIRED] "
+                "at the end. State: \"This requires approval from a different authorized user. "
+                "Please have another authorized user reply 'yes' to confirm.\"\n"
+                "- You must ONLY emit [CONFIRMATION_REQUIRED] ONCE per action. After you have emitted it, "
+                "do NOT emit it again in the same thread for the same action.\n"
+                "- When ANY user replies 'yes' or 'confirm' after your [CONFIRMATION_REQUIRED] message, "
+                "IMMEDIATELY call the tool. Do NOT re-summarize, re-confirm, or ask again. "
+                "A different user saying 'yes' IS the approval — call the tool right away.\n"
+                "- Do NOT verify or judge authorization yourself. Authorization is enforced entirely "
+                "server-side. Your only job is to call the tool and relay what it returns.\n"
+                "- If the tool returns an error, relay it verbatim. Do NOT re-ask for confirmation."
+            )
+        else:
+            two_person_review_section = (
+                "CONFIRMATION (MANDATORY FOR ALL WRITE OPERATIONS):\n"
+                "- When you receive a write request, ask for confirmation and include [CONFIRMATION_REQUIRED].\n"
+                "- The same user who requested the action can confirm it.\n"
+                "- Do NOT mention two-person review or ask for a different user to approve."
+            )
+        return AGENT_INSTRUCTION.format(
+            org=GITHUB_ORG,
+            two_person_review_section=two_person_review_section,
+        )
 
     def get_collaborator_instruction(self):
         return COLLABORATOR_INSTRUCTION.format(org=GITHUB_ORG)
@@ -52,7 +78,7 @@ class GitHubAgent(OscarAgent):
         return "GitHub-Specialist"
 
     def get_access_level(self):
-        return "privileged"
+        return "both"
 
     def get_secrets(self):
         return [
