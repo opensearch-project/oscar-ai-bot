@@ -66,8 +66,10 @@ class EventHandlers:
         text = message.get("text")
         event_ts = message.get("ts")  # Use ts for the specific message
 
-        # Check if user is authorized for DM access
-        if user_id not in config.fully_authorized_users and user_id not in config.dm_authorized_users:
+        # DM access is restricted to global admins (keyed by the user's linked
+        # GitHub handle; agent-level users cannot DM) OR to Slack users on the
+        # explicit dm_authorized_users allowlist.
+        if not self.message_processor.is_global_admin(user_id) and user_id not in config.dm_authorized_users:
             logger.warning(f"UNAUTHORIZED_DM_ATTEMPT: user={user_id}")
             return
 

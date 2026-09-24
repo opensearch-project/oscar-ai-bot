@@ -34,7 +34,9 @@ def _build_mock_config():
         'channel_mention': r'(?<!<)#([a-zA-Z0-9_-]+)(?!>)',
         'version': r'version\s+(\d+\.\d+\.\d+)',
     }
-    cfg.fully_authorized_users = ['U_ADMIN']
+    cfg.fully_authorized_users = []
+    cfg.global_admins = ['admin-gh']
+    cfg.agent_tiers = {'jenkins': ['jenkins-gh']}
     cfg.dm_authorized_users = ['U_DM']
     cfg.channel_allow_list = ['C_ALLOWED']
     cfg.agent_queries = {}

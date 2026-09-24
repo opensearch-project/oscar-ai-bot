@@ -15,6 +15,7 @@ from typing import Callable
 import boto3
 from config import config
 from input_validator import InputValidationError, validate_and_sanitize
+from oscar_shared.authorization import resolve_authorized_agents
 from oscar_shared.oauth_state import generate_state
 from slack_sdk import WebClient
 
@@ -81,6 +82,14 @@ class MessageProcessor:
                 attrs['requester_user_id'] = current_user_id
         else:
             attrs['requester_user_id'] = current_user_id
+
+        # Enrich the requester with GitHub identity + per-agent privilege so
+        # each agent Lambda can enforce its own tier without reading the secret.
+        requester_id = attrs['requester_user_id']
+        github_handle, is_global, agents = self._resolve_privilege(requester_id)
+        attrs['requester_github_handle'] = github_handle
+        attrs['is_global_admin'] = 'true' if is_global else 'false'
+        attrs['authorized_agents'] = ','.join(sorted(agents))
 
         return attrs
 
@@ -222,19 +231,75 @@ class MessageProcessor:
             logger.warning("Failed to fetch thread parent: %s", e)
             return ""
 
+    def _get_identity_record(self, user_id: str) -> dict:
+        """Look up the active identity record for a Slack user.
+
+        Returns the full DynamoDB item, or an empty dict if the user has no
+        active GitHub link. Cached per-message in ``self._identity_cache``.
+        """
+        cache = getattr(self, '_identity_cache', None)
+        if cache is None:
+            self._identity_cache = cache = {}
+        if user_id in cache:
+            return cache[user_id]
+
+        table = self._get_identity_table()
+        resp = table.query(
+            IndexName="slack-user-index",
+            KeyConditionExpression="slack_user_id = :uid",
+            ExpressionAttributeValues={":uid": user_id},
+        )
+        record = next((i for i in resp.get("Items", []) if i.get("status") == "active"), {})
+        cache[user_id] = record
+        return record
+
+    def _resolve_privilege(self, user_id: str):
+        """Resolve (github_handle, is_global, agents) for a Slack user.
+
+        Maps the Slack user to their linked GitHub handle via the identity
+        table, then resolves privilege from the central authorization config.
+        Fails closed: an unlinked user (no handle) has no privilege.
+        """
+        github_handle = self._get_identity_record(user_id).get("github_handle", "")
+        is_global, agents = resolve_authorized_agents(
+            github_handle, config.global_admins, config.agent_tiers
+        )
+        return github_handle, is_global, agents
+
     def is_fully_authorized_user(self, user_id: str) -> bool:
         """
-        Check if a user is fully authorized to use privileged features.
+        Check if a user is privileged for any agent (global or agent-level).
+
+        Authorization is keyed by the user's linked GitHub handle (resolved via
+        the identity table), checked against the central authorization config.
+        Used for supervisor routing and context isolation; per-agent enforcement
+        additionally happens in each agent Lambda via session attributes.
 
         Args:
-            user_id: The user ID to check
+            user_id: The Slack user ID to check
 
         Returns:
-            True if the user is fully authorized, False otherwise
+            True if the user is a global admin or privileged for any agent.
         """
-        is_authorized = user_id in config.fully_authorized_users
+        _, is_global, agents = self._resolve_privilege(user_id)
+        is_authorized = is_global or bool(agents)
         logger.debug(f"User {user_id} authorization check: {is_authorized}")
         return is_authorized
+
+    def is_global_admin(self, user_id: str) -> bool:
+        """Check if a user is a GLOBAL admin (privileged for every agent).
+
+        Stricter than :meth:`is_fully_authorized_user`: agent-level users
+        (e.g. jenkins-only) return False. Keyed by linked GitHub handle.
+
+        Args:
+            user_id: The Slack user ID to check
+
+        Returns:
+            True only if the user's linked GitHub handle is in the global list.
+        """
+        _, is_global, _ = self._resolve_privilege(user_id)
+        return is_global
 
     def _get_identity_table(self):
         """Get the identity DynamoDB table (cached)."""
@@ -247,14 +312,7 @@ class MessageProcessor:
         return self._identity_table
 
     def _has_identity_mapping(self, user_id: str) -> bool:
-        table = self._get_identity_table()
-        resp = table.query(
-            IndexName="slack-user-index",
-            KeyConditionExpression="slack_user_id = :uid",
-            ExpressionAttributeValues={":uid": user_id},
-        )
-        items = resp.get("Items", [])
-        return any(i.get("status") == "active" for i in items)
+        return bool(self._get_identity_record(user_id))
 
     def _handle_link_github_via_dm(self, user_id: str, channel: str, thread_ts: str, reaction_ts: str, say: Callable) -> None:
         """Handle link-github request by sending OAuth link via DM."""
@@ -331,6 +389,10 @@ class MessageProcessor:
         self.reaction_manager.manage_reactions(channel, reaction_ts, add_reaction="thinking_face")
 
         start_time = time.time()
+
+        # Reset per-message identity cache (records are cached only for the
+        # lifetime of a single message to avoid duplicate DynamoDB queries).
+        self._identity_cache = {}
 
         try:
             # Extract or generate query based on source

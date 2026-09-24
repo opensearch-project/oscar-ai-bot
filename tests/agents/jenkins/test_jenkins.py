@@ -636,3 +636,96 @@ class TestAccessControl(unittest.TestCase):
         result = lambda_handler(event, None)
         response_body = result['response']['functionResponse']['responseBody']['TEXT']['body']
         self.assertIn('Access denied', response_body)
+
+
+@patch.dict(os.environ, _JENKINS_ENV)
+class TestAccessTierDerivation(unittest.TestCase):
+    """Access tier is derived from per-agent GitHub-identity attributes.
+
+    A user is privileged for Jenkins iff they are a global admin OR listed
+    under agents.jenkins. Privilege for a different agent must NOT grant
+    Jenkins access. Fails closed when attributes are absent.
+    """
+
+    def setUp(self):
+        _reset_config_cache()
+
+    def tearDown(self):
+        _reset_config_cache()
+
+    def _list_jobs_event(self, session_attrs):
+        return {
+            'function': 'trigger_job',
+            'parameters': [
+                {'name': 'job_name', 'value': 'docker-scan'},
+                {'name': 'IMAGE_FULL_NAME', 'value': 'alpine:3.19'},
+                {'name': 'confirmed', 'value': 'true'},
+            ],
+            'sessionAttributes': session_attrs,
+        }
+
+    @patch('lambda_function.JenkinsClient')
+    @patch('lambda_function.get_job_registry')
+    @patch('lambda_function.config')
+    def test_global_admin_can_trigger(self, mock_config, mock_get_registry, mock_client_cls):
+        from lambda_function import lambda_handler
+        mock_config.enable_2pr = False
+        mock_get_registry.return_value = _build_test_registry()
+
+        event = self._list_jobs_event({'is_global_admin': 'true', 'authorized_agents': ''})
+        lambda_handler(event, None)
+        mock_client_cls.return_value.trigger_job.assert_called_once()
+
+    @patch('lambda_function.JenkinsClient')
+    @patch('lambda_function.get_job_registry')
+    @patch('lambda_function.config')
+    def test_jenkins_listed_user_can_trigger(self, mock_config, mock_get_registry, mock_client_cls):
+        from lambda_function import lambda_handler
+        mock_config.enable_2pr = False
+        mock_get_registry.return_value = _build_test_registry()
+
+        event = self._list_jobs_event({'is_global_admin': 'false', 'authorized_agents': 'jenkins'})
+        lambda_handler(event, None)
+        mock_client_cls.return_value.trigger_job.assert_called_once()
+
+    @patch('lambda_function.JenkinsClient')
+    @patch('lambda_function.get_job_registry')
+    @patch('lambda_function.config')
+    def test_other_agent_only_user_is_blocked(self, mock_config, mock_get_registry, mock_client_cls):
+        """A user privileged for a DIFFERENT agent is limited on Jenkins."""
+        from lambda_function import lambda_handler
+        mock_config.enable_2pr = False
+        mock_get_registry.return_value = _build_test_registry()
+
+        event = self._list_jobs_event({'is_global_admin': 'false', 'authorized_agents': 'metrics'})
+        result = lambda_handler(event, None)
+        body = result['response']['functionResponse']['responseBody']['TEXT']['body']
+        self.assertIn('elevated access', body)
+        mock_client_cls.return_value.trigger_job.assert_not_called()
+
+    @patch('lambda_function.JenkinsClient')
+    @patch('lambda_function.get_job_registry')
+    @patch('lambda_function.config')
+    def test_no_privilege_is_blocked(self, mock_config, mock_get_registry, mock_client_cls):
+        from lambda_function import lambda_handler
+        mock_config.enable_2pr = False
+        mock_get_registry.return_value = _build_test_registry()
+
+        event = self._list_jobs_event({'is_global_admin': 'false', 'authorized_agents': ''})
+        result = lambda_handler(event, None)
+        body = result['response']['functionResponse']['responseBody']['TEXT']['body']
+        self.assertIn('elevated access', body)
+        mock_client_cls.return_value.trigger_job.assert_not_called()
+
+    @patch('lambda_function.JenkinsClient')
+    @patch('lambda_function.get_job_registry')
+    @patch('lambda_function.config')
+    def test_legacy_access_tier_fallback(self, mock_config, mock_get_registry, mock_client_cls):
+        """When per-agent attrs are absent, fall back to a direct access_tier."""
+        from lambda_function import lambda_handler
+        mock_config.enable_2pr = False
+        mock_get_registry.return_value = _build_test_registry()
+
+        event = self._list_jobs_event({'access_tier': 'privileged'})
+        lambda_handler(event, None)
+        mock_client_cls.return_value.trigger_job.assert_called_once()

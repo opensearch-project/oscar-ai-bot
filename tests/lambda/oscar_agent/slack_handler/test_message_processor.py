@@ -22,7 +22,11 @@ def _make_processor(**overrides):
         timeout_handler=Mock(),
     )
     defaults.update(overrides)
-    return MessageProcessor(**defaults)
+    mp = MessageProcessor(**defaults)
+    # Default: no linked identity (tests that care override this). Prevents
+    # accidental DynamoDB access via _resolve_privilege / _get_identity_record.
+    mp._get_identity_record = Mock(return_value={})
+    return mp
 
 
 class TestExtractQuery:
@@ -98,16 +102,82 @@ class TestBuildIdentityAttributes:
         assert result['requester_user_id'] == 'U_ALICE'
         assert 'approver_user_id' not in result
 
+    def test_enriches_global_admin_attributes(self):
+        """A global admin requester gets is_global_admin=true and empty agents."""
+        storage = Mock()
+        storage.get_context.return_value = None
+        mp = _make_processor(storage=storage)
+        mp._get_identity_record = Mock(return_value={'github_handle': 'admin-gh'})
+        result = mp._build_identity_attributes('C123_ts1', 'U_ADMIN')
+        assert result['requester_github_handle'] == 'admin-gh'
+        assert result['is_global_admin'] == 'true'
+        assert result['authorized_agents'] == ''
+
+    def test_enriches_agent_level_attributes(self):
+        """A jenkins-only requester gets is_global_admin=false and authorized_agents=jenkins."""
+        storage = Mock()
+        storage.get_context.return_value = None
+        mp = _make_processor(storage=storage)
+        mp._get_identity_record = Mock(return_value={'github_handle': 'jenkins-gh'})
+        result = mp._build_identity_attributes('C123_ts1', 'U_JENKINS')
+        assert result['requester_github_handle'] == 'jenkins-gh'
+        assert result['is_global_admin'] == 'false'
+        assert result['authorized_agents'] == 'jenkins'
+
+    def test_enriches_unlinked_user_as_unprivileged(self):
+        """An unlinked requester (no handle) gets no privilege."""
+        storage = Mock()
+        storage.get_context.return_value = None
+        mp = _make_processor(storage=storage)
+        mp._get_identity_record = Mock(return_value={})
+        result = mp._build_identity_attributes('C123_ts1', 'U_UNLINKED')
+        assert result['requester_github_handle'] == ''
+        assert result['is_global_admin'] == 'false'
+        assert result['authorized_agents'] == ''
+
 
 class TestIsFullyAuthorizedUser:
 
-    def test_authorized_true(self):
+    def test_global_admin_true(self):
         mp = _make_processor()
+        mp._get_identity_record = Mock(return_value={'github_handle': 'admin-gh'})
         assert mp.is_fully_authorized_user('U_ADMIN') is True
+
+    def test_agent_level_user_true(self):
+        """A user privileged for any agent (e.g. jenkins) is 'authorized' for routing."""
+        mp = _make_processor()
+        mp._get_identity_record = Mock(return_value={'github_handle': 'jenkins-gh'})
+        assert mp.is_fully_authorized_user('U_JENKINS') is True
 
     def test_unauthorized_false(self):
         mp = _make_processor()
+        mp._get_identity_record = Mock(return_value={'github_handle': 'nobody-gh'})
         assert mp.is_fully_authorized_user('U_NOBODY') is False
+
+    def test_unlinked_user_false(self):
+        """No linked GitHub handle -> not privileged (fail closed)."""
+        mp = _make_processor()
+        mp._get_identity_record = Mock(return_value={})
+        assert mp.is_fully_authorized_user('U_UNLINKED') is False
+
+
+class TestIsGlobalAdmin:
+
+    def test_global_admin_true(self):
+        mp = _make_processor()
+        mp._get_identity_record = Mock(return_value={'github_handle': 'admin-gh'})
+        assert mp.is_global_admin('U_ADMIN') is True
+
+    def test_agent_level_user_false(self):
+        """Agent-level users are NOT global admins."""
+        mp = _make_processor()
+        mp._get_identity_record = Mock(return_value={'github_handle': 'jenkins-gh'})
+        assert mp.is_global_admin('U_JENKINS') is False
+
+    def test_unlinked_user_false(self):
+        mp = _make_processor()
+        mp._get_identity_record = Mock(return_value={})
+        assert mp.is_global_admin('U_UNLINKED') is False
 
 
 class TestHandleConfirmationDetection:
@@ -395,6 +465,7 @@ class TestHasIdentityMapping:
     @patch.dict(os.environ, {"IDENTITY_TABLE_NAME": ""})
     def test_raises_when_no_table_configured(self):
         mp = _make_processor()
+        del mp._get_identity_record  # exercise the real implementation
         with pytest.raises(ValueError, match="IDENTITY_TABLE cannot be fetched"):
             mp._has_identity_mapping("U123")
 
@@ -406,6 +477,7 @@ class TestHasIdentityMapping:
         mock_boto3.resource.return_value.Table.return_value = table
 
         mp = _make_processor()
+        del mp._get_identity_record  # exercise the real implementation
         assert mp._has_identity_mapping("U123") is True
 
     @patch.dict(os.environ, {"IDENTITY_TABLE_NAME": "oscar-identity-W1-dev"})
@@ -416,6 +488,7 @@ class TestHasIdentityMapping:
         mock_boto3.resource.return_value.Table.return_value = table
 
         mp = _make_processor()
+        del mp._get_identity_record  # exercise the real implementation
         assert mp._has_identity_mapping("U123") is False
 
     @patch.dict(os.environ, {"IDENTITY_TABLE_NAME": "oscar-identity-W1-dev"})
@@ -426,6 +499,7 @@ class TestHasIdentityMapping:
         mock_boto3.resource.return_value.Table.return_value = table
 
         mp = _make_processor()
+        del mp._get_identity_record  # exercise the real implementation
         assert mp._has_identity_mapping("U123") is False
 
 

@@ -64,18 +64,34 @@ class TestHandleAppMention:
 
 class TestHandleMessage:
 
-    def test_dm_from_fully_authorized_user(self):
+    def test_dm_from_global_admin_processed(self):
         processor = Mock()
+        processor.is_global_admin.return_value = True
         handler = EventHandlers(processor)
 
         message = {'channel_type': 'im', 'channel': 'D123', 'ts': 'ts1',
                    'user': 'U_ADMIN', 'text': 'hello'}
         handler.handle_message(message, Mock())
 
+        processor.is_global_admin.assert_called_once_with('U_ADMIN')
         processor.process_message.assert_called_once()
 
-    def test_dm_from_dm_authorized_user(self):
+    def test_dm_from_agent_level_user_ignored(self):
+        """Agent-level (non-global) users cannot DM."""
         processor = Mock()
+        processor.is_global_admin.return_value = False
+        handler = EventHandlers(processor)
+
+        message = {'channel_type': 'im', 'channel': 'D123', 'ts': 'ts1',
+                   'user': 'U_JENKINS', 'text': 'hello'}
+        handler.handle_message(message, Mock())
+
+        processor.process_message.assert_not_called()
+
+    def test_dm_from_dm_allowlisted_user_processed(self):
+        """A Slack user on dm_authorized_users can DM even if not a global admin."""
+        processor = Mock()
+        processor.is_global_admin.return_value = False
         handler = EventHandlers(processor)
 
         message = {'channel_type': 'im', 'channel': 'D123', 'ts': 'ts1',
@@ -86,6 +102,7 @@ class TestHandleMessage:
 
     def test_dm_from_unauthorized_user_ignored(self):
         processor = Mock()
+        processor.is_global_admin.return_value = False
         handler = EventHandlers(processor)
 
         message = {'channel_type': 'im', 'channel': 'D123', 'ts': 'ts1',
