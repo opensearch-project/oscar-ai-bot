@@ -26,6 +26,8 @@ logger = logging.getLogger(__name__)
 class MessageProcessor:
     """Processes Slack messages and generates agent responses."""
 
+    DISPLAY_NAME_CACHE_LIMIT = 500
+
     def __init__(self, storage, oscar_agent, reaction_manager, timeout_handler,
                  slack_client=None) -> None:
         """Initialize with required dependencies.
@@ -107,14 +109,19 @@ class MessageProcessor:
 
         name = ''
         try:
-            profile = self.slack_client.users_info(user=user_id)['user']
-            name = (profile.get('profile', {}).get('display_name')
-                    or profile.get('real_name')
-                    or profile.get('name')
+            user = self.slack_client.users_info(user=user_id)['user']
+            name = (user.get('profile', {}).get('display_name')
+                    or user.get('real_name')
+                    or user.get('name')
                     or '')
         except Exception as e:
             logger.warning(f'SLACK_DISPLAY_NAME_LOOKUP_FAILED: user={user_id} error={e}')
 
+        # Bounded so a long-lived container serving many users cannot grow this without limit.
+        # Dropping the whole cache rather than evicting one entry keeps it to a single branch; the
+        # cost of a refill is one API call per user, and a name is only ever a label.
+        if len(self._display_names) >= self.DISPLAY_NAME_CACHE_LIMIT:
+            self._display_names.clear()
         self._display_names[user_id] = name
         return name
 

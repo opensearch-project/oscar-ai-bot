@@ -269,8 +269,12 @@ def handle_trigger_job(jenkins_client: JenkinsClient, params: Dict[str, Any], se
                 'job_name': job_name
             }
 
+    # On a registry miss, fall back to overwriting only what the caller actually supplied. Adding
+    # the identity parameters instead would push them at every job, none of which declares them;
+    # this way a model-supplied identity still cannot survive, and nothing else is touched.
     job_definition = jenkins_client.job_registry.get_job(job_name)
-    declared_params = {p.name for p in job_definition.parameters} if job_definition else set()
+    declared_params = ({p.name for p in job_definition.parameters} if job_definition
+                       else set(job_params))
     job_params = _inject_authenticated_requester(
         job_name, job_params, session_attributes or {}, declared_params,
     )

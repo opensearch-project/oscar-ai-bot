@@ -515,6 +515,24 @@ class TestInjectAuthenticatedRequester(unittest.TestCase):
         )
         self.assertEqual(params, original)
 
+    def test_a_registry_miss_still_discards_a_supplied_identity(self):
+        """An unknown job is rejected downstream, but the safeguard must not rely on that."""
+        params = _inject_authenticated_requester(
+            'mystery-job',
+            {'DECIDED_BY_SLACK_USER': 'U_CLAIMED'},
+            {'requester_user_id': 'U_REAL'},
+            set({'DECIDED_BY_SLACK_USER': 'U_CLAIMED'}),
+        )
+        self.assertEqual(params['DECIDED_BY_SLACK_USER'], 'U_REAL')
+
+    def test_a_registry_miss_does_not_add_identity_params_to_other_jobs(self):
+        """Most jobs declare no identity parameter; a miss must not push one at them."""
+        original = {'IMAGE_FULL_NAME': 'alpine:3.19'}
+        params = _inject_authenticated_requester(
+            'docker-scan', original, {'requester_user_id': 'U_REAL'}, set(original),
+        )
+        self.assertEqual(params, original)
+
     def test_the_caller_mapping_is_not_mutated(self):
         original = {'DECIDED_BY_SLACK_USER': 'U_CLAIMED'}
         _inject_authenticated_requester('release-state', original, {'requester_user_id': 'U_REAL'})
