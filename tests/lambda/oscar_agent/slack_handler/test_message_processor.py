@@ -44,6 +44,54 @@ class TestExtractQuery:
         assert mp.extract_query('  <@U1>  hello  ') == 'hello'
 
 
+class TestResolveDisplayName:
+    """The recorded name has to come from Slack, since the model's version of it is a claim."""
+
+    @staticmethod
+    def _slack(user):
+        client = Mock()
+        client.users_info.return_value = {'user': user}
+        return client
+
+    def test_prefers_the_profile_display_name(self):
+        mp = _make_processor(slack_client=self._slack(
+            {'name': 'foo', 'real_name': 'Foo Bar', 'profile': {'display_name': 'Foo'}}))
+        assert mp._resolve_display_name('U1') == 'Foo'
+
+    def test_falls_back_to_real_name_then_the_handle(self):
+        """real_name and name both sit on the user object, not inside profile."""
+        mp = _make_processor(slack_client=self._slack(
+            {'name': 'foo', 'real_name': 'Foo Bar', 'profile': {'display_name': ''}}))
+        assert mp._resolve_display_name('U1') == 'Foo Bar'
+
+        mp = _make_processor(slack_client=self._slack({'name': 'foo', 'profile': {}}))
+        assert mp._resolve_display_name('U1') == 'foo'
+
+    def test_a_lookup_failure_costs_the_label_not_the_action(self):
+        client = Mock()
+        client.users_info.side_effect = RuntimeError('missing_scope')
+        mp = _make_processor(slack_client=client)
+        assert mp._resolve_display_name('U1') == ''
+
+    def test_no_slack_client_resolves_nothing(self):
+        assert _make_processor()._resolve_display_name('U1') == ''
+
+    def test_result_is_cached_per_user(self):
+        client = self._slack({'profile': {'display_name': 'Foo'}})
+        mp = _make_processor(slack_client=client)
+        assert mp._resolve_display_name('U1') == 'Foo'
+        assert mp._resolve_display_name('U1') == 'Foo'
+        client.users_info.assert_called_once()
+
+    def test_cache_is_bounded(self):
+        """A long-lived container serving many users must not grow this without limit."""
+        client = self._slack({'profile': {'display_name': 'Foo'}})
+        mp = _make_processor(slack_client=client)
+        for index in range(MessageProcessor.DISPLAY_NAME_CACHE_LIMIT + 5):
+            mp._resolve_display_name(f'U{index}')
+        assert len(mp._display_names) <= MessageProcessor.DISPLAY_NAME_CACHE_LIMIT
+
+
 class TestBuildIdentityAttributes:
 
     def test_first_message_sets_requester(self):
@@ -54,6 +102,22 @@ class TestBuildIdentityAttributes:
         assert result['current_user_id'] == 'U_FIRST'
         assert result['requester_user_id'] == 'U_FIRST'
         assert 'approver_user_id' not in result
+
+    def test_requester_display_name_is_included_when_slack_resolves_one(self):
+        storage = Mock()
+        storage.get_context.return_value = None
+        client = Mock()
+        client.users_info.return_value = {'user': {'profile': {'display_name': 'Foo Bar'}}}
+        mp = _make_processor(storage=storage, slack_client=client)
+        result = mp._build_identity_attributes('C123_ts1', 'U_FIRST')
+        assert result['requester_display_name'] == 'Foo Bar'
+
+    def test_requester_display_name_is_omitted_when_unresolvable(self):
+        storage = Mock()
+        storage.get_context.return_value = None
+        mp = _make_processor(storage=storage)
+        result = mp._build_identity_attributes('C123_ts1', 'U_FIRST')
+        assert 'requester_display_name' not in result
 
     def test_pending_approval_different_user_sets_approver(self):
         """A different user replying after a confirmation prompt becomes approver."""
