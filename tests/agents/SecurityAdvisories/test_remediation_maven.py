@@ -61,6 +61,12 @@ def _load_maven():
             'maven_strategy', os.path.join(_MAVEN_PATH, 'maven.py'))
         mav = importlib.util.module_from_spec(mav_spec)
         mav_spec.loader.exec_module(mav)
+    # Unit tests never hit the network: stub the core-catalog fetch to fail, so
+    # _core_managed_version returns None (-> literal force / plain unsupported)
+    # unless a test explicitly patches mav._core_managed_version / mav._http_get.
+    # Keep the real _http_get accessible for its own direct test.
+    mav._real_http_get = mav._http_get
+    mav._http_get = lambda *a, **k: (_ for _ in ()).throw(RuntimeError("no network in tests"))
     return mav, rem
 
 
@@ -128,6 +134,19 @@ class TestBuildContext:
         maven, _ = _load_maven()
         ctx = _ctx(maven, package='com.google.guava:guava', patched='33.5.0-jre')
         assert ctx['coordinate'] == 'com.google.guava:guava'
+
+    def test_origin_files_carried_onto_context(self):
+        maven, _ = _load_maven()
+        origin_files = ['libs/opensaml/build.gradle']
+        ctx = _ctx(maven, origin_files=origin_files)
+        assert ctx['origin_files'] == origin_files
+
+    def test_origin_files_default_to_empty_list(self):
+        # absent origin (npm-style event / release-tag scan) -> [], never None,
+        # so the force path can iterate it unconditionally.
+        maven, _ = _load_maven()
+        ctx = _ctx(maven)
+        assert ctx['origin_files'] == []
 
     def test_missing_field_raises(self):
         maven, rem = _load_maven()
@@ -382,6 +401,34 @@ class TestApplyFix:
         # no-op edit -> reject
         assert maven._verify_force_edit(base, base, "com.x:y", "2.5.0") is False
 
+    def test_verify_force_edit_var_token(self):
+        # expected_token is a ${versions.X} var (core-managed re-assert).
+        maven, _ = _load_maven()
+        base = 'a\nb\n  force "g:a:1.0"\n'
+        tok = '${versions.jackson_databind}'
+        # double-quoted GString pin at the var -> ok (no literal version introduced)
+        good = base + f'  force "com.x:y:{tok}"\n'
+        assert maven._verify_force_edit(base, good, "com.x:y", "2.5.0",
+                                        expected_token=tok) is True
+        # single-quoted (wouldn't interpolate) -> reject
+        single = base + f"  force 'com.x:y:{tok}'\n"
+        assert maven._verify_force_edit(base, single, "com.x:y", "2.5.0",
+                                        expected_token=tok) is False
+        # sneaks in a foreign literal version alongside the var -> reject
+        sneaky = base + f'  force "com.x:y:{tok}"\n  force "z:w:9.9.9"\n'
+        assert maven._verify_force_edit(base, sneaky, "com.x:y", "2.5.0",
+                                        expected_token=tok) is False
+        # sneaks in ANOTHER dep pinned via a var (colon form) -> reject (coord regex)
+        sneaky_var = base + f'  force "com.x:y:{tok}"\n  force "z:w:{tok}"\n'
+        assert maven._verify_force_edit(base, sneaky_var, "com.x:y", "2.5.0",
+                                        expected_token=tok) is False
+        # extra dep via eachDependency useVersion (var) — no foreign g:a: colon, so the
+        # coord regex misses it; the "exactly one pin statement" check rejects it.
+        sneaky_each = base + (f'  force "com.x:y:{tok}"\n'
+                              f'  if (d.name == \'z\') {{ d.useVersion "{tok}" }}\n')
+        assert maven._verify_force_edit(base, sneaky_each, "com.x:y", "2.5.0",
+                                        expected_token=tok) is False
+
     def test_transitive_but_actually_declared_edits_declaration(self, tmp_path):
         maven, _ = _load_maven()
         # Stale scan says transitive, but the dep IS declared directly on HEAD:
@@ -406,6 +453,19 @@ class TestApplyFix:
         assert 'core' in str(exc.value).lower()
         assert 'allprojects {' not in _read(tmp_path)   # no force block written
 
+    def test_core_inherited_message_enriched_with_core_version(self, tmp_path):
+        # core_inherited + core confirmed on a vulnerable version -> the decline names
+        # core's actual version and points the fix at core (the safeguard message).
+        maven, rem = _load_maven()
+        _gradle(tmp_path, "dependencies {\n  implementation 'org.jsoup:jsoup:1.20.1'\n}\n")
+        maven._core_managed_version = lambda coord: '5.6.0'   # core below patched
+        ctx = _ctx(maven, package='org.apache.httpcomponents.client5/httpclient5',
+                   patched='5.6.4', declaration_class='core_inherited')
+        with pytest.raises(rem.RemediationUnsupported) as exc:
+            maven.apply_fix(str(tmp_path), ctx)
+        msg = str(exc.value)
+        assert '5.6.0' in msg and 'vulnerable' in msg.lower() and 'core' in msg.lower()
+
     def test_undeclared_unknown_class_stays_unsupported(self, tmp_path):
         maven, rem = _load_maven()
         # No declaration and no transitive signal -> unchanged unsupported behavior.
@@ -427,10 +487,189 @@ class TestApplyFix:
             maven.apply_fix(str(tmp_path), ctx)
         assert 'root build.gradle' in str(exc.value)
 
+    def test_transitive_single_origin_file_forces_in_submodule(self, tmp_path):
+        # opensaml pattern: undeclared transitive resolving through ONE submodule ->
+        # force in that submodule's own configurations.all (not root allprojects).
+        maven, _ = _load_maven()
+        (tmp_path / 'build.gradle').write_text("plugins { id 'java' }\n")  # root, not target
+        sub = tmp_path / 'libs' / 'opensaml'
+        sub.mkdir(parents=True)
+        (sub / 'build.gradle').write_text(
+            "configurations.all {\n  resolutionStrategy {\n    force 'x:y:1.0'\n  }\n}\n")
+        ctx = _ctx(maven, package='com.fasterxml.jackson.core/jackson-databind',
+                   patched='2.21.5', declaration_class='transitive',
+                   origin_files=['libs/opensaml/build.gradle'])
+        maven.apply_fix(str(tmp_path), ctx)
+        sub_text = (sub / 'build.gradle').read_text()
+        assert 'jackson-databind:2.21.5' in sub_text
+        assert 'allprojects {' not in sub_text          # submodule scope, not root
+        assert ctx['bumped_sections'] == ['libs/opensaml/build.gradle (force)']
+        assert 'jackson' not in (tmp_path / 'build.gradle').read_text()  # root untouched
+
+    def test_transitive_multiple_origin_files_falls_back_to_root(self, tmp_path):
+        # jetty pattern: undeclared transitive resolving through several modules ->
+        # no single owner -> root allprojects cascade (main-faithful; precise
+        # per-owner handling is deferred, see todo-follow-ups.md). Not declined.
+        maven, _ = _load_maven()
+        (tmp_path / 'build.gradle').write_text("plugins { id 'java' }\n")
+        for rel in ('plugins/repository-hdfs', 'test/fixtures/hdfs-fixture'):
+            d = tmp_path / rel
+            d.mkdir(parents=True)
+            (d / 'build.gradle').write_text("dependencies {}\n")
+        origin_files = ['build.gradle', 'plugins/repository-hdfs/build.gradle',
+                        'test/fixtures/hdfs-fixture/build.gradle']
+        ctx = _ctx(maven, package='org.eclipse.jetty/jetty-http', patched='12.0.31',
+                   declaration_class='transitive', origin_files=origin_files)
+        maven.apply_fix(str(tmp_path), ctx)
+        text = (tmp_path / 'build.gradle').read_text()   # root cascade
+        assert 'allprojects {' in text
+        assert 'org.eclipse.jetty:jetty-http:12.0.31' in text
+        assert ctx['bumped_sections'] == ['build.gradle (force)']
+        # submodules untouched (the pin cascades from root)
+        assert 'jetty' not in (tmp_path / 'test/fixtures/hdfs-fixture/build.gradle').read_text()
+
+    # --- security#6550 pattern: jackson-databind "declared" only via a core-managed
+    # ${versions.jackson_databind} (root force + implementation), but a submodule BOM
+    # (libs/opensaml -> jackson-bom) overrides it. Scan classifies transitive, origin
+    # names libs/opensaml -> force there (NOT core_inherited unsupported, NOT root).
+    # The version form depends on what core resolves the var to. ---
+
+    @staticmethod
+    def _security_opensaml_tree(tmp_path):
+        (tmp_path / 'build.gradle').write_text(
+            'configurations { all { resolutionStrategy {\n'
+            '  force "com.fasterxml.jackson.core:jackson-databind:${versions.jackson_databind}"\n'
+            '} } }\n'
+            'dependencies {\n'
+            '  implementation "com.fasterxml.jackson.core:jackson-databind:${versions.jackson_databind}"\n'
+            '}\n')
+        sub = tmp_path / 'libs' / 'opensaml'
+        sub.mkdir(parents=True)
+        (sub / 'build.gradle').write_text(
+            'configurations.all {\n  resolutionStrategy {\n'
+            '    force "org.apache.commons:commons-lang3:3.18.0"\n  }\n}\n')
+        # origin_files as the Lambda distills it (single resolving module)
+        return ['libs/opensaml/build.gradle']
+
+    def test_core_var_reuses_var_when_core_patched(self, tmp_path):
+        # core manages jackson_databind at >= patched -> re-assert the maintainer's
+        # ${versions.jackson_databind} in libs/opensaml (double-quoted GString).
+        maven, _ = _load_maven()
+        origin_files = self._security_opensaml_tree(tmp_path)
+        maven._core_managed_version = lambda coord: '2.22.2'   # core is patched
+        ctx = _ctx(maven, package='com.fasterxml.jackson.core/jackson-databind',
+                   patched='2.22.0', declaration_class='transitive', origin_files=origin_files)
+        maven.apply_fix(str(tmp_path), ctx)
+        sub_text = (tmp_path / 'libs' / 'opensaml' / 'build.gradle').read_text()
+        assert ('force "com.fasterxml.jackson.core:jackson-databind:'
+                '${versions.jackson_databind}"') in sub_text        # var, double-quoted
+        assert '2.22.0' not in sub_text                             # no literal pin
+        assert ctx['bumped_sections'] == ['libs/opensaml/build.gradle (force)']
+
+    def test_core_var_folds_into_existing_block_via_llm(self, tmp_path):
+        # var pin + LLM available -> fold one line into libs/opensaml's EXISTING
+        # configurations.all (maintainer style), not a fresh appended block.
+        maven, _ = _load_maven()
+        origin_files = self._security_opensaml_tree(tmp_path)
+        maven._core_managed_version = lambda coord: '2.22.2'   # core patched -> var
+        fold = {
+            "old_string": '    force "org.apache.commons:commons-lang3:3.18.0"',
+            "new_string": '    force "org.apache.commons:commons-lang3:3.18.0"\n'
+                          '    force "com.fasterxml.jackson.core:jackson-databind:'
+                          '${versions.jackson_databind}"',
+        }
+        ctx = _ctx(maven, package='com.fasterxml.jackson.core/jackson-databind',
+                   patched='2.22.0', declaration_class='transitive', origin_files=origin_files)
+        with patch.object(llm_planner, 'write_force_edit', return_value=fold):
+            maven.apply_fix(str(tmp_path), ctx)
+        sub_text = (tmp_path / 'libs' / 'opensaml' / 'build.gradle').read_text()
+        assert ('force "com.fasterxml.jackson.core:jackson-databind:'
+                '${versions.jackson_databind}"') in sub_text     # var, double-quoted
+        assert sub_text.count('configurations.all {') == 1       # folded, not appended
+        assert '// Pin' not in sub_text                          # no fresh block
+        assert ctx['bumped_sections'] == ['libs/opensaml/build.gradle (force, llm)']
+
+    def test_core_var_llm_single_quote_rejected_falls_back(self, tmp_path):
+        # LLM emits a single-quoted GString (wouldn't interpolate) -> verify rejects
+        # -> deterministic append with correct double quotes.
+        maven, _ = _load_maven()
+        origin_files = self._security_opensaml_tree(tmp_path)
+        maven._core_managed_version = lambda coord: '2.22.2'
+        bad = {
+            "old_string": '    force "org.apache.commons:commons-lang3:3.18.0"',
+            "new_string": '    force "org.apache.commons:commons-lang3:3.18.0"\n'
+                          "    force 'com.fasterxml.jackson.core:jackson-databind:"
+                          "${versions.jackson_databind}'",   # single quotes -> invalid
+        }
+        ctx = _ctx(maven, package='com.fasterxml.jackson.core/jackson-databind',
+                   patched='2.22.0', declaration_class='transitive', origin_files=origin_files)
+        with patch.object(llm_planner, 'write_force_edit', return_value=bad):
+            maven.apply_fix(str(tmp_path), ctx)
+        sub_text = (tmp_path / 'libs' / 'opensaml' / 'build.gradle').read_text()
+        assert '// Pin' in sub_text                              # fell back to append
+        assert ('force "com.fasterxml.jackson.core:jackson-databind:'
+                '${versions.jackson_databind}"') in sub_text     # double-quoted append
+        assert ctx['bumped_sections'] == ['libs/opensaml/build.gradle (force)']
+
+    def test_core_vulnerable_declines_fix_in_core(self, tmp_path):
+        # core itself is below patched -> the fix belongs in core; decline with a
+        # concrete message naming core's vulnerable version.
+        maven, rem = _load_maven()
+        origin_files = self._security_opensaml_tree(tmp_path)
+        maven._core_managed_version = lambda coord: '2.21.4'   # core still vulnerable
+        ctx = _ctx(maven, package='com.fasterxml.jackson.core/jackson-databind',
+                   patched='2.22.0', declaration_class='transitive', origin_files=origin_files)
+        with pytest.raises(rem.RemediationUnsupported) as exc:
+            maven.apply_fix(str(tmp_path), ctx)
+        assert '2.21.4' in str(exc.value) and 'core' in str(exc.value).lower()
+        # nothing forced in the submodule
+        assert 'jackson-databind' not in \
+            (tmp_path / 'libs' / 'opensaml' / 'build.gradle').read_text()
+
+    def test_core_var_lookup_unavailable_falls_back_to_literal(self, tmp_path):
+        # core lookup unavailable (network stubbed off in _load_maven) -> literal
+        # patched force in libs/opensaml (always fixes the CVE), never a wrong decline.
+        maven, _ = _load_maven()
+        origin_files = self._security_opensaml_tree(tmp_path)
+        ctx = _ctx(maven, package='com.fasterxml.jackson.core/jackson-databind',
+                   patched='2.22.0', declaration_class='transitive', origin_files=origin_files)
+        maven.apply_fix(str(tmp_path), ctx)
+        sub_text = (tmp_path / 'libs' / 'opensaml' / 'build.gradle').read_text()
+        assert 'com.fasterxml.jackson.core:jackson-databind:2.22.0' in sub_text  # literal
+        assert '${versions.jackson_databind}' not in sub_text.split('commons-lang3')[-1]
+        assert ctx['bumped_sections'] == ['libs/opensaml/build.gradle (force)']
+
+    def test_transitive_absent_origin_file_falls_back_to_root(self, tmp_path):
+        # origin names a module not in this (fork's) tree -> ignored -> root fallback
+        # (allprojects cascade), preserving the pre-origin behavior.
+        maven, _ = _load_maven()
+        (tmp_path / 'build.gradle').write_text("plugins { id 'java' }\n")
+        ctx = _ctx(maven, package='com.x/y', patched='2.0.0',
+                   declaration_class='transitive',
+                   origin_files=['libs/ghost/build.gradle'])
+        maven.apply_fix(str(tmp_path), ctx)
+        text = (tmp_path / 'build.gradle').read_text()
+        assert 'allprojects {' in text                  # root fallback cascades
+        assert 'com.x:y:2.0.0' in text
+        assert ctx['bumped_sections'] == ['build.gradle (force)']
+
     def test_no_build_gradle_unsupported(self, tmp_path):
         maven, rem = _load_maven()
         with pytest.raises(rem.RemediationUnsupported):
             maven.apply_fix(str(tmp_path), _ctx(maven))
+
+    def test_transitive_bare_core_var_forces_literal(self, tmp_path):
+        # transitive dep referenced via a bare ${var} not defined in-repo (core-
+        # inherited) -> recorded as a core_force_var; force falls back to literal
+        # (core lookup stubbed unavailable). Exercises the bare-var force_var path.
+        maven, _ = _load_maven()
+        _gradle(tmp_path, 'dependencies {\n  force "com.x:y:${some_core_var}"\n}\n')
+        ctx = _ctx(maven, package='com.x/y', patched='2.0.0',
+                   declaration_class='transitive', origin_files=['build.gradle'])
+        maven.apply_fix(str(tmp_path), ctx)
+        text = _read(tmp_path)
+        assert 'com.x:y:2.0.0' in text                     # literal force appended
+        assert ctx['bumped_sections'] == ['build.gradle (force)']
 
     def test_literal_and_var_same_file_both_applied(self, tmp_path):
         # Regression (review #1): a literal edit and a same-file ${var} bump must
@@ -530,6 +769,40 @@ class TestHelpers:
     def test_regenerate_is_noop(self, tmp_path):
         maven, _ = _load_maven()
         assert maven.regenerate(str(tmp_path), {}) is None
+
+    def test_resolving_build_files_distinct_present_only(self, tmp_path):
+        maven, _ = _load_maven()
+        (tmp_path / 'build.gradle').write_text('x')
+        sub = tmp_path / 'libs' / 'opensaml'
+        sub.mkdir(parents=True)
+        (sub / 'build.gradle').write_text('x')
+        origin_files = [
+            'build.gradle',
+            'build.gradle',                     # dup -> de-duped
+            'libs/opensaml/build.gradle',
+            'libs/ghost/build.gradle',          # absent in clone -> dropped
+            'io.netty-netty-bom@4.2.18.Final',  # not a build.gradle path -> ignored
+        ]
+        assert maven._resolving_build_files(str(tmp_path), origin_files) == [
+            'build.gradle', 'libs/opensaml/build.gradle']
+
+    def test_resolving_build_files_empty_or_absent_origin(self, tmp_path):
+        maven, _ = _load_maven()
+        assert maven._resolving_build_files(str(tmp_path), []) == []
+        assert maven._resolving_build_files(str(tmp_path), None) == []
+
+    def test_force_block_root_uses_allprojects(self):
+        maven, _ = _load_maven()
+        ctx = _ctx(maven, package='com.x/y', patched='2.0.0')
+        block = maven._force_block(ctx, 'com.x:y:2.0.0', 'build.gradle')
+        assert 'allprojects {' in block and "force 'com.x:y:2.0.0'" in block
+
+    def test_force_block_submodule_omits_allprojects(self):
+        maven, _ = _load_maven()
+        ctx = _ctx(maven, package='com.x/y', patched='2.0.0')
+        block = maven._force_block(ctx, 'com.x:y:2.0.0', 'libs/opensaml/build.gradle')
+        assert 'allprojects {' not in block
+        assert 'configurations.all {' in block and "force 'com.x:y:2.0.0'" in block
 
     def test_gradle_sources_reads_each_file_once(self, tmp_path, monkeypatch):
         # Regression guard: files were previously read twice (once for the sort
@@ -795,6 +1068,59 @@ class TestCoreSubmodule:
 
 
 class TestCoreHelpers:
+    def test_core_managed_version_resolves_via_catalog(self):
+        # fetch core catalog (stubbed) -> [libraries] group+name -> version.ref ->
+        # [versions] value. Exercises the real parsing without touching the network.
+        maven, _ = _load_maven()
+        catalog = ('[versions]\njackson_databind = "2.22.2"\nother = "1.0"\n'
+                   '[libraries]\njackson-databind = { group = "com.fasterxml.jackson.core", '
+                   'name = "jackson-databind", version.ref = "jackson_databind" }\n')
+        maven._http_get = lambda *a, **k: catalog
+        assert maven._core_managed_version(
+            'com.fasterxml.jackson.core:jackson-databind') == '2.22.2'
+        # coordinate core doesn't manage -> None
+        assert maven._core_managed_version('com.example:absent') is None
+
+    def test_core_managed_version_network_failure_returns_none(self):
+        maven, _ = _load_maven()  # _http_get already stubbed to raise in _load_maven
+        assert maven._core_managed_version(
+            'com.fasterxml.jackson.core:jackson-databind') is None
+
+    def test_http_get_reads_and_decodes(self):
+        # the real _http_get (network shim) reads the response body and decodes it.
+        maven, _ = _load_maven()
+
+        class _Resp:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                return False
+
+            def read(self):
+                return b"catalog-bytes"
+
+        with patch("urllib.request.urlopen", return_value=_Resp()):
+            assert maven._real_http_get("https://example.test/catalog") == "catalog-bytes"
+
+    def test_core_catalog_fetched_once_across_coords(self):
+        # memoized: many coordinate lookups in one run share a single catalog fetch
+        # (matters for batched runs resolving many CVEs).
+        maven, _ = _load_maven()
+        catalog = ('[versions]\njackson_databind = "2.22.2"\nnetty = "4.2.0"\n'
+                   '[libraries]\n'
+                   'jackson-databind = { group = "com.fasterxml.jackson.core", '
+                   'name = "jackson-databind", version.ref = "jackson_databind" }\n'
+                   'netty-common = { group = "io.netty", name = "netty-common", '
+                   'version.ref = "netty" }\n')
+        calls = []
+        maven._http_get = lambda *a, **k: (calls.append(1), catalog)[1]
+        assert maven._core_managed_version(
+            'com.fasterxml.jackson.core:jackson-databind') == '2.22.2'
+        assert maven._core_managed_version('io.netty:netty-common') == '4.2.0'
+        assert maven._core_managed_version('com.example:absent') is None
+        assert len(calls) == 1   # one fetch for all three lookups
+
     def test_versions_map_key(self):
         maven, _ = _load_maven()
         assert maven._versions_map_key('${versions.thrift}') == 'thrift'

@@ -342,79 +342,13 @@ class TestOpensearchRequest:
 
 
 # ---------------------------------------------------------------------------
-# get_latest_scans_index tests
+# SCANS_INDEX (scans rollover alias) — replaces the old get_latest_scans_index()
 # ---------------------------------------------------------------------------
 
 
-class TestGetLatestScansIndexHappyPath:
-    """Test get_latest_scans_index returns the most recently created index."""
+class TestScansIndexAlias:
+    """The scans read target is the rollover alias, defaulting to 'scans'."""
 
-    def test_returns_index_from_search_sorted_by_index_name(self):
+    def test_defaults_to_scans_alias(self):
         mod = _load_aws_utils()
-        cfg = _make_config_mock(cross_account_role_arn='')
-
-        search_response = {
-            'hits': {
-                'total': {'value': 164},
-                'hits': [
-                    {
-                        '_index': 'scans-000164',
-                        '_id': 'abc123',
-                        '_score': None,
-                        'sort': ['scans-000164'],
-                    },
-                ],
-            },
-        }
-
-        mock_session = MagicMock()
-        mock_creds = MagicMock()
-        mock_session.get_credentials.return_value = mock_creds
-
-        mock_response = MagicMock()
-        mock_response.status_code = 200
-        mock_response.json.return_value = search_response
-
-        with patch.object(mod, 'config', cfg), \
-             patch.object(mod, 'boto3') as mock_boto3, \
-             patch.object(mod, 'requests') as mock_requests, \
-             patch.object(mod, 'SigV4Auth'):
-            mock_boto3.Session.return_value = mock_session
-            mock_requests.request.return_value = mock_response
-
-            result = mod.get_latest_scans_index()
-
-        assert result == 'scans-000164'
-
-
-class TestGetLatestScansIndexEmptyResponse:
-    """Test get_latest_scans_index raises when no scans indices are found."""
-
-    def test_raises_runtime_error_on_empty_hits(self):
-        mod = _load_aws_utils()
-        cfg = _make_config_mock(cross_account_role_arn='')
-
-        search_response = {
-            'hits': {
-                'total': {'value': 0},
-                'hits': [],
-            },
-        }
-
-        mock_session = MagicMock()
-        mock_creds = MagicMock()
-        mock_session.get_credentials.return_value = mock_creds
-
-        mock_response = MagicMock()
-        mock_response.status_code = 200
-        mock_response.json.return_value = search_response
-
-        with patch.object(mod, 'config', cfg), \
-             patch.object(mod, 'boto3') as mock_boto3, \
-             patch.object(mod, 'requests') as mock_requests, \
-             patch.object(mod, 'SigV4Auth'):
-            mock_boto3.Session.return_value = mock_session
-            mock_requests.request.return_value = mock_response
-
-            with pytest.raises(RuntimeError, match='No scans indices found'):
-                mod.get_latest_scans_index()
+        assert mod.SCANS_INDEX == 'scans'
