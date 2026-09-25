@@ -42,7 +42,7 @@ from typing import Any, Dict, List, Optional
 import boto3
 import requests
 import semver
-from aws_utils import get_latest_scans_index, opensearch_request
+from aws_utils import SCANS_INDEX, SCANS_RECENCY_WINDOW, opensearch_request
 from origin_classifier import classify_origin
 from query_utils import connection_error, error_response
 
@@ -597,6 +597,8 @@ def _affected_candidates(cve_id: str, request_id: str):
                     # release_type is a text field with a keyword sub-field; use
                     # the keyword for exact matching. `terms` matches either bundle.
                     {'terms': {'release_type.keyword': SCANS_RELEASE_TYPES}},
+                    # Bound by scan recency so can_match can skip older indices.
+                    {'range': {'timestamp.scan': {'gte': SCANS_RECENCY_WINDOW}}},
                     {'nested': {
                         'path': 'vulnerabilities',
                         # inner_hits returns ONLY the matched (non-excluded)
@@ -640,7 +642,7 @@ def _affected_candidates(cve_id: str, request_id: str):
     })
 
     response = opensearch_request(
-        'POST', f'/{get_latest_scans_index()}/_search', body,
+        'POST', f'/{SCANS_INDEX}/_search', body,
     )
     hits = response.get('hits', {}).get('hits', [])
 
