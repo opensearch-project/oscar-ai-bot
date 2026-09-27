@@ -1247,11 +1247,15 @@ class TestBuildCveBatch:
 
     @staticmethod
     def _entry(gh_package, patched, cve_id, ecosystem='maven',
-               declaration_class='direct', origin_files=None):
+               declaration_class='direct', origin_files=None, package=None,
+               installed='1.0.0'):
+        # scans coordinate defaults to the canonical name in '/'-form
         return {
             'gh_package': gh_package,
+            'package': package if package is not None else gh_package.replace(':', '/'),
             'patched_version': patched,
             'cve_id': cve_id,
+            'installed_version': installed,
             'ecosystem': ecosystem,
             'declaration_class': declaration_class,
             'origin_files': origin_files or [],
@@ -1264,7 +1268,8 @@ class TestBuildCveBatch:
             self._entry('org.apache.logging.log4j:log4j-core', '2.17.1', 'CVE-2026-5'),
         ], 'req')
         assert len(batch) == 1
-        assert batch[0]['package'] == 'org.apache.logging.log4j:log4j-core'
+        # emitted package is the scans coordinate ('/'-form), not the canonical key
+        assert batch[0]['package'] == 'org.apache.logging.log4j/log4j-core'
         assert batch[0]['patched_version'] == '2.17.1'
         assert batch[0]['cve_ids'] == ['CVE-2026-1', 'CVE-2026-5']
 
@@ -1283,7 +1288,7 @@ class TestBuildCveBatch:
             self._entry('g:a', '1.0.0', 'CVE-1'),
             self._entry('g:b', '2.0.0', 'CVE-2'),
         ], 'req')
-        assert [b['package'] for b in batch] == ['g:a', 'g:b']  # sorted
+        assert [b['package'] for b in batch] == ['g/a', 'g/b']  # sorted, scans form
 
     def test_canonical_keying_unifies_slash_and_colon_forms(self):
         # scans writes group/artifact, advisory writes group:artifact -> same package
@@ -1303,7 +1308,7 @@ class TestBuildCveBatch:
             self._entry('g:a', '', 'CVE-2'),
             self._entry('g:b', '3.0.0', 'CVE-3'),
         ], 'req')
-        assert [b['package'] for b in batch] == ['g:b']
+        assert [b['package'] for b in batch] == ['g/b']
 
     def test_max_handles_non_semver_maven_versions(self):
         mod, _ = _load_remediation_handler()
@@ -1489,3 +1494,140 @@ class TestResolveProjectCves:
             {'cve-2026-1'.upper()}, 'req',
         )
         assert [r['cve_id'] for r in ready] == ['CVE-2026-1']
+
+
+class TestRemediateProject:
+    """End-to-end handle_remediate_project: gather -> resolve -> dedup ->
+    per-ecosystem dispatch. OpenSearch, resolver, and ECS are mocked."""
+
+    _ENV = {
+        'NPM_REMEDIATION_TASKDEF': 'oscar-npm',
+        'MAVEN_REMEDIATION_TASKDEF': 'oscar-maven',
+        'REMEDIATION_ECS_CLUSTER': 'oscar',
+        'REMEDIATION_ECS_SUBNETS': 'subnet-a',
+        'REMEDIATION_ECS_SECURITY_GROUP': 'sg-1',
+    }
+
+    # three distinct packages across two ecosystems
+    _VULNS = [
+        ('CVE-1', 'maven', 'g/a', '1.0.0'),
+        ('CVE-2', 'maven', 'g/b', '1.0.0'),
+        ('CVE-3', 'npm', 'axios', '1.2.0'),
+    ]
+
+    @staticmethod
+    def _ready(cve_id, ecosystem, package, *a, **k):
+        # gh_package derived from the scans package keeps distinct packages distinct
+        return {'outcome': 'ready', 'gh_package': package.replace('/', ':'),
+                'patched_version': '9.9.9'}
+
+    def _mod(self, vulns=None, resolver=None):
+        mod, _ = _load_remediation_handler()
+        mod.opensearch_request = MagicMock(
+            return_value=_scans_response([_project_hit(vulns=vulns or self._VULNS)]))
+        mod._resolve_remediation = MagicMock(side_effect=resolver or self._ready)
+        return mod
+
+    def _run(self, mod, params, accepted=True, session=None):
+        client = _install_fake_ecs(mod, accepted=accepted)
+        with patch.dict(os.environ, self._ENV, clear=False):
+            out = mod.handle_remediate_project(params, 'req', session)
+        return out, client
+
+    @staticmethod
+    def _envs(client):
+        envs = []
+        for call in client.run_task.call_args_list:
+            env_list = call.kwargs['overrides']['containerOverrides'][0]['environment']
+            envs.append({e['name']: e['value'] for e in env_list})
+        return envs
+
+    def test_project_mode_one_task_per_ecosystem(self):
+        mod = self._mod()
+        out, client = self._run(mod, {'project_name': 'OpenSearch'})
+        assert out['status'] == 'remediation_started'
+        assert out['mode'] == 'project'
+        # 2 ecosystems -> 2 tasks (maven batch of 2, npm batch of 1)
+        assert client.run_task.call_count == 2
+        assert out['pull_requests_expected'] == 2
+        assert out['remediating_cves'] == ['CVE-1', 'CVE-2', 'CVE-3']
+
+    def test_project_mode_cve_batch_payload_shape(self):
+        mod = self._mod()
+        _out, client = self._run(mod, {'project_name': 'OpenSearch'})
+        batches = [json.loads(e['CVE_BATCH']) for e in self._envs(client)]
+        maven_batch = next(b for b in batches if len(b) == 2)
+        assert {e['package'] for e in maven_batch} == {'g/a', 'g/b'}
+        for e in maven_batch:
+            assert e['patched_version'] == '9.9.9'
+            assert e['installed_version'] == '1.0.0'
+            assert isinstance(e['cve_ids'], list) and e['cve_ids']
+
+    def test_per_cve_mode_one_task_per_package(self):
+        mod = self._mod()
+        out, client = self._run(mod, {'project_name': 'OpenSearch', 'mode': 'per_cve'})
+        assert out['status'] == 'remediation_started'
+        assert client.run_task.call_count == 3       # one per package
+        assert all(len(json.loads(e['CVE_BATCH'])) == 1 for e in self._envs(client))
+
+    def test_cve_ids_filter_limits_batch(self):
+        mod = self._mod()
+        out, client = self._run(
+            mod, {'project_name': 'OpenSearch', 'cve_ids': 'CVE-1'})
+        assert client.run_task.call_count == 1        # only the maven g/a task
+        assert out['remediating_cves'] == ['CVE-1']
+
+    def test_same_package_two_cves_dedupes_to_one_bump(self):
+        vulns = [('CVE-1', 'maven', 'g/a', '1.0.0'), ('CVE-2', 'maven', 'g/a', '1.0.0')]
+        out, client = self._run(self._mod(vulns=vulns), {'project_name': 'OpenSearch'})
+        assert client.run_task.call_count == 1
+        batch = json.loads(self._envs(client)[0]['CVE_BATCH'])
+        assert len(batch) == 1
+        assert sorted(batch[0]['cve_ids']) == ['CVE-1', 'CVE-2']
+
+    def test_nothing_to_remediate_when_all_skipped(self):
+        mod = self._mod(resolver=lambda *a, **k: {'outcome': 'already_patched',
+                                                  'gh_package': 'x', 'patched_version': '9'})
+        out, client = self._run(mod, {'project_name': 'OpenSearch'})
+        assert out['status'] == 'nothing_to_remediate'
+        assert client.run_task.call_count == 0
+        assert len(out['skipped']) == 3
+
+    def test_unsupported_ecosystem_reported_when_no_taskdef(self):
+        mod = self._mod(vulns=[('CVE-1', 'maven', 'g/a', '1.0.0')])
+        client = _install_fake_ecs(mod)
+        # only npm wired -> maven has no task definition
+        env = {k: v for k, v in self._ENV.items() if k != 'MAVEN_REMEDIATION_TASKDEF'}
+        with patch.dict(os.environ, env, clear=True):
+            out = mod.handle_remediate_project({'project_name': 'OpenSearch'}, 'req', None)
+        assert out['status'] == 'remediation_unavailable'
+        assert out['unsupported_ecosystems'] == ['maven']
+        assert client.run_task.call_count == 0
+
+    def test_project_not_found_returns_gather_error(self):
+        mod, _ = _load_remediation_handler()
+        mod.opensearch_request = MagicMock(return_value=_scans_response([]))
+        out, client = self._run(mod, {'project_name': 'Nope'})
+        assert out['status'] == 'not_affected'
+        assert client.run_task.call_count == 0
+
+    def test_missing_project_name(self):
+        mod, _ = _load_remediation_handler()
+        out = mod.handle_remediate_project({}, 'req', None)
+        assert out['status'] == 'error'
+        assert out['type'] == 'invalid_request'
+
+    def test_invalid_mode(self):
+        mod = self._mod()
+        out, _client = self._run(mod, {'project_name': 'OpenSearch', 'mode': 'bogus'})
+        assert out['status'] == 'error'
+        assert out['type'] == 'invalid_request'
+
+    def test_slack_thread_forwarded_in_payload(self):
+        mod = self._mod(vulns=[('CVE-1', 'maven', 'g/a', '1.0.0')])
+        _out, client = self._run(
+            mod, {'project_name': 'OpenSearch'},
+            session={'slack_channel': 'C1', 'slack_thread_ts': '123.45'})
+        env = self._envs(client)[0]
+        assert env['SLACK_CHANNEL'] == 'C1'
+        assert env['SLACK_THREAD_TS'] == '123.45'

@@ -480,6 +480,175 @@ def handle_remediate_cve(
     }
 
 
+def handle_remediate_project(
+    params: Dict[str, str],
+    request_id: str,
+    session_attributes: Optional[Dict[str, str]] = None,
+) -> Dict[str, Any]:
+    """Remediate a set of CVEs across one project in a single pull request.
+
+    Gathers the project's affected CVEs from the scans cluster, optionally
+    narrows to a caller-supplied ``cve_ids`` subset, dedups per package (max
+    patched version), and dispatches the per-ecosystem Fargate worker with the
+    whole batch as one ``CVE_BATCH`` payload. Because the workers are
+    ecosystem-specific, a project with both npm and maven fixes yields one task
+    (and PR) per ecosystem.
+
+    Async, like remediate_cve: ``run_task`` is fire-and-forget; the worker posts
+    each PR link back to the Slack thread. Pre-flight outcomes (nothing to
+    remediate, unresolvable project) return synchronously.
+
+    Args:
+        params: Bedrock parameters. Recognized keys:
+            project_name (required) — as returned by list_projects.
+            cve_ids (optional)      — comma-separated subset to remediate; omitted
+                                      remediates every affected CVE in the project.
+            mode (optional)         — 'project' (default; one PR per project per
+                                      ecosystem) or 'per_cve' (one PR per package).
+        request_id: Short request ID for log correlation.
+        session_attributes: Slack thread context forwarded to the worker.
+    """
+    session_attributes = session_attributes or {}
+    project_name = (params.get('project_name') or '').strip()
+    mode = (params.get('mode') or 'project').strip().lower()
+    cve_ids_raw = (params.get('cve_ids') or '').strip()
+
+    if not project_name:
+        return error_response(
+            'invalid_request',
+            'project_name is required. Call list_projects first to get the exact '
+            'project name.',
+        )
+    if mode not in ('project', 'per_cve'):
+        return error_response(
+            'invalid_request', "mode must be 'project' or 'per_cve'.",
+        )
+
+    cve_filter = None
+    if cve_ids_raw:
+        cve_filter = {c.strip().upper() for c in cve_ids_raw.split(',') if c.strip()}
+
+    logger.info(
+        f"[{request_id}] REMEDIATE_PROJECT: project={project_name!r} mode={mode!r} "
+        f"cve_ids={sorted(cve_filter) if cve_filter else 'ALL'}"
+    )
+
+    # --- gather the project's affected CVEs from the scans cluster -----------
+    try:
+        project_ctx, error = _project_vulnerabilities(project_name, request_id)
+    except Exception as e:  # OpenSearch query failed
+        logger.error(f"[{request_id}] REMEDIATE_PROJECT_GATHER_FAILED: {e}")
+        return connection_error(e)
+    if error:
+        return error
+
+    repository = f"{project_ctx['repo_owner']}/{project_ctx['repo_name']}"
+
+    # --- resolve each CVE through the shared gates, then dedup per package ----
+    ready, skipped = _resolve_project_cves(project_ctx, cve_filter, request_id)
+    batch = _build_cve_batch(ready, request_id)
+
+    if not batch:
+        scope = ' from the requested set' if cve_filter else ''
+        return {
+            'status': 'nothing_to_remediate',
+            'project_name': project_name,
+            'repository': repository,
+            'skipped': skipped,
+            'message': (
+                f"No remediable CVEs for {repository}{scope}. "
+                f"{_summarize_skipped(skipped)}"
+            ),
+        }
+
+    # --- dispatch: workers are per-ecosystem, so group the batch by ecosystem;
+    # each ecosystem gets one task (mode=project) or one per package (per_cve) --
+    by_ecosystem: Dict[str, List[Dict[str, Any]]] = {}
+    for entry in batch:
+        by_ecosystem.setdefault(entry['ecosystem'], []).append(entry)
+
+    dispatched: List[Dict[str, Any]] = []
+    unavailable: List[str] = []
+    base_branch = SCANS_MAIN_TAG.split('/')[-1]
+    for ecosystem, group in sorted(by_ecosystem.items()):
+        task_batches = [group] if mode == 'project' else [[e] for e in group]
+        for tb in task_batches:
+            payload = {
+                'repo_name': project_ctx['repo_name'],
+                'base_branch': base_branch,
+                'cve_batch': json.dumps(tb),
+                'slack_channel': (session_attributes.get('slack_channel') or '').strip(),
+                'slack_thread_ts': (session_attributes.get('slack_thread_ts') or '').strip(),
+            }
+            try:
+                ok = _dispatch_remediation(ecosystem, payload, request_id)
+            except Exception as e:  # run_task launch failure
+                logger.error(f"[{request_id}] REMEDIATE_PROJECT_DISPATCH_FAILED: {e}")
+                return error_response(
+                    'remediation_error', 'Failed to start automated remediation.',
+                )
+            if not ok:
+                # no Fargate worker wired for this ecosystem — don't retry the rest
+                unavailable.append(ecosystem)
+                break
+            dispatched.append({
+                'ecosystem': ecosystem,
+                'packages': [e['package'] for e in tb],
+                'cve_ids': sorted({c for e in tb for c in e['cve_ids']}),
+            })
+
+    covered = sorted({c for d in dispatched for c in d['cve_ids']})
+    if not dispatched:
+        return {
+            'status': 'remediation_unavailable',
+            'project_name': project_name,
+            'repository': repository,
+            'unsupported_ecosystems': sorted(set(unavailable)),
+            'skipped': skipped,
+            'message': (
+                f"Resolved fixes for {repository} but no automated remediation "
+                f"worker is wired for its ecosystem(s): "
+                f"{', '.join(sorted(set(unavailable)))}."
+            ),
+        }
+
+    logger.info(
+        f"[{request_id}] REMEDIATE_PROJECT_STARTED: {repository} mode={mode} "
+        f"{len(dispatched)} task(s), {len(covered)} CVE(s), {len(skipped)} skipped"
+    )
+    return {
+        'status': 'remediation_started',
+        'project_name': project_name,
+        'repository': repository,
+        'mode': mode,
+        'pull_requests_expected': len(dispatched),
+        'remediating_cves': covered,
+        'dispatched': dispatched,
+        'skipped': skipped,
+        'unsupported_ecosystems': sorted(set(unavailable)),
+        'message': (
+            f"Started remediation for {repository}: {len(dispatched)} pull "
+            f"request(s) covering {len(covered)} CVE(s). This runs in the "
+            f"background; the PR link(s) will be posted here shortly. "
+            f"{_summarize_skipped(skipped)}"
+        ),
+    }
+
+
+def _summarize_skipped(skipped: List[Dict[str, Any]]) -> str:
+    """One-line human summary of the CVEs a batch skipped, grouped by reason."""
+    if not skipped:
+        return "No CVEs were skipped."
+    by_reason: Dict[str, List[str]] = {}
+    for s in skipped:
+        by_reason.setdefault(s['reason'], []).append(s['cve_id'])
+    parts = [
+        f"{reason.replace('_', ' ')}: {', '.join(sorted(cves))}"
+        for reason, cves in sorted(by_reason.items())
+    ]
+    return "Skipped — " + "; ".join(parts) + "."
+
+
 def handle_list_affected_repositories(
     params: Dict[str, str], request_id: str,
 ) -> Dict[str, Any]:
@@ -564,6 +733,11 @@ _PAYLOAD_TO_ENV = {
     'installed_version': 'INSTALLED_VERSION',
     'declaration_class': 'DECLARATION_CLASS',
     'origin_files': 'ORIGIN_FILES',
+    # JSON list of {package, patched_version, cve_ids, installed_version,
+    # declaration_class, origin_files} for batch (project) remediation. Empty for
+    # single-CVE dispatch; the worker reads it in preference to the scalar
+    # per-CVE vars when present.
+    'cve_batch': 'CVE_BATCH',
     'base_branch': 'BASE_BRANCH',
     'slack_channel': 'SLACK_CHANNEL',
     'slack_thread_ts': 'SLACK_THREAD_TS',
@@ -960,9 +1134,11 @@ def _resolve_project_cves(
         )
         if outcome['outcome'] == 'ready':
             ready.append({
-                'gh_package': outcome['gh_package'],
+                'gh_package': outcome['gh_package'],   # canonical, dedup key only
+                'package': e['package'],               # scans coordinate the worker edits
                 'patched_version': outcome['patched_version'],
                 'cve_id': cve_id,
+                'installed_version': e['installed_version'],
                 'ecosystem': e['ecosystem'],
                 'declaration_class': e['declaration_class'],
                 'origin_files': _origin_build_files(e['origin']),
@@ -1410,37 +1586,44 @@ def _build_cve_batch(
     """Level-1 dedup: collapse per-CVE resolutions to one entry per package.
 
     ``entries`` is the raw per-CVE list for ONE project — each item is a resolved
-    remediation ``{gh_package, patched_version, cve_id, ecosystem,
-    declaration_class, origin_files}`` (``gh_package`` is GitHub's canonical name
-    from ``_derive_patched_version``; ``origin_files`` already distilled). Groups
-    by canonical package (``_normalize_pkg_name`` — unifies the scans ``group/artifact``
-    vs advisory ``group:artifact`` forms and lower-cases, so distinct packages are
-    NOT falsely merged), takes ``max(patched_version)`` within the group, and keeps
-    every contributing ``cve_ids`` (sorted, deduped) for PR/commit attribution.
+    remediation ``{gh_package, package, patched_version, cve_id, installed_version,
+    ecosystem, declaration_class, origin_files}``. ``gh_package`` is GitHub's
+    canonical name from ``_derive_patched_version`` (used only as the dedup key);
+    ``package`` is the scans repo-specific coordinate the worker actually edits;
+    ``origin_files`` is already distilled.
 
-    Entries missing a canonical package or a patched version are dropped (nothing
-    to bump). Package-level fields (ecosystem/declaration_class/origin_files) are
-    taken from the max-version contributor — for the same package in one repo they
-    are identical anyway (same installed coordinate).
+    Dedup key = ``_normalize_pkg_name(gh_package or package)`` — the canonical name
+    unifies the scans ``group/artifact`` vs advisory ``group:artifact`` forms and
+    lower-cases, so distinct packages are NOT falsely merged. Within a group it
+    takes ``max(patched_version)`` and keeps every contributing ``cve_ids``
+    (sorted, deduped) for PR/commit attribution. Entries missing a key or a patched
+    version are dropped (nothing to bump). The emitted ``package`` /
+    ecosystem / declaration_class / origin_files / installed_version come from the
+    max-version contributor — for one package in one repo they are identical anyway.
 
-    Returns the deduped batch — the ``CVE_BATCH`` payload the worker iterates.
-    Level-2 (regroup by the planner's resolved edit target, e.g. a shared catalog
-    key) happens in the worker, post-classification.
+    Returns the deduped batch — the ``CVE_BATCH`` payload the worker iterates
+    (each entry shaped like the single-CVE worker inputs, but with ``cve_ids`` in
+    place of a single ``cve_id``). Level-2 (regroup by the planner's resolved edit
+    target, e.g. a shared catalog key) happens in the worker, post-classification.
     """
     grouped: Dict[str, Dict[str, Any]] = {}
     for e in entries:
         gh_package = (e.get('gh_package') or '').strip()
+        scans_package = (e.get('package') or '').strip()
         patched = (e.get('patched_version') or '').strip()
         cve_id = (e.get('cve_id') or '').strip()
-        if not gh_package or not patched:
+        key = _normalize_pkg_name(gh_package or scans_package)
+        if not key or not patched:
             continue
-        key = _normalize_pkg_name(gh_package)
         cur = grouped.get(key)
         if cur is None:
             grouped[key] = {
-                'package': gh_package,
+                # scans coordinate the worker edits with (fall back to the
+                # canonical name if the scan somehow lacked one)
+                'package': scans_package or gh_package,
                 'patched_version': patched,
                 'cve_ids': {cve_id} if cve_id else set(),
+                'installed_version': e.get('installed_version', ''),
                 'ecosystem': e.get('ecosystem', ''),
                 'declaration_class': e.get('declaration_class', ''),
                 'origin_files': e.get('origin_files') or [],
@@ -1452,6 +1635,8 @@ def _build_cve_batch(
         if winner != cur['patched_version']:
             # the new CVE carries the higher patch -> adopt its package-level fields
             cur['patched_version'] = winner
+            cur['package'] = scans_package or gh_package or cur['package']
+            cur['installed_version'] = e.get('installed_version', cur['installed_version'])
             cur['ecosystem'] = e.get('ecosystem', cur['ecosystem'])
             cur['declaration_class'] = e.get('declaration_class', cur['declaration_class'])
             cur['origin_files'] = e.get('origin_files') or cur['origin_files']
