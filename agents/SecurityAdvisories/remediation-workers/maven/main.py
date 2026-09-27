@@ -69,6 +69,11 @@ def _event_from_env():
     """Build the remediation event dict from environment variables."""
     event = {key: os.environ.get(env, "") for env, key in _ENV_TO_EVENT.items()}
     event["origin_files"] = _parse_origin_files(os.environ.get("ORIGIN_FILES", ""))
+    # CVE_BATCH (project remediation): a JSON list of per-package entries. When
+    # present, remediation.handle takes the batch path (one PR, many CVEs) and
+    # the scalar PACKAGE/PATCHED_VERSION vars above are unused. Left as the raw
+    # JSON string; remediation._batch_entries decodes it. Blank => single-CVE.
+    event["cve_batch"] = os.environ.get("CVE_BATCH", "")
     return event
 
 
