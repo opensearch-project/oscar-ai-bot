@@ -88,6 +88,11 @@ def _load_lambda_function(
             return_value={'status': 'remediation_unavailable', 'cve_id': 'CVE-0000-0000',
                           'repository': 'opensearch-project/repo'},
         )
+        mock_remediation_handler.handle_remediate_project = MagicMock(
+            return_value={'status': 'remediation_started',
+                          'repository': 'opensearch-project/repo',
+                          'pull_requests_expected': 1},
+        )
     if mock_response_builder is None:
         mock_response_builder = _make_mock_response_builder()
 
@@ -159,6 +164,51 @@ class TestRoutingToQueryVulnerabilities:
         assert params['query'] == 'Show critical CVEs'
         assert params['version'] == '2.19.6'
         assert params['project_name'] == 'OpenSearch'
+
+
+class TestRoutingToRemediation:
+    """Test routing to the remediation handlers."""
+
+    def test_routes_remediate_cve(self):
+        mock_rem = MagicMock()
+        mock_rem.handle_remediate_cve = MagicMock(
+            return_value={'status': 'remediation_started'})
+        mod, *_ = _load_lambda_function(mock_remediation_handler=mock_rem)
+        event = {
+            'function': 'remediate_cve',
+            'actionGroup': 'securityAdvisoriesActions',
+            'parameters': [
+                {'name': 'cve_id', 'value': 'CVE-2026-1225'},
+                {'name': 'repo_name', 'value': 'sql'},
+            ],
+            'sessionAttributes': {'slack_channel': 'C1', 'slack_thread_ts': '1.2'},
+        }
+        mod.lambda_handler(event, None)
+        mock_rem.handle_remediate_cve.assert_called_once()
+
+    def test_routes_remediate_project_with_params_and_session(self):
+        mock_rem = MagicMock()
+        mock_rem.handle_remediate_project = MagicMock(
+            return_value={'status': 'remediation_started',
+                          'pull_requests_expected': 2})
+        mod, *_ = _load_lambda_function(mock_remediation_handler=mock_rem)
+        session = {'slack_channel': 'C1', 'slack_thread_ts': '1.2'}
+        event = {
+            'function': 'remediate_project',
+            'actionGroup': 'securityAdvisoriesActions',
+            'parameters': [
+                {'name': 'project_name', 'value': 'OpenSearch Dashboards'},
+                {'name': 'cve_ids', 'value': 'CVE-1,CVE-2'},
+                {'name': 'mode', 'value': 'project'},
+            ],
+            'sessionAttributes': session,
+        }
+        mod.lambda_handler(event, None)
+        mock_rem.handle_remediate_project.assert_called_once()
+        args = mock_rem.handle_remediate_project.call_args.args
+        assert args[0] == {'project_name': 'OpenSearch Dashboards',
+                           'cve_ids': 'CVE-1,CVE-2', 'mode': 'project'}
+        assert args[2] == session          # session_attributes forwarded
 
 
 class TestRoutingToListProjects:

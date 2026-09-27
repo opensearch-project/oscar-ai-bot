@@ -79,8 +79,18 @@ def _event_from_env():
 
 def main():
     event = _event_from_env()
-    logger.info("maven remediation (ECS) invoked: cve_id=%s repo_name=%s package=%s",
-                event.get("cve_id"), event.get("repo_name"), event.get("package"))
+    # Batch (project) invocations carry a CVE_BATCH instead of the scalar
+    # cve_id/package; log the full CVE set so the entry breadcrumb is meaningful.
+    batch = remediation._batch_entries(event)
+    if batch:
+        cves = sorted({c for e in batch for c in (e.get("cve_ids") or [])})
+        logger.info("maven remediation (ECS) invoked (batch): repo_name=%s "
+                    "packages=%s cves=%s",
+                    event.get("repo_name"),
+                    [e.get("package") for e in batch], cves)
+    else:
+        logger.info("maven remediation (ECS) invoked: cve_id=%s repo_name=%s package=%s",
+                    event.get("cve_id"), event.get("repo_name"), event.get("package"))
     result = remediation.handle(event, maven)
     # Surface the outcome via the task exit code for observability (the Slack
     # post-back is the user-facing signal).

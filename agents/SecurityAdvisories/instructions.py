@@ -66,6 +66,7 @@ If the user does NOT specify a version or tag (e.g., "CVEs for OpenSearch"), def
 | `list_ticket_projects` | List projects that currently have assigned SIM tickets | When user wants to know which projects have open ticket work |
 | `list_affected_repositories` | List the repositories a CVE affects on main | FIRST step when the user asks to remediate a CVE — to resolve which repository they mean before calling remediate_cve |
 | `remediate_cve` | Remediate a CVE on a repository by opening a fix pull request | After list_affected_repositories, once you know the exact repository to fix |
+| `remediate_project` | Remediate several CVEs for one project in a single pull request | When the user asks to remediate multiple CVEs at once, or "all" CVEs, for a project (resolve the project name with list_projects first) |
 
 ### query_vulnerabilities parameters
 | Parameter | Required | Description |
@@ -98,6 +99,13 @@ No parameters. Returns the list of projects that currently have assigned tickets
 | `cve_id` | Yes | The CVE identifier to remediate (e.g., "CVE-2026-1225") |
 | `repo_name` | Yes | The exact repository to remediate, taken from a `list_affected_repositories` result (e.g., "alerting-dashboards-plugin") |
 
+### remediate_project parameters
+| Parameter | Required | Description |
+|-----------|----------|-------------|
+| `project_name` | Yes | The exact canonical project name, resolved via `list_projects` (e.g., "OpenSearch Dashboards") |
+| `cve_ids` | No | Comma-separated CVE IDs to remediate (e.g., "CVE-2026-1225,CVE-2026-1300"). Omit to remediate every CVE the project is affected by |
+| `mode` | No | `project` (default) = one PR per project per ecosystem; `per_cve` = one PR per package. Only set `per_cve` if the user explicitly wants separate PRs |
+
 ## REMEDIATION
 Remediation is a two-step flow that mirrors `list_projects` → `query_vulnerabilities`:
 
@@ -119,6 +127,20 @@ Report the result based on its status:
 - **multiple_packages** — the CVE affects several packages in one repository (see `packages`). Tell the user that automated remediation of multi-package CVEs isn't supported yet and list the affected packages.
 - **unsupported_ecosystem** / **no_patched_version** — relay the message: the CVE cannot be auto-remediated (unsupported ecosystem, or no fix version available).
 - **error** — relay the error message concisely.
+
+### Remediating several CVEs at once (`remediate_project`)
+When the user asks to remediate MULTIPLE CVEs, or "all" CVEs, for one project, prefer `remediate_project` over calling `remediate_cve` repeatedly — it batches the fixes into a single pull request per project (per ecosystem).
+
+1. Resolve the project name to its canonical form with `list_projects` first (same as `query_vulnerabilities`), then pass it as `project_name`.
+2. If the user named specific CVEs, pass them as a comma-separated `cve_ids`. Omit `cve_ids` to remediate every CVE the project is affected by. Do NOT pass a repository — the project maps to its repository downstream.
+3. Leave `mode` unset (defaults to one PR per project) unless the user explicitly wants a separate PR per CVE, in which case pass `mode="per_cve"`.
+
+Report the result based on its status:
+- **remediation_started** — the batch was kicked off in the background. Relay the message: it's in progress and the pull request link(s) will be posted in this thread shortly. `pull_requests_expected` and `remediating_cves` say how many PRs and which CVEs; `skipped` lists CVEs that were not remediated (already patched, existing PR, out of scope, or not affecting the project) — mention them briefly. Do NOT invent a `pr_url`; it arrives later in the thread.
+- **nothing_to_remediate** — no remediable CVEs were found for the project (or from the requested set); relay the message and the `skipped` reasons.
+- **remediation_unavailable** — fixes were resolved but no worker is wired for the project's ecosystem(s) yet. Relay the message as-is.
+- **not_affected** — the project name did not resolve to a scanned project with open vulnerabilities; suggest confirming the name via `list_projects`.
+- **unsupported** / **error** — relay the message concisely.
 
 ## HANDLING AMBIGUOUS VERSION QUERIES
 When the user's query contains vague version language ("most recent", "latest", "newest", "current") instead of a concrete tag or version number:

@@ -191,6 +191,50 @@ def _privileged_action_group(
                         ),
                     },
                 ),
+                bedrock.CfnAgent.FunctionProperty(
+                    name="remediate_project",
+                    description=(
+                        "Remediate multiple CVEs for one OpenSearch project in a "
+                        "single pull request (one PR per project, per ecosystem). "
+                        "Use this when the user asks to remediate several CVEs at "
+                        "once, or 'all' CVEs, for a project. Call list_projects "
+                        "first to resolve the exact canonical project name. It "
+                        "gathers the project's affected CVEs, deduplicates them per "
+                        "package (bumping each to the highest patched version), and "
+                        "skips any that already have an open fix PR. Prefer this "
+                        "over calling remediate_cve repeatedly for the same project."
+                    ),
+                    parameters={
+                        "project_name": bedrock.CfnAgent.ParameterDetailProperty(
+                            type="string",
+                            description=(
+                                "The exact canonical project name, as returned by "
+                                "list_projects (e.g., 'OpenSearch Dashboards')."
+                            ),
+                            required=True,
+                        ),
+                        "cve_ids": bedrock.CfnAgent.ParameterDetailProperty(
+                            type="string",
+                            description=(
+                                "Optional comma-separated list of the specific CVE "
+                                "IDs to remediate (e.g., 'CVE-2026-1225,CVE-2026-1300'). "
+                                "Omit to remediate every CVE the project is affected by."
+                            ),
+                            required=False,
+                        ),
+                        "mode": bedrock.CfnAgent.ParameterDetailProperty(
+                            type="string",
+                            description=(
+                                "How to group the fixes into pull requests. "
+                                "'project' (default) opens one PR per project per "
+                                "ecosystem containing all the fixes; 'per_cve' opens "
+                                "a separate PR per package. Valid values: 'project', "
+                                "'per_cve'."
+                            ),
+                            required=False,
+                        ),
+                    },
+                ),
             ]
         ),
     )

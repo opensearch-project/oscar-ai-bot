@@ -318,6 +318,11 @@ def _execute_batch(event, strategy):
         entry_ctxs.append(ctx)
 
     all_cves = sorted({c for ec in entry_ctxs for c in ec.get("cve_ids", [])})
+    logger.info(
+        "Batch remediation for %s (%s): %d package(s), %d CVE(s) — packages=%s cves=%s",
+        repo_name, strategy.name, len(entries), len(all_cves),
+        [e.get("package") for e in entries], all_cves,
+    )
 
     try:
         _clone(WORK_DIR, BASE_OWNER, repo_name, token=token,
