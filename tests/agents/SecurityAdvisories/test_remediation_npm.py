@@ -452,6 +452,9 @@ class TestEcsEntrypoint:
             'base_branch': 'main',
             'slack_channel': 'C0APV94Q1JP',
             'slack_thread_ts': '1788210459.939479',
+            # read so remediation.handle can route to the batch path (npm batch
+            # itself is not yet supported -> returns a clean unsupported outcome)
+            'cve_batch': '',
         }
 
     def test_missing_env_vars_become_empty(self):

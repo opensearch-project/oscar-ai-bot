@@ -41,7 +41,12 @@ _ENV_TO_EVENT = {
 
 def _event_from_env():
     """Build the remediation event dict from environment variables."""
-    return {key: os.environ.get(env, "") for env, key in _ENV_TO_EVENT.items()}
+    event = {key: os.environ.get(env, "") for env, key in _ENV_TO_EVENT.items()}
+    # CVE_BATCH (project remediation) is read so remediation.handle can route to
+    # the batch path. npm batch isn't supported yet (npm.supports_batch is unset),
+    # so it returns a clean "unsupported" outcome rather than a cryptic failure.
+    event["cve_batch"] = os.environ.get("CVE_BATCH", "")
+    return event
 
 
 def main():

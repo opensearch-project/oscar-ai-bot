@@ -1358,3 +1358,142 @@ class TestRemediationUnsupportedPath:
         assert 'CVE-2026-0001' in msg
         assert 'inherited from core.' in msg
         assert 'Manual review' in msg
+
+
+class TestBatchExecute:
+    """Batch (project) remediation flow in the shared _execute: one clone, many
+    edits, one holistic regenerate, one commit/PR. Git/GitHub side is mocked."""
+
+    _ENTRIES = [
+        {'package': 'org.apache.logging.log4j/log4j-core',
+         'patched_version': '2.25.4', 'cve_ids': ['CVE-1', 'CVE-2'],
+         'installed_version': '2.20.0', 'declaration_class': 'direct',
+         'origin_files': []},
+        {'package': 'com.fasterxml.jackson.core/jackson-databind',
+         'patched_version': '2.17.1', 'cve_ids': ['CVE-3'],
+         'installed_version': '2.15.0', 'declaration_class': 'direct',
+         'origin_files': []},
+    ]
+
+    @staticmethod
+    def _event(entries, **over):
+        e = {'repo_name': 'alerting', 'base_branch': 'main',
+             'cve_batch': json.dumps(entries)}
+        e.update(over)
+        return e
+
+    def _run(self, maven, rem, event, apply_side_effect=None,
+             changed=None, pr_url='https://github.com/o/r/pull/1'):
+        cm = [
+            patch.object(rem, '_resolve_token', return_value='tok'),
+            patch.object(rem, 'WRITE_OWNER', 'v-e-e-m-a'),
+            patch.object(rem, 'BASE_OWNER', 'opensearch-project'),
+            patch.object(rem, '_clone'),
+            patch.object(maven, 'regenerate'),
+            patch.object(rem, '_changed_files',
+                         return_value=['build.gradle'] if changed is None else changed),
+            patch.object(rem, '_commit_and_open_pr', return_value=pr_url),
+        ]
+        if apply_side_effect is not None:
+            cm.append(patch.object(maven, 'apply_fix', side_effect=apply_side_effect))
+        else:
+            cm.append(patch.object(maven, 'apply_fix'))
+        from contextlib import ExitStack
+        with ExitStack() as stack:
+            mocks = [stack.enter_context(c) for c in cm]
+            result = rem._execute(event, maven)
+        return result, mocks
+
+    def test_success_opens_one_pr_for_all_cves(self):
+        maven, rem = _load_maven()
+        result, mocks = self._run(maven, rem, self._event(self._ENTRIES))
+        assert result['status'] == 'success'
+        assert result['remediated'] == ['CVE-1', 'CVE-2', 'CVE-3']
+        assert result['pr_url'] == 'https://github.com/o/r/pull/1'
+        # apply_fix per package, regenerate + commit exactly once
+        apply_mock = mocks[-1]
+        regen_mock = mocks[4]
+        commit_mock = mocks[6]
+        assert apply_mock.call_count == 2
+        assert regen_mock.call_count == 1
+        assert commit_mock.call_count == 1
+
+    def test_commit_lists_all_cves_and_deterministic_branch(self):
+        maven, rem = _load_maven()
+        _result, mocks = self._run(maven, rem, self._event(self._ENTRIES))
+        commit_mock = mocks[6]
+        pr_ctx = commit_mock.call_args.args[1]
+        assert pr_ctx['branch_name'].startswith('oscar/batch-')
+        for cve in ('CVE-1', 'CVE-2', 'CVE-3'):
+            assert cve in pr_ctx['pr_body']
+        assert 'log4j-core' in pr_ctx['pr_body']
+        assert 'CVEs in alerting' in pr_ctx['pr_title']
+
+    def test_partial_failure_skips_and_still_opens_pr(self):
+        maven, rem = _load_maven()
+        result, _ = self._run(
+            maven, rem, self._event(self._ENTRIES),
+            apply_side_effect=[None, rem.RemediationUnsupported('inherited from core')])
+        assert result['status'] == 'success'
+        assert result['remediated'] == ['CVE-1', 'CVE-2']       # jackson skipped
+        assert len(result['skipped']) == 1
+        assert result['skipped'][0]['cve_ids'] == ['CVE-3']
+
+    def test_all_skipped_returns_unsupported_no_pr(self):
+        maven, rem = _load_maven()
+        result, mocks = self._run(
+            maven, rem, self._event(self._ENTRIES),
+            apply_side_effect=[rem.RemediationUnsupported('x'),
+                               rem.RemediationUnsupported('y')])
+        assert result['status'] == 'unsupported'
+        assert mocks[6].call_count == 0                          # no commit/PR
+        assert len(result['skipped']) == 2
+
+    def test_no_change_when_nothing_edited(self):
+        maven, rem = _load_maven()
+        result, mocks = self._run(maven, rem, self._event(self._ENTRIES), changed=[])
+        assert result['status'] == 'no_change'
+        assert mocks[6].call_count == 0
+
+    def test_npm_style_unsupported_when_batch_not_supported(self):
+        maven, rem = _load_maven()
+        with patch.object(maven, 'supports_batch', False):
+            result = rem._execute(self._event(self._ENTRIES), maven)
+        assert result['status'] == 'unsupported'
+        assert 'not yet supported' in result['message']
+
+    def test_batch_entries_decodes_json_list_and_blank(self):
+        _maven, rem = _load_maven()
+        assert rem._batch_entries({'cve_batch': json.dumps([{'a': 1}])}) == [{'a': 1}]
+        assert rem._batch_entries({'cve_batch': [{'a': 1}]}) == [{'a': 1}]
+        assert rem._batch_entries({'cve_batch': ''}) == []
+        assert rem._batch_entries({}) == []
+        assert rem._batch_entries({'cve_batch': 'not json'}) == []
+
+    def test_merged_regen_ctx_aggregates_flags(self):
+        _maven, rem = _load_maven()
+        merged = rem._merged_regen_ctx([
+            {'is_core': True, 'bumped_sections': ['log4j']},
+            {'is_core': False, 'bumped_sections': ['jackson']},
+        ], 'alerting')
+        assert merged['is_core'] is True
+        assert sorted(merged['bumped_sections']) == ['jackson', 'log4j']
+
+    def test_pr_meta_branch_is_stable_across_cve_order(self):
+        _maven, rem = _load_maven()
+        a = rem._batch_pr_meta([{'coordinate': 'g:a', 'patched_version': '1',
+                                 'cve_ids': ['CVE-2', 'CVE-1']}], 'r', 'main')
+        b = rem._batch_pr_meta([{'coordinate': 'g:a', 'patched_version': '1',
+                                 'cve_ids': ['CVE-1', 'CVE-2']}], 'r', 'main')
+        assert a['branch_name'] == b['branch_name']
+
+    def test_slack_message_batch_success_and_unsupported(self):
+        _maven, rem = _load_maven()
+        ok = rem._format_slack_message({
+            'status': 'success', 'remediated': ['CVE-1', 'CVE-2'],
+            'pr_url': 'https://pr', 'skipped': [{'cve_ids': ['CVE-9']}]})
+        assert '2 CVEs' in ok and 'https://pr' in ok and '1 skipped' in ok
+        un = rem._format_slack_message({
+            'status': 'unsupported', 'cve_ids': ['CVE-1'],
+            'message': 'nothing could be remediated.'})
+        assert 'Manual review' in un

@@ -26,6 +26,7 @@ never depends on the fork being in sync with upstream. We never push a branch to
 the live upstream repo — only the PR is opened there.
 """
 
+import hashlib
 import json
 import logging
 import os
@@ -140,22 +141,39 @@ def handle(event, strategy):
     return result
 
 
+def _require_config():
+    """Validate worker credentials/owner config once.
+
+    Returns ``(token, None)`` when ready, or ``(None, error_dict)`` when a
+    required piece is missing. Shared by the single-CVE and batch flows.
+    """
+    token = _resolve_token()
+    if not token:
+        return None, {"status": "error",
+                      "message": "GitHub credentials are not configured."}
+    if not WRITE_OWNER:
+        return None, {"status": "error",
+                      "message": "REMEDIATION_WRITE_OWNER is not configured."}
+    if not BASE_OWNER:
+        return None, {"status": "error",
+                      "message": "REMEDIATION_BASE_OWNER is not configured."}
+    return token, None
+
+
 def _execute(event, strategy):
     """Run the full remediation for the given ecosystem ``strategy``.
 
     Returns a plain result dict (the caller relays it); never raises for an
     expected failure — those become ``{"status": "error"|..., "message": ...}``.
     """
-    token = _resolve_token()
-    if not token:
-        return {"status": "error",
-                "message": "GitHub credentials are not configured."}
-    if not WRITE_OWNER:
-        return {"status": "error",
-                "message": "REMEDIATION_WRITE_OWNER is not configured."}
-    if not BASE_OWNER:
-        return {"status": "error",
-                "message": "REMEDIATION_BASE_OWNER is not configured."}
+    # A CVE_BATCH payload (project remediation) takes a different path: one clone,
+    # many edits, one holistic regen, one commit/PR. See _execute_batch.
+    if _batch_entries(event):
+        return _execute_batch(event, strategy)
+
+    token, err = _require_config()
+    if err:
+        return err
 
     try:
         ctx = strategy.build_context(event, WRITE_OWNER, BASE_OWNER)
@@ -213,6 +231,215 @@ def _execute(event, strategy):
         "pr_url": pr_url,
         "changed_files": changed,
         "message": strategy.summary(ctx),
+    }
+
+
+# --------------------------------------------------------------------------
+# Batch (project) remediation — one clone, many edits, one commit/PR
+# --------------------------------------------------------------------------
+
+def _batch_entries(event):
+    """Decode the ``cve_batch`` payload into a list of entry dicts, or ``[]``.
+
+    The Lambda JSON-encodes the deduped per-package batch into the ``cve_batch``
+    field (env ``CVE_BATCH``); each entry is ``{package, patched_version,
+    cve_ids, installed_version, declaration_class, origin_files}``. A blank /
+    missing / unparseable value yields ``[]`` (the caller then runs the ordinary
+    single-CVE flow), never a crash.
+    """
+    raw = event.get("cve_batch")
+    if not raw:
+        return []
+    if isinstance(raw, list):        # already decoded (tests / direct calls)
+        return raw
+    try:
+        value = json.loads(raw)
+    except (ValueError, TypeError):
+        logger.warning("CVE_BATCH is not valid JSON; ignoring the batch payload.")
+        return []
+    return value if isinstance(value, list) else []
+
+
+def _execute_batch(event, strategy):
+    """Remediate several CVEs for one project in a single pull request.
+
+    One clone, one ``apply_fix`` per package (partial-failure: a package that
+    can't be edited is skipped, not fatal), one holistic ``regenerate``, one
+    commit + PR whose message lists every remediated CVE. Only strategies that
+    set ``supports_batch = True`` run here; others return ``unsupported`` so the
+    caller can fall back to per-CVE remediation.
+    """
+    entries = _batch_entries(event)
+    if not getattr(strategy, "supports_batch", False):
+        return {
+            "status": "unsupported",
+            "message": (
+                f"Batch remediation is not yet supported for the "
+                f"{getattr(strategy, 'name', 'this')} ecosystem; remediate these "
+                f"CVEs individually."
+            ),
+        }
+
+    token, err = _require_config()
+    if err:
+        return err
+
+    repo_name = (event.get("repo_name") or "").strip()
+    base_branch = (event.get("base_branch") or "main").strip()
+    if not repo_name:
+        return {"status": "error", "message": "repo_name is required."}
+
+    # Per-entry contexts (reuse the strategy's own context builder so coordinate
+    # parsing / routing signals are identical to the single-CVE path). The
+    # representative cve_id drives coordinate logic; the full cve_ids list rides
+    # along for the batch commit/PR text.
+    entry_ctxs = []
+    for entry in entries:
+        cve_ids = [c for c in (entry.get("cve_ids") or []) if c]
+        sub_event = {
+            "repo_name": repo_name,
+            "base_branch": base_branch,
+            "package": entry.get("package", ""),
+            "patched_version": entry.get("patched_version", ""),
+            "installed_version": entry.get("installed_version", ""),
+            "declaration_class": entry.get("declaration_class", ""),
+            "origin_files": entry.get("origin_files") or [],
+            "cve_id": cve_ids[0] if cve_ids else "",
+        }
+        try:
+            ctx = strategy.build_context(sub_event, WRITE_OWNER, BASE_OWNER)
+        except RemediationError as e:
+            logger.error("Skipping unbuildable batch entry %s: %s",
+                         entry.get("package"), e)
+            entry_ctxs.append({"_skip": True, "cve_ids": cve_ids,
+                               "package": entry.get("package", ""), "reason": str(e)})
+            continue
+        ctx["cve_ids"] = cve_ids
+        entry_ctxs.append(ctx)
+
+    all_cves = sorted({c for ec in entry_ctxs for c in ec.get("cve_ids", [])})
+
+    try:
+        _clone(WORK_DIR, BASE_OWNER, repo_name, token=token,
+               base_branch=base_branch,
+               sparse_paths=getattr(strategy, "sparse_paths", None))
+
+        applied, skipped = [], []
+        for ctx in entry_ctxs:
+            if ctx.get("_skip"):
+                skipped.append({"package": ctx["package"], "cve_ids": ctx["cve_ids"],
+                                "reason": ctx["reason"]})
+                continue
+            try:
+                strategy.apply_fix(WORK_DIR, ctx)
+                applied.append(ctx)
+            except RemediationUnsupported as e:
+                logger.info("Batch entry unsupported (%s): %s", ctx.get("coordinate")
+                            or ctx.get("package_name"), e)
+                skipped.append({"package": ctx.get("package_name"),
+                                "cve_ids": ctx["cve_ids"], "reason": str(e)})
+            except RemediationError as e:
+                logger.error("Batch entry failed (%s): %s", ctx.get("coordinate")
+                             or ctx.get("package_name"), e)
+                skipped.append({"package": ctx.get("package_name"),
+                                "cve_ids": ctx["cve_ids"], "reason": str(e)})
+
+        if not applied:
+            return {"status": "unsupported", "cve_ids": all_cves,
+                    "skipped": skipped,
+                    "message": (f"No package in {repo_name} could be remediated "
+                                f"automatically ({len(skipped)} skipped).")}
+
+        # One holistic regen after every edit (e.g. maven's single updateShas).
+        strategy.regenerate(WORK_DIR, _merged_regen_ctx(applied, repo_name))
+
+        changed = _changed_files(WORK_DIR)
+        if not changed:
+            return {"status": "no_change", "cve_ids": all_cves, "skipped": skipped,
+                    "message": (f"{repo_name} already satisfies the patched "
+                                f"versions; no change needed.")}
+        logger.info("Batch changed files: %s", changed)
+
+        pr_url = _commit_and_open_pr(
+            WORK_DIR, _batch_pr_meta(applied, repo_name, base_branch), token)
+    except RemediationInProgress as e:
+        logger.info("Batch remediation already in progress for %s: %s", repo_name, e)
+        return {"status": "remediation_in_progress", "cve_ids": all_cves,
+                "message": str(e)}
+    except RemediationError as e:
+        logger.error("Batch remediation failed for %s: %s", repo_name, e)
+        return {"status": "error", "cve_ids": all_cves, "message": str(e)}
+
+    remediated = sorted({c for ctx in applied for c in ctx.get("cve_ids", [])})
+    return {
+        "status": "success",
+        "ecosystem": strategy.name,
+        "repository": f"{BASE_OWNER}/{repo_name}",
+        "pr_url": pr_url,
+        "changed_files": changed,
+        "remediated": remediated,
+        "skipped": skipped,
+        "message": (f"Opened a pull request for {repo_name} remediating "
+                    f"{len(remediated)} CVE(s)"
+                    + (f"; {len(skipped)} skipped" if skipped else "") + "."),
+    }
+
+
+def _merged_regen_ctx(applied_ctxs, repo_name):
+    """Aggregate context for the single post-batch ``regenerate`` call.
+
+    Merges the per-entry flags the strategies read in ``regenerate``:
+    ``is_core`` (any core edit -> run the checksum regen) and the union of
+    ``bumped_sections`` (empty => nothing bumped => regen no-ops).
+    """
+    bumped = [s for ctx in applied_ctxs for s in (ctx.get("bumped_sections") or [])]
+    return {
+        "repo_name": repo_name,
+        "is_core": any(ctx.get("is_core") for ctx in applied_ctxs),
+        "bumped_sections": bumped,
+    }
+
+
+def _batch_pr_meta(applied_ctxs, repo_name, base_branch):
+    """Branch/commit/PR text for a batch: one commit, body lists every CVE.
+
+    The branch name is deterministic over the full remediated CVE set (sorted,
+    hashed) so racing workers for the same batch collide on the same ref — the
+    same concurrency guard the single-CVE path relies on.
+    """
+    all_cves = sorted({c for ctx in applied_ctxs for c in ctx.get("cve_ids", [])})
+    digest = hashlib.sha1(",".join(all_cves).encode()).hexdigest()[:12]
+    branch_name = f"oscar/batch-{digest}"
+
+    lines = []
+    for ctx in sorted(applied_ctxs, key=lambda c: c.get("coordinate")
+                      or c.get("package_name") or ""):
+        name = ctx.get("coordinate") or ctx.get("package_name")
+        installed = ctx.get("installed_version") or "the affected version"
+        cves = ", ".join(sorted(ctx.get("cve_ids", []))) or "n/a"
+        lines.append(f"- `{name}`: {installed} → `{ctx['patched_version']}` "
+                     f"(addresses {cves})")
+
+    n_pkg = len(applied_ctxs)
+    commit_message = (f"Bump {n_pkg} "
+                      f"{'dependency' if n_pkg == 1 else 'dependencies'} "
+                      f"to patched versions")
+    pr_title = (f"Remediate {len(all_cves)} "
+                f"{'CVE' if len(all_cves) == 1 else 'CVEs'} in {repo_name}")
+    pr_body = (
+        "Bumps the following dependencies to their patched versions:\n\n"
+        + "\n".join(lines)
+        + "\n\nOpened automatically by the OSCAR CVE remediation flow."
+    )
+    return {
+        "write_owner": WRITE_OWNER,
+        "base_owner": BASE_OWNER,
+        "repo_name": repo_name,
+        "base_branch": base_branch,
+        "branch_name": branch_name,
+        "commit_message": commit_message,
+        "pr_title": pr_title,
+        "pr_body": pr_body,
     }
 
 
@@ -275,6 +502,9 @@ def _notify_slack(event, result):
 def _format_slack_message(result):
     """Human-readable Slack message for a remediation result dict."""
     status = result.get("status")
+    # Batch (project) result: many CVEs in one PR.
+    if result.get("remediated") is not None or result.get("cve_ids") is not None:
+        return _format_batch_slack_message(result)
     cve = result.get("cve_id") or "the CVE"
     if status == "success":
         return (
@@ -291,6 +521,29 @@ def _format_slack_message(result):
                 f"{result.get('message', 'unsupported declaration form.')} "
                 f"Manual review needed.")
     return f":x: Remediation for *{cve}* failed: {result.get('message', 'unknown error.')}"
+
+
+def _format_batch_slack_message(result):
+    """Human-readable Slack message for a batch (project) remediation result."""
+    status = result.get("status")
+    n_skip = len(result.get("skipped") or [])
+    if status == "success":
+        n = len(result.get("remediated") or [])
+        msg = (f":white_check_mark: Opened a pull request remediating {n} "
+               f"{'CVE' if n == 1 else 'CVEs'}")
+        msg += f": {result['pr_url']}" if result.get("pr_url") else "."
+        if n_skip:
+            msg += f" ({n_skip} skipped for manual review)"
+        return msg
+    if status == "no_change":
+        return f":information_source: {result.get('message', 'no change needed.')}"
+    if status == "remediation_in_progress":
+        return (":hourglass_flowing_sand: A batch remediation for this project is "
+                "already in progress; not opening a duplicate.")
+    if status == "unsupported":
+        return (f":warning: {result.get('message', 'nothing could be remediated.')} "
+                f"Manual review needed.")
+    return f":x: Batch remediation failed: {result.get('message', 'unknown error.')}"
 
 
 def _resolve_slack_token():

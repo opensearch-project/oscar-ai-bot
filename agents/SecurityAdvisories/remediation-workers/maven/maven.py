@@ -56,6 +56,11 @@ logger.setLevel(logging.INFO)
 
 name = "maven"
 
+# Batch (project) remediation is supported: apply_fix per package edits the tree
+# and regenerate runs one holistic ./gradlew updateShas over the final version
+# set, so the shared batch flow can drive many packages into a single PR.
+supports_batch = True
+
 # Files we scan for declarations and for resolving in-repo version variables.
 _GRADLE_GLOBS = ("**/build.gradle", "**/gradle.properties")
 
