@@ -96,6 +96,113 @@ SCANS_MAIN_TAG = 'origin/main'
 SCANS_RELEASE_TYPES = ['bundle_opensearch', 'bundle_opensearch_dashboards']
 
 
+def _resolve_remediation(
+    cve_id: str,
+    ecosystem: str,
+    package: str,
+    installed_version: str,
+    repo_owner: str,
+    repo_name: str,
+    request_id: str,
+) -> Dict[str, Any]:
+    """Run the per-CVE remediation gates for one resolved (cve, repo, package).
+
+    In order: ecosystem-supported gate, patched-version derivation (GitHub
+    advisory, line-aware), no-patch gate, already-patched gate, and the open-PR
+    dedup check. Returns a NEUTRAL outcome dict — no ECS dispatch, no Bedrock
+    envelope — so the single-CVE handler (one envelope) and the project batch
+    handler (aggregate report + CVE_BATCH) share the gate logic without
+    duplicating it. ``outcome`` is one of:
+
+      'ready'                -> gh_package, patched_version (dispatchable)
+      'unsupported_ecosystem'
+      'no_patched_version'   -> gh_package
+      'already_patched'      -> gh_package, patched_version
+      'pr_exists'            -> gh_package, patched_version, pr {url,title,matched_by}
+      'error'                -> code='github_error', message (derive/PR-check stage)
+
+    Network/API failures are caught and returned as 'error' (with the failing
+    stage's message) rather than raised, so a batch run can skip one CVE and
+    continue. Callers format the outcome and decide whether to dispatch.
+    """
+    # gate 1: ecosystem we can remediate at all? (cluster vocabulary, no GitHub call)
+    if ecosystem not in SUPPORTED_ECOSYSTEMS:
+        logger.info(
+            f"[{request_id}] REMEDIATE_CVE_UNSUPPORTED: ecosystem={ecosystem!r} "
+            f"for {cve_id} is not in scope"
+        )
+        return {'outcome': 'unsupported_ecosystem'}
+
+    # derive the patched version from the GitHub Advisory API — matched to OUR
+    # package and installed version (multi-package / multi-range advisories).
+    try:
+        gh_package, patched_version = _derive_patched_version(
+            cve_id, ecosystem, package, installed_version, request_id,
+        )
+    except Exception as e:  # advisory lookup failed (network / API error)
+        logger.error(f"[{request_id}] REMEDIATE_CVE_DERIVE_FAILED: {e}")
+        return {
+            'outcome': 'error', 'code': 'github_error',
+            'message': 'Failed to look up advisory details from GitHub.',
+        }
+
+    logger.info(
+        f"[{request_id}] REMEDIATE_CVE_DERIVED: package={package!r} "
+        f"github_package={gh_package!r} patched_version={patched_version!r}"
+    )
+
+    # gate 2: do we have a version to upgrade to?
+    if not patched_version:
+        logger.info(
+            f"[{request_id}] REMEDIATE_CVE_NO_PATCH: no patched version for {cve_id}"
+        )
+        return {'outcome': 'no_patched_version', 'gh_package': gh_package}
+
+    # gate 3: skip if the cluster's installed version is already >= patched.
+    # Semver only; unparseable versions (e.g. maven) proceed, can't prove safe.
+    if installed_version and _at_or_above_version(installed_version, patched_version):
+        logger.info(
+            f"[{request_id}] REMEDIATE_CVE_NOT_AFFECTED: {repo_owner}/{repo_name} "
+            f"has {package} {installed_version} >= patched {patched_version} for {cve_id}"
+        )
+        return {
+            'outcome': 'already_patched',
+            'gh_package': gh_package,
+            'patched_version': patched_version,
+        }
+
+    # pre-flight: is there already an OPEN PR fixing this CVE? (dedup)
+    try:
+        existing = _find_existing_pr(
+            repo_owner, repo_name, cve_id, gh_package or package, patched_version, request_id,
+        )
+    except Exception as e:  # network / API errors — surface, don't crash
+        logger.error(f"[{request_id}] REMEDIATE_CVE_PR_CHECK_FAILED: {e}")
+        return {
+            'outcome': 'error', 'code': 'github_error',
+            'message': 'Failed to check for existing pull requests on GitHub.',
+        }
+
+    if existing:
+        logger.info(
+            f"[{request_id}] REMEDIATE_CVE_SKIPPED: open PR already exists for "
+            f"{cve_id} on {repo_owner}/{repo_name} -> {existing['url']} "
+            f"(matched by {existing['matched_by']})"
+        )
+        return {
+            'outcome': 'pr_exists',
+            'gh_package': gh_package,
+            'patched_version': patched_version,
+            'pr': existing,
+        }
+
+    return {
+        'outcome': 'ready',
+        'gh_package': gh_package,
+        'patched_version': patched_version,
+    }
+
+
 def handle_remediate_cve(
     params: Dict[str, str],
     request_id: str,
@@ -224,14 +331,17 @@ def handle_remediate_cve(
         f"(project={resolved['project_name']!r})"
     )
 
-    # gate 1: is this an ecosystem we can remediate at all? The ecosystem comes
-    # from the scans cluster (repo-specific, cluster vocabulary), so this gate
-    # runs without any GitHub call — unsupported ecosystems short-circuit here.
-    if ecosystem not in SUPPORTED_ECOSYSTEMS:
-        logger.info(
-            f"[{request_id}] REMEDIATE_CVE_UNSUPPORTED: ecosystem={ecosystem!r} "
-            f"for {cve_id} is not in scope"
-        )
+    # --- per-CVE gates (shared with the project batch handler) ---------------
+    # Ecosystem gate, patched-version derivation, no-patch / already-patched
+    # gates, and the open-PR dedup all live in _resolve_remediation so both
+    # entry points share them. It returns a neutral outcome; we format it into
+    # this handler's status envelopes (batch aggregates them differently).
+    outcome = _resolve_remediation(
+        cve_id, ecosystem, package, installed_version, repo_owner, repo_name, request_id,
+    )
+    kind = outcome['outcome']
+
+    if kind == 'unsupported_ecosystem':
         return {
             'status': 'unsupported_ecosystem',
             'cve_id': cve_id,
@@ -243,33 +353,10 @@ def handle_remediate_cve(
             ),
         }
 
-    # --- derive the patched version from the GitHub Advisory API --------------
-    # Ecosystem AND the repo-specific package both come from the cluster (above);
-    # GitHub only supplies the fix version the cluster doesn't carry. We match the
-    # GitHub advisory entry to OUR package, so a multi-package CVE resolves to the
-    # version for the package this repo actually uses (not an arbitrary one), and
-    # to OUR installed version, so a multi-range advisory resolves to the fix for
-    # the version line this repo is on.
-    try:
-        gh_package, patched_version = _derive_patched_version(
-            cve_id, ecosystem, package, installed_version, request_id,
-        )
-    except Exception as e:  # advisory lookup failed (network / API error)
-        logger.error(f"[{request_id}] REMEDIATE_CVE_DERIVE_FAILED: {e}")
-        return error_response(
-            'github_error', 'Failed to look up advisory details from GitHub.',
-        )
+    if kind == 'error':
+        return error_response(outcome['code'], outcome['message'])
 
-    logger.info(
-        f"[{request_id}] REMEDIATE_CVE_DERIVED: package={package!r} "
-        f"github_package={gh_package!r} patched_version={patched_version!r}"
-    )
-
-    # gate 2: do we have a version to upgrade to?
-    if not patched_version:
-        logger.info(
-            f"[{request_id}] REMEDIATE_CVE_NO_PATCH: no patched version for {cve_id}"
-        )
+    if kind == 'no_patched_version':
         return {
             'status': 'no_patched_version',
             'cve_id': cve_id,
@@ -279,14 +366,9 @@ def handle_remediate_cve(
             ),
         }
 
-    # gate 3: cross-check GitHub's patched version against the cluster's installed
-    # version to avoid false positives — skip if installed >= patched. Semver
-    # only; unparseable versions (e.g. maven) proceed, since we can't prove safe.
-    if installed_version and _at_or_above_version(installed_version, patched_version):
-        logger.info(
-            f"[{request_id}] REMEDIATE_CVE_NOT_AFFECTED: {repo_owner}/{repo_name} "
-            f"has {package} {installed_version} >= patched {patched_version} for {cve_id}"
-        )
+    patched_version = outcome['patched_version']
+
+    if kind == 'already_patched':
         return {
             'status': 'already_patched',
             'cve_id': cve_id,
@@ -302,25 +384,8 @@ def handle_remediate_cve(
             ),
         }
 
-    # --- pre-flight: is there already an OPEN PR fixing this CVE? -----------
-    # Look for an open PR already fixing this CVE; if found, surface it and stop
-    # (dedup — don't open a duplicate).
-    try:
-        existing = _find_existing_pr(
-            repo_owner, repo_name, cve_id, gh_package or package, patched_version, request_id,
-        )
-    except Exception as e:  # network / API errors — surface, don't crash
-        logger.error(f"[{request_id}] REMEDIATE_CVE_PR_CHECK_FAILED: {e}")
-        return error_response(
-            'github_error', 'Failed to check for existing pull requests on GitHub.',
-        )
-
-    if existing:
-        logger.info(
-            f"[{request_id}] REMEDIATE_CVE_SKIPPED: open PR already exists for "
-            f"{cve_id} on {repo_owner}/{repo_name} -> {existing['url']} "
-            f"(matched by {existing['matched_by']})"
-        )
+    if kind == 'pr_exists':
+        existing = outcome['pr']
         return {
             'status': 'pr_exists',
             'cve_id': cve_id,
@@ -335,7 +400,7 @@ def handle_remediate_cve(
             ),
         }
 
-    # --- no existing PR: hand the fix to the ecosystem's Fargate worker -----
+    # kind == 'ready' -> hand the fix to the ecosystem's Fargate worker -------
     # Slack thread context rides along in the payload so the worker can post the
     # PR link back when it finishes. If no worker is wired for this ecosystem yet,
     # we fall back to remediation_unavailable below.
