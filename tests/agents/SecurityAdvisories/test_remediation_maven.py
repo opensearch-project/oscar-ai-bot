@@ -1497,3 +1497,62 @@ class TestBatchExecute:
             'status': 'unsupported', 'cve_ids': ['CVE-1'],
             'message': 'nothing could be remediated.'})
         assert 'Manual review' in un
+
+    def test_core_batch_runs_single_updateshas_with_merged_ctx(self):
+        # OpenSearch core (version catalog): each entry's apply_fix marks is_core
+        # and bumps a [versions] key. The batch must run ONE ./gradlew updateShas
+        # over the merged final state, not one per CVE.
+        maven, rem = _load_maven()
+        keys = {'org.apache.logging.log4j/log4j-core': 'log4j',
+                'com.fasterxml.jackson.core/jackson-databind': 'jackson'}
+
+        def fake_apply(_wd, ctx):
+            ctx['is_core'] = True
+            ctx.setdefault('bumped_sections', []).append(keys[ctx['package_name']])
+
+        captured = {}
+
+        def fake_regen(_wd, ctx):
+            captured['ctx'] = ctx
+
+        with patch.object(rem, '_resolve_token', return_value='tok'), \
+                patch.object(rem, 'WRITE_OWNER', 'v-e-e-m-a'), \
+                patch.object(rem, 'BASE_OWNER', 'opensearch-project'), \
+                patch.object(rem, '_clone'), \
+                patch.object(maven, 'apply_fix', side_effect=fake_apply), \
+                patch.object(maven, 'regenerate', side_effect=fake_regen) as rg, \
+                patch.object(rem, '_changed_files',
+                             return_value=['gradle/libs.versions.toml']), \
+                patch.object(rem, '_commit_and_open_pr', return_value='https://pr'):
+            result = rem._execute(self._event(self._ENTRIES), maven)
+        assert result['status'] == 'success'
+        assert rg.call_count == 1                         # ONE updateShas, not per-CVE
+        assert captured['ctx']['is_core'] is True
+        assert sorted(captured['ctx']['bumped_sections']) == ['jackson', 'log4j']
+
+    def test_mixed_core_and_plugin_batch_still_regens_once_as_core(self):
+        # A batch mixing a catalog (core) edit and a build.gradle (plugin) edit
+        # aggregates to is_core=True (any core) so the single updateShas runs.
+        maven, rem = _load_maven()
+        flags = {'org.apache.logging.log4j/log4j-core': (True, 'log4j'),
+                 'com.fasterxml.jackson.core/jackson-databind': (False, 'build.gradle')}
+
+        def fake_apply(_wd, ctx):
+            is_core, section = flags[ctx['package_name']]
+            ctx['is_core'] = is_core
+            ctx.setdefault('bumped_sections', []).append(section)
+
+        captured = {}
+        with patch.object(rem, '_resolve_token', return_value='tok'), \
+                patch.object(rem, 'WRITE_OWNER', 'v-e-e-m-a'), \
+                patch.object(rem, 'BASE_OWNER', 'opensearch-project'), \
+                patch.object(rem, '_clone'), \
+                patch.object(maven, 'apply_fix', side_effect=fake_apply), \
+                patch.object(maven, 'regenerate',
+                             side_effect=lambda _wd, ctx: captured.update(ctx=ctx)) as rg, \
+                patch.object(rem, '_changed_files', return_value=['build.gradle']), \
+                patch.object(rem, '_commit_and_open_pr', return_value='https://pr'):
+            rem._execute(self._event(self._ENTRIES), maven)
+        assert rg.call_count == 1
+        assert captured['ctx']['is_core'] is True         # any core -> regen runs
+        assert sorted(captured['ctx']['bumped_sections']) == ['build.gradle', 'log4j']
