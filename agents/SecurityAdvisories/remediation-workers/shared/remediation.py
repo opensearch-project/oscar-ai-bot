@@ -329,25 +329,32 @@ def _execute_batch(event, strategy):
                base_branch=base_branch,
                sparse_paths=getattr(strategy, "sparse_paths", None))
 
-        applied, skipped = [], []
-        for ctx in entry_ctxs:
-            if ctx.get("_skip"):
-                skipped.append({"package": ctx["package"], "cve_ids": ctx["cve_ids"],
-                                "reason": ctx["reason"]})
-                continue
-            try:
-                strategy.apply_fix(WORK_DIR, ctx)
-                applied.append(ctx)
-            except RemediationUnsupported as e:
-                logger.info("Batch entry unsupported (%s): %s", ctx.get("coordinate")
-                            or ctx.get("package_name"), e)
-                skipped.append({"package": ctx.get("package_name"),
-                                "cve_ids": ctx["cve_ids"], "reason": str(e)})
-            except RemediationError as e:
-                logger.error("Batch entry failed (%s): %s", ctx.get("coordinate")
-                             or ctx.get("package_name"), e)
-                skipped.append({"package": ctx.get("package_name"),
-                                "cve_ids": ctx["cve_ids"], "reason": str(e)})
+        # Entries whose context couldn't even be built are skipped up front.
+        skipped = [{"package": ctx["package"], "cve_ids": ctx["cve_ids"],
+                    "reason": ctx["reason"]}
+                   for ctx in entry_ctxs if ctx.get("_skip")]
+        buildable = [ctx for ctx in entry_ctxs if not ctx.get("_skip")]
+
+        has_hook = hasattr(strategy, "apply_batch")
+        if has_hook:
+            # The strategy applies every edit AND regenerates holistically its own
+            # way (npm: one batched `yarn upgrade` + one `yarn install`, since its
+            # regen is per-method and can't be driven by the generic loop below).
+            applied, hook_skipped = strategy.apply_batch(WORK_DIR, buildable)
+            skipped.extend(hook_skipped)
+        else:
+            # Generic: apply each edit, then ONE holistic regenerate (maven: a
+            # single `./gradlew updateShas` over the final version set).
+            applied = []
+            for ctx in buildable:
+                try:
+                    strategy.apply_fix(WORK_DIR, ctx)
+                    applied.append(ctx)
+                except RemediationError as e:   # includes RemediationUnsupported
+                    logger.info("Batch entry skipped (%s): %s",
+                                ctx.get("coordinate") or ctx.get("package_name"), e)
+                    skipped.append({"package": ctx.get("package_name"),
+                                    "cve_ids": ctx["cve_ids"], "reason": str(e)})
 
         if not applied:
             return {"status": "unsupported", "cve_ids": all_cves,
@@ -355,8 +362,8 @@ def _execute_batch(event, strategy):
                     "message": (f"No package in {repo_name} could be remediated "
                                 f"automatically ({len(skipped)} skipped).")}
 
-        # One holistic regen after every edit (e.g. maven's single updateShas).
-        strategy.regenerate(WORK_DIR, _merged_regen_ctx(applied, repo_name))
+        if not has_hook:
+            strategy.regenerate(WORK_DIR, _merged_regen_ctx(applied, repo_name))
 
         changed = _changed_files(WORK_DIR)
         if not changed:
