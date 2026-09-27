@@ -95,6 +95,12 @@ SCANS_MAIN_TAG = 'origin/main'
 # release_type field.
 SCANS_RELEASE_TYPES = ['bundle_opensearch', 'bundle_opensearch_dashboards']
 
+# Max vulnerabilities pulled per project scan for batch remediation. Bounded by
+# the cluster's index.max_inner_result_window (default 100). A project with more
+# than this many open vulns would be truncated -> a follow-up would paginate;
+# 100 comfortably covers current bundle components.
+_PROJECT_VULN_INNER_SIZE = 100
+
 
 def _resolve_remediation(
     cve_id: str,
@@ -772,6 +778,214 @@ def _affected_candidates(cve_id: str, request_id: str):
     return list(candidates.values()), None
 
 
+def _project_vulnerabilities(project_name: str, request_id: str):
+    """All non-excluded CVE/package pairs a project has on the main branch.
+
+    The INVERSE of ``_affected_candidates``: filters the latest main-branch scan
+    by ``project.name`` (not a ``cve_id``) and returns every non-excluded
+    vulnerability it carries — the gather step for batch remediation. Keyed on
+    ``project.name`` (the field the scans store is indexed on, per
+    ``list_projects``), so the caller passes the name ``list_projects`` returns.
+
+    Returns ``(project_ctx, error)``:
+      - ``project_ctx`` = ``{repo_owner, repo_name, project_name, entries}`` where
+        ``entries`` is one ``{cve_id, ecosystem, package, installed_version,
+        declaration_class, origin}`` per (CVE, package) the scan reports.
+      - ``error`` = a status dict when the project has no main-branch scan / no
+        open vulnerabilities / an unparseable repo URL; ``project_ctx`` is None.
+    """
+    body = json.dumps({
+        'size': 1,
+        '_source': ['project.name', 'project.repo', 'project.tag'],
+        # newest scan first so collapse keeps the LATEST main scan for the project
+        'sort': [{'timestamp.scan': {'order': 'desc'}}],
+        'collapse': {'field': 'project.name'},
+        'query': {
+            'bool': {
+                'filter': [
+                    {'term': {'project.name': project_name}},
+                    {'term': {'project.tag': SCANS_MAIN_TAG}},
+                    {'terms': {'release_type.keyword': SCANS_RELEASE_TYPES}},
+                    {'range': {'timestamp.scan': {'gte': SCANS_RECENCY_WINDOW}}},
+                    {'nested': {
+                        'path': 'vulnerabilities',
+                        # every non-excluded vulnerability (no cve_id filter);
+                        # inner_hits ships only the matched vulns, not the whole
+                        # array. Bounded by _PROJECT_VULN_INNER_SIZE.
+                        'inner_hits': {
+                            'size': _PROJECT_VULN_INNER_SIZE,
+                            '_source': [
+                                'vulnerabilities.id',
+                                'vulnerabilities.package.ecosystem',
+                                'vulnerabilities.package.name',
+                                'vulnerabilities.package.version',
+                                'vulnerabilities.package.origin',
+                            ],
+                        },
+                        'query': {'bool': {
+                            # ignore CVEs suppressed AT_PROJECT / AT_RULE
+                            'must_not': [
+                                {'exists': {'field': 'vulnerabilities.excluded'}},
+                            ],
+                        }},
+                    }},
+                ],
+            },
+        },
+    })
+
+    response = opensearch_request('POST', f'/{SCANS_INDEX}/_search', body)
+    hits = response.get('hits', {}).get('hits', [])
+    if not hits:
+        return None, {
+            'status': 'not_affected',
+            'project_name': project_name,
+            'message': (
+                f"No main-branch scan with open vulnerabilities was found for "
+                f"project '{project_name}'. Check the name via list_projects, or "
+                f"the project may be a non-release component that is not supported."
+            ),
+        }
+
+    hit = hits[0]
+    proj = hit.get('_source', {}).get('project', {})
+    owner, name = _parse_repo_url(proj.get('repo') or '')
+    if not owner or not name:
+        logger.warning(
+            f"[{request_id}] REMEDIATE_PROJECT_RESOLVE: unparseable repo url "
+            f"{proj.get('repo')!r} for project {proj.get('name')!r}"
+        )
+        return None, {
+            'status': 'error',
+            'project_name': project_name,
+            'message': (
+                f"Could not identify the GitHub repository for project "
+                f"'{project_name}' from the scans cluster."
+            ),
+        }
+
+    entries = _project_vuln_entries(hit)
+    if not entries:
+        return None, {
+            'status': 'not_affected',
+            'project_name': project_name,
+            'message': (
+                f"Project '{project_name}' has no open (non-excluded) "
+                f"vulnerabilities on the main branch."
+            ),
+        }
+
+    logger.info(
+        f"[{request_id}] REMEDIATE_PROJECT_SCANS: {owner}/{name} "
+        f"(project={proj.get('name')!r}) {len(entries)} vuln entr(ies)"
+    )
+    return {
+        'repo_owner': owner,
+        'repo_name': name,
+        'project_name': proj.get('name', ''),
+        'entries': entries,
+    }, None
+
+
+def _project_vuln_entries(hit: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """One ``{cve_id, ecosystem, package, installed_version, declaration_class,
+    origin}`` per (CVE, package) in a project scan's nested ``inner_hits``.
+
+    Unlike ``_matched_packages`` (which dedups to package names for one CVE), this
+    keeps the CVE id on every entry and dedups by ``(cve_id, package)`` — batch
+    dedup to one bump per package happens later in ``_build_cve_batch``, which
+    needs each contributing CVE id.
+    """
+    inner = (
+        ((hit.get('inner_hits') or {}).get('vulnerabilities') or {})
+        .get('hits', {}).get('hits', [])
+    )
+    entries: List[Dict[str, Any]] = []
+    seen = set()
+    for h in inner:
+        src = h.get('_source') or {}
+        cve_id = (src.get('id') or '').strip()
+        name = _vuln_package(src)
+        if not cve_id or not name:
+            continue
+        key = (cve_id, name)
+        if key in seen:
+            continue
+        seen.add(key)
+        ecosystem = _vuln_ecosystem(src)
+        declaration_class = (
+            classify_origin(_vuln_origin(src)) if ecosystem == 'maven' else 'unknown'
+        )
+        entries.append({
+            'cve_id': cve_id,
+            'ecosystem': ecosystem,
+            'package': name,
+            'installed_version': _vuln_version(src),
+            'declaration_class': declaration_class,
+            'origin': _vuln_origin(src) if ecosystem == 'maven' else None,
+        })
+    return entries
+
+
+def _resolve_project_cves(
+    project_ctx: Dict[str, Any],
+    cve_filter: Optional[set],
+    request_id: str,
+):
+    """Run ``_resolve_remediation`` over a project's gathered entries.
+
+    ``cve_filter`` = a set of upper-cased CVE ids to remediate, or None for all.
+    Returns ``(ready, skipped)``:
+      - ``ready`` = resolved entries for ``_build_cve_batch`` (``{gh_package,
+        patched_version, cve_id, ecosystem, declaration_class, origin_files}``).
+      - ``skipped`` = ``{cve_id, package, reason}`` for the partial-failure report
+        (``reason`` is the non-ready outcome: unsupported_ecosystem /
+        no_patched_version / already_patched / pr_exists / error). Requested CVEs
+        not present in the project's affected set are reported as ``not_affected``.
+    """
+    owner = project_ctx['repo_owner']
+    repo = project_ctx['repo_name']
+    ready: List[Dict[str, Any]] = []
+    skipped: List[Dict[str, Any]] = []
+    seen_cves = set()
+
+    for e in project_ctx['entries']:
+        cve_id = e['cve_id']
+        seen_cves.add(cve_id.upper())
+        if cve_filter is not None and cve_id.upper() not in cve_filter:
+            continue
+        outcome = _resolve_remediation(
+            cve_id, e['ecosystem'], e['package'], e['installed_version'],
+            owner, repo, request_id,
+        )
+        if outcome['outcome'] == 'ready':
+            ready.append({
+                'gh_package': outcome['gh_package'],
+                'patched_version': outcome['patched_version'],
+                'cve_id': cve_id,
+                'ecosystem': e['ecosystem'],
+                'declaration_class': e['declaration_class'],
+                'origin_files': _origin_build_files(e['origin']),
+            })
+        else:
+            skipped.append({
+                'cve_id': cve_id,
+                'package': e['package'],
+                'reason': outcome['outcome'],
+            })
+
+    # CVEs the user asked for that the project isn't actually affected by
+    if cve_filter is not None:
+        for missing in sorted(cve_filter - seen_cves):
+            skipped.append({'cve_id': missing, 'package': '', 'reason': 'not_affected'})
+
+    logger.info(
+        f"[{request_id}] REMEDIATE_PROJECT_RESOLVED: {owner}/{repo} "
+        f"{len(ready)} ready, {len(skipped)} skipped"
+    )
+    return ready, skipped
+
+
 def _select_candidate(
     candidates: List[Dict[str, Any]], repo_name: str,
 ) -> Optional[Dict[str, Any]]:
@@ -1166,8 +1380,7 @@ def _patched_sort_key(version: str):
 
     Only meaningful for comparing two patched versions of the SAME package, which
     range-aware derivation guarantees are on the same maintenance line — so this
-    is a within-line ``max``, never a cross-major decision. See
-    cve-remediation-batch.md.
+    is a within-line ``max``, never a cross-major decision.
     """
     try:
         return (1, semver.Version.parse(version))
@@ -1212,7 +1425,7 @@ def _build_cve_batch(
 
     Returns the deduped batch — the ``CVE_BATCH`` payload the worker iterates.
     Level-2 (regroup by the planner's resolved edit target, e.g. a shared catalog
-    key) happens in the worker, post-classification. See cve-remediation-batch.md.
+    key) happens in the worker, post-classification.
     """
     grouped: Dict[str, Dict[str, Any]] = {}
     for e in entries:

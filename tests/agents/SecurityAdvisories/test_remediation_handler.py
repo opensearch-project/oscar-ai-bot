@@ -1339,3 +1339,153 @@ class TestBuildCveBatch:
         ], 'req')
         assert batch[0]['cve_ids'] == ['CVE-1']
         assert batch[0]['patched_version'] == '1.0.1'
+
+
+def _project_hit(repo='https://github.com/opensearch-project/OpenSearch.git',
+                 name='OpenSearch', vulns=None):
+    """A scans hit for the project gather: project in _source, all the project's
+    vulns delivered via nested inner_hits. ``vulns`` = list of
+    (cve, ecosystem, package, version) tuples."""
+    inner = [
+        {'_source': {'id': cve,
+                     'package': {'ecosystem': eco, 'name': pkg, 'version': ver}}}
+        for (cve, eco, pkg, ver) in (vulns or [])
+    ]
+    return {
+        '_source': {'project': {'repo': repo, 'name': name, 'tag': 'origin/main'}},
+        'inner_hits': {'vulnerabilities': {'hits': {'hits': inner}}},
+    }
+
+
+class TestProjectVulnerabilities:
+    """Inverse gather: project.name -> all non-excluded (cve, package) entries."""
+
+    def test_returns_one_entry_per_cve_package(self):
+        mod, _ = _load_remediation_handler()
+        mod.opensearch_request = MagicMock(return_value=_scans_response([
+            _project_hit(vulns=[
+                ('CVE-1', 'maven', 'g/a', '1.0.0'),
+                ('CVE-2', 'maven', 'g/a', '1.0.0'),   # same package, 2nd CVE
+                ('CVE-3', 'npm', 'axios', '1.2.0'),
+            ]),
+        ]))
+        ctx, err = mod._project_vulnerabilities('OpenSearch', 'req')
+        assert err is None
+        assert ctx['repo_owner'] == 'opensearch-project'
+        assert ctx['repo_name'] == 'OpenSearch'
+        assert len(ctx['entries']) == 3
+        assert {e['cve_id'] for e in ctx['entries']} == {'CVE-1', 'CVE-2', 'CVE-3'}
+
+    def test_dedups_duplicate_inner_hits(self):
+        mod, _ = _load_remediation_handler()
+        mod.opensearch_request = MagicMock(return_value=_scans_response([
+            _project_hit(vulns=[
+                ('CVE-1', 'maven', 'g/a', '1.0.0'),
+                ('CVE-1', 'maven', 'g/a', '1.0.0'),   # duplicate (cve, package)
+            ]),
+        ]))
+        ctx, err = mod._project_vulnerabilities('OpenSearch', 'req')
+        assert err is None
+        assert len(ctx['entries']) == 1
+
+    def test_no_hits_returns_not_affected(self):
+        mod, _ = _load_remediation_handler()
+        mod.opensearch_request = MagicMock(return_value=_scans_response([]))
+        ctx, err = mod._project_vulnerabilities('Nope', 'req')
+        assert ctx is None
+        assert err['status'] == 'not_affected'
+
+    def test_unparseable_repo_returns_error(self):
+        mod, _ = _load_remediation_handler()
+        mod.opensearch_request = MagicMock(return_value=_scans_response([
+            _project_hit(repo='not-a-url', vulns=[('CVE-1', 'maven', 'g/a', '1.0.0')]),
+        ]))
+        ctx, err = mod._project_vulnerabilities('OpenSearch', 'req')
+        assert ctx is None
+        assert err['status'] == 'error'
+
+    def test_hit_but_no_entries_returns_not_affected(self):
+        mod, _ = _load_remediation_handler()
+        mod.opensearch_request = MagicMock(return_value=_scans_response([
+            _project_hit(vulns=[]),
+        ]))
+        ctx, err = mod._project_vulnerabilities('OpenSearch', 'req')
+        assert ctx is None
+        assert err['status'] == 'not_affected'
+
+    def test_maven_origin_classified_npm_not(self):
+        mod, _ = _load_remediation_handler()
+        mod.opensearch_request = MagicMock(return_value=_scans_response([
+            _project_hit(vulns=[
+                ('CVE-1', 'maven', 'g/a', '1.0.0'),
+                ('CVE-2', 'npm', 'axios', '1.2.0'),
+            ]),
+        ]))
+        ctx, _err = mod._project_vulnerabilities('OpenSearch', 'req')
+        by_cve = {e['cve_id']: e for e in ctx['entries']}
+        # npm entries are never origin-classified
+        assert by_cve['CVE-2']['declaration_class'] == 'unknown'
+
+
+class TestResolveProjectCves:
+    """Loop _resolve_remediation over a project's entries -> (ready, skipped)."""
+
+    @staticmethod
+    def _ctx(entries):
+        return {'repo_owner': 'opensearch-project', 'repo_name': 'OpenSearch',
+                'project_name': 'OpenSearch', 'entries': entries}
+
+    @staticmethod
+    def _entry(cve_id, package='g/a', ecosystem='maven', installed='1.0.0'):
+        return {'cve_id': cve_id, 'ecosystem': ecosystem, 'package': package,
+                'installed_version': installed, 'declaration_class': 'direct',
+                'origin': None}
+
+    def test_ready_and_skipped_split(self):
+        mod, _ = _load_remediation_handler()
+        outcomes = {
+            'CVE-1': {'outcome': 'ready', 'gh_package': 'g:a', 'patched_version': '1.0.1'},
+            'CVE-2': {'outcome': 'already_patched', 'gh_package': 'g:b',
+                      'patched_version': '2.0.0'},
+        }
+        mod._resolve_remediation = MagicMock(side_effect=lambda cve, *a, **k: outcomes[cve])
+        ready, skipped = mod._resolve_project_cves(
+            self._ctx([self._entry('CVE-1'), self._entry('CVE-2', package='g/b')]),
+            None, 'req',
+        )
+        assert [r['cve_id'] for r in ready] == ['CVE-1']
+        assert ready[0]['gh_package'] == 'g:a'
+        assert [(s['cve_id'], s['reason']) for s in skipped] == [('CVE-2', 'already_patched')]
+
+    def test_cve_filter_limits_to_subset(self):
+        mod, _ = _load_remediation_handler()
+        mod._resolve_remediation = MagicMock(
+            return_value={'outcome': 'ready', 'gh_package': 'g:a', 'patched_version': '1.0.1'})
+        ready, skipped = mod._resolve_project_cves(
+            self._ctx([self._entry('CVE-1'), self._entry('CVE-2'), self._entry('CVE-3')]),
+            {'CVE-2'}, 'req',
+        )
+        assert [r['cve_id'] for r in ready] == ['CVE-2']
+        assert skipped == []
+        assert mod._resolve_remediation.call_count == 1
+
+    def test_requested_but_not_affected_reported(self):
+        mod, _ = _load_remediation_handler()
+        mod._resolve_remediation = MagicMock(
+            return_value={'outcome': 'ready', 'gh_package': 'g:a', 'patched_version': '1.0.1'})
+        ready, skipped = mod._resolve_project_cves(
+            self._ctx([self._entry('CVE-1')]),
+            {'CVE-1', 'CVE-9'}, 'req',
+        )
+        assert [r['cve_id'] for r in ready] == ['CVE-1']
+        assert [(s['cve_id'], s['reason']) for s in skipped] == [('CVE-9', 'not_affected')]
+
+    def test_filter_is_case_insensitive(self):
+        mod, _ = _load_remediation_handler()
+        mod._resolve_remediation = MagicMock(
+            return_value={'outcome': 'ready', 'gh_package': 'g:a', 'patched_version': '1.0.1'})
+        ready, _skipped = mod._resolve_project_cves(
+            self._ctx([self._entry('CVE-2026-1')]),
+            {'cve-2026-1'.upper()}, 'req',
+        )
+        assert [r['cve_id'] for r in ready] == ['CVE-2026-1']
