@@ -1431,6 +1431,24 @@ class TestProjectVulnerabilities:
         # npm entries are never origin-classified
         assert by_cve['CVE-2']['declaration_class'] == 'unknown'
 
+    def test_flags_truncation_when_total_exceeds_cap(self):
+        mod, _ = _load_remediation_handler()
+        hit = _project_hit(vulns=[('CVE-1', 'maven', 'g/a', '1.0.0')])
+        # more open vulns exist than inner_hits returned -> truncated
+        hit['inner_hits']['vulnerabilities']['hits']['total'] = {'value': 150}
+        mod.opensearch_request = MagicMock(return_value=_scans_response([hit]))
+        ctx, err = mod._project_vulnerabilities('OpenSearch', 'req')
+        assert err is None
+        assert ctx['results_truncated'] is True
+
+    def test_not_truncated_under_cap(self):
+        mod, _ = _load_remediation_handler()
+        hit = _project_hit(vulns=[('CVE-1', 'maven', 'g/a', '1.0.0')])
+        hit['inner_hits']['vulnerabilities']['hits']['total'] = {'value': 1}
+        mod.opensearch_request = MagicMock(return_value=_scans_response([hit]))
+        ctx, _err = mod._project_vulnerabilities('OpenSearch', 'req')
+        assert ctx['results_truncated'] is False
+
 
 class TestResolveProjectCves:
     """Loop _resolve_remediation over a project's entries -> (ready, skipped)."""
@@ -1494,6 +1512,23 @@ class TestResolveProjectCves:
             {'cve-2026-1'.upper()}, 'req',
         )
         assert [r['cve_id'] for r in ready] == ['CVE-2026-1']
+
+    def test_unexpected_resolve_error_skips_one_not_the_batch(self):
+        # a raise from _resolve_remediation on one CVE must not abort the batch
+        mod, _ = _load_remediation_handler()
+
+        def flaky(cve, *a, **k):
+            if cve == 'CVE-BOOM':
+                raise RuntimeError('unexpected network blip')
+            return {'outcome': 'ready', 'gh_package': 'g:a', 'patched_version': '1.0.1'}
+
+        mod._resolve_remediation = MagicMock(side_effect=flaky)
+        ready, skipped = mod._resolve_project_cves(
+            self._ctx([self._entry('CVE-BOOM'), self._entry('CVE-OK', package='g/b')]),
+            None, 'req',
+        )
+        assert [r['cve_id'] for r in ready] == ['CVE-OK']
+        assert [(s['cve_id'], s['reason']) for s in skipped] == [('CVE-BOOM', 'error')]
 
 
 class TestRemediateProject:
@@ -1603,6 +1638,22 @@ class TestRemediateProject:
         assert out['status'] == 'remediation_unavailable'
         assert out['unsupported_ecosystems'] == ['maven']
         assert client.run_task.call_count == 0
+        # the undispatched CVEs are surfaced, not silently dropped
+        assert [(s['cve_id'], s['reason']) for s in out['skipped']] == \
+            [('CVE-1', 'remediation_unavailable')]
+
+    def test_unavailable_ecosystem_records_all_its_cves_per_cve_mode(self):
+        # per_cve mode, no maven worker -> every maven CVE recorded as unavailable
+        mod = self._mod(vulns=[('CVE-1', 'maven', 'g/a', '1.0.0'),
+                               ('CVE-2', 'maven', 'g/b', '1.0.0')])
+        client = _install_fake_ecs(mod)
+        env = {k: v for k, v in self._ENV.items() if k != 'MAVEN_REMEDIATION_TASKDEF'}
+        with patch.dict(os.environ, env, clear=True):
+            out = mod.handle_remediate_project(
+                {'project_name': 'OpenSearch', 'mode': 'per_cve'}, 'req', None)
+        assert client.run_task.call_count == 0
+        assert {s['cve_id'] for s in out['skipped']} == {'CVE-1', 'CVE-2'}
+        assert all(s['reason'] == 'remediation_unavailable' for s in out['skipped'])
 
     def test_project_not_found_returns_gather_error(self):
         mod, _ = _load_remediation_handler()

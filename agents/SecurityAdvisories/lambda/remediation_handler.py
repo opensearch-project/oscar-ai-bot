@@ -588,8 +588,15 @@ def handle_remediate_project(
                     'remediation_error', 'Failed to start automated remediation.',
                 )
             if not ok:
-                # no Fargate worker wired for this ecosystem — don't retry the rest
+                # No Fargate worker wired for this ecosystem — none of its tasks
+                # can dispatch, so record every one of its CVEs as unavailable (so
+                # the user sees them rather than having them silently dropped) and
+                # stop retrying the rest of this ecosystem's tasks.
                 unavailable.append(ecosystem)
+                for entry in group:
+                    for c in entry['cve_ids']:
+                        skipped.append({'cve_id': c, 'package': entry.get('package', ''),
+                                        'reason': 'remediation_unavailable'})
                 break
             dispatched.append({
                 'ecosystem': ecosystem,
@@ -616,6 +623,12 @@ def handle_remediate_project(
         f"[{request_id}] REMEDIATE_PROJECT_STARTED: {repository} mode={mode} "
         f"{len(dispatched)} task(s), {len(covered)} CVE(s), {len(skipped)} skipped"
     )
+    truncated = bool(project_ctx.get('results_truncated'))
+    truncation_note = (
+        (f" NOTE: {project_name} has more than {_PROJECT_VULN_INNER_SIZE} open "
+         f"vulnerabilities; only the first {_PROJECT_VULN_INNER_SIZE} were considered, "
+         f"so some CVEs may remain — re-run to catch the rest.") if truncated else ""
+    )
     return {
         'status': 'remediation_started',
         'project_name': project_name,
@@ -626,11 +639,12 @@ def handle_remediate_project(
         'dispatched': dispatched,
         'skipped': skipped,
         'unsupported_ecosystems': sorted(set(unavailable)),
+        'results_truncated': truncated,
         'message': (
             f"Started remediation for {repository}: {len(dispatched)} pull "
             f"request(s) covering {len(covered)} CVE(s). This runs in the "
             f"background; the PR link(s) will be posted here shortly. "
-            f"{_summarize_skipped(skipped)}"
+            f"{_summarize_skipped(skipped)}{truncation_note}"
         ),
     }
 
@@ -1049,6 +1063,22 @@ def _project_vulnerabilities(project_name: str, request_id: str):
             ),
         }
 
+    # Truncation guard: inner_hits is capped at _PROJECT_VULN_INNER_SIZE, so a
+    # project with more open vulnerabilities than that would be silently cut off.
+    # Compare against the reported total and flag it so the batch doesn't claim to
+    # "remediate everything" while quietly dropping CVEs.
+    inner_meta = (
+        ((hit.get('inner_hits') or {}).get('vulnerabilities') or {}).get('hits', {})
+    )
+    total = (inner_meta.get('total') or {}).get('value', 0)
+    truncated = isinstance(total, int) and total > _PROJECT_VULN_INNER_SIZE
+    if truncated:
+        logger.warning(
+            f"[{request_id}] REMEDIATE_PROJECT_TRUNCATED: {owner}/{name} has {total} "
+            f"open vulnerabilities but only the first {_PROJECT_VULN_INNER_SIZE} were "
+            f"fetched; some CVEs will not be remediated in this run."
+        )
+
     logger.info(
         f"[{request_id}] REMEDIATE_PROJECT_SCANS: {owner}/{name} "
         f"(project={proj.get('name')!r}) {len(entries)} vuln entr(ies)"
@@ -1058,6 +1088,7 @@ def _project_vulnerabilities(project_name: str, request_id: str):
         'repo_name': name,
         'project_name': proj.get('name', ''),
         'entries': entries,
+        'results_truncated': truncated,
     }, None
 
 
@@ -1128,10 +1159,18 @@ def _resolve_project_cves(
         seen_cves.add(cve_id.upper())
         if cve_filter is not None and cve_id.upper() not in cve_filter:
             continue
-        outcome = _resolve_remediation(
-            cve_id, e['ecosystem'], e['package'], e['installed_version'],
-            owner, repo, request_id,
-        )
+        try:
+            outcome = _resolve_remediation(
+                cve_id, e['ecosystem'], e['package'], e['installed_version'],
+                owner, repo, request_id,
+            )
+        except Exception as ex:  # noqa: BLE001 — one bad CVE must not abort the batch
+            logger.error(
+                f"[{request_id}] REMEDIATE_PROJECT_RESOLVE_UNEXPECTED: {cve_id}: {ex}"
+            )
+            skipped.append({'cve_id': cve_id, 'package': e['package'],
+                            'reason': 'error'})
+            continue
         if outcome['outcome'] == 'ready':
             ready.append({
                 'gh_package': outcome['gh_package'],   # canonical, dedup key only

@@ -311,7 +311,7 @@ def _execute_batch(event, strategy):
         except RemediationError as e:
             logger.error("Skipping unbuildable batch entry %s: %s",
                          entry.get("package"), e)
-            entry_ctxs.append({"_skip": True, "cve_ids": cve_ids,
+            entry_ctxs.append({"__batch_skip__": True, "cve_ids": cve_ids,
                                "package": entry.get("package", ""), "reason": str(e)})
             continue
         ctx["cve_ids"] = cve_ids
@@ -332,8 +332,8 @@ def _execute_batch(event, strategy):
         # Entries whose context couldn't even be built are skipped up front.
         skipped = [{"package": ctx["package"], "cve_ids": ctx["cve_ids"],
                     "reason": ctx["reason"]}
-                   for ctx in entry_ctxs if ctx.get("_skip")]
-        buildable = [ctx for ctx in entry_ctxs if not ctx.get("_skip")]
+                   for ctx in entry_ctxs if ctx.get("__batch_skip__")]
+        buildable = [ctx for ctx in entry_ctxs if not ctx.get("__batch_skip__")]
 
         has_hook = hasattr(strategy, "apply_batch")
         if has_hook:
@@ -357,7 +357,7 @@ def _execute_batch(event, strategy):
                                     "cve_ids": ctx["cve_ids"], "reason": str(e)})
 
         if not applied:
-            return {"status": "unsupported", "cve_ids": all_cves,
+            return {"status": "unsupported", "batch": True, "cve_ids": all_cves,
                     "skipped": skipped,
                     "message": (f"No package in {repo_name} could be remediated "
                                 f"automatically ({len(skipped)} skipped).")}
@@ -367,7 +367,8 @@ def _execute_batch(event, strategy):
 
         changed = _changed_files(WORK_DIR)
         if not changed:
-            return {"status": "no_change", "cve_ids": all_cves, "skipped": skipped,
+            return {"status": "no_change", "batch": True, "cve_ids": all_cves,
+                    "skipped": skipped,
                     "message": (f"{repo_name} already satisfies the patched "
                                 f"versions; no change needed.")}
         logger.info("Batch changed files: %s", changed)
@@ -376,15 +377,17 @@ def _execute_batch(event, strategy):
             WORK_DIR, _batch_pr_meta(applied, repo_name, base_branch), token)
     except RemediationInProgress as e:
         logger.info("Batch remediation already in progress for %s: %s", repo_name, e)
-        return {"status": "remediation_in_progress", "cve_ids": all_cves,
-                "message": str(e)}
+        return {"status": "remediation_in_progress", "batch": True,
+                "cve_ids": all_cves, "message": str(e)}
     except RemediationError as e:
         logger.error("Batch remediation failed for %s: %s", repo_name, e)
-        return {"status": "error", "cve_ids": all_cves, "message": str(e)}
+        return {"status": "error", "batch": True, "cve_ids": all_cves,
+                "message": str(e)}
 
     remediated = sorted({c for ctx in applied for c in ctx.get("cve_ids", [])})
     return {
         "status": "success",
+        "batch": True,
         "ecosystem": strategy.name,
         "repository": f"{BASE_OWNER}/{repo_name}",
         "pr_url": pr_url,
@@ -416,8 +419,18 @@ def _batch_pr_meta(applied_ctxs, repo_name, base_branch):
     """Branch/commit/PR text for a batch: one commit, body lists every CVE.
 
     The branch name is deterministic over the full remediated CVE set (sorted,
-    hashed) so racing workers for the same batch collide on the same ref — the
+    hashed) so racing workers for the *same* batch collide on the same ref — the
     same concurrency guard the single-CVE path relies on.
+
+    KNOWN LIMITATION: the guard only collides on an IDENTICAL CVE set. Two batches
+    for the same project with *overlapping but different* CVE sets (e.g. one "all",
+    one filtered) hash to different branches and can both open PRs touching the
+    same package. The per-CVE `_find_existing_pr` pre-flight (in the Lambda) covers
+    this once the first PR is open — it matches the CVE id in the batch PR body —
+    but there's still a race window between dispatch and PR creation (minutes) where
+    two concurrent same-project batches won't see each other. Acceptable for now
+    (requires concurrent same-project invocations); harden later by checking for
+    open `oscar/batch-*` PRs covering any target CVE at dispatch time.
     """
     all_cves = sorted({c for ctx in applied_ctxs for c in ctx.get("cve_ids", [])})
     digest = hashlib.sha1(",".join(all_cves).encode()).hexdigest()[:12]
@@ -514,8 +527,9 @@ def _notify_slack(event, result):
 def _format_slack_message(result):
     """Human-readable Slack message for a remediation result dict."""
     status = result.get("status")
-    # Batch (project) result: many CVEs in one PR.
-    if result.get("remediated") is not None or result.get("cve_ids") is not None:
+    # Batch (project) result: many CVEs in one PR. Routed on an explicit flag set
+    # by _execute_batch (not a heuristic on which keys happen to be present).
+    if result.get("batch"):
         return _format_batch_slack_message(result)
     cve = result.get("cve_id") or "the CVE"
     if status == "success":

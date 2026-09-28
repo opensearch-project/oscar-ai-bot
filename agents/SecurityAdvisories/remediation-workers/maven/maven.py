@@ -40,7 +40,6 @@ transitive (advisory package may not match this repo); and version indirection w
 can't edit (``System.getProperty(...)`` etc.).
 """
 
-import functools
 import glob
 import logging
 import os
@@ -350,17 +349,26 @@ def _http_get(url, timeout=_CORE_CATALOG_TIMEOUT):
         return resp.read().decode("utf-8", "replace")
 
 
-@functools.lru_cache(maxsize=1)
+_CORE_CATALOG_CACHE: dict = {}
+
+
 def _core_catalog_text():
-    """Core's version catalog, fetched once per process (memoized), or ``None`` on
-    failure. Memoized so a batched run resolving many coordinates fetches it once
-    rather than per coordinate.
+    """Core's version catalog, or ``None`` on failure.
+
+    Memoized so a batched run resolving many coordinates fetches it once rather
+    than per coordinate — but ONLY a successful fetch is cached. A failure returns
+    ``None`` without caching, so a transient network error on the first lookup
+    doesn't poison every subsequent coordinate in the same batch run.
     """
+    if "text" in _CORE_CATALOG_CACHE:
+        return _CORE_CATALOG_CACHE["text"]
     try:
-        return _http_get(_CORE_CATALOG_URL)
+        text = _http_get(_CORE_CATALOG_URL)
     except Exception as e:  # noqa: BLE001 - any fetch/network error -> unknown (None)
         logger.warning("core catalog fetch failed: %s", e)
         return None
+    _CORE_CATALOG_CACHE["text"] = text
+    return text
 
 
 def _core_managed_version(coord):

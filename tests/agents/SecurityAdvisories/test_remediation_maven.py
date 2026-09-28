@@ -1490,11 +1490,11 @@ class TestBatchExecute:
     def test_slack_message_batch_success_and_unsupported(self):
         _maven, rem = _load_maven()
         ok = rem._format_slack_message({
-            'status': 'success', 'remediated': ['CVE-1', 'CVE-2'],
+            'status': 'success', 'batch': True, 'remediated': ['CVE-1', 'CVE-2'],
             'pr_url': 'https://pr', 'skipped': [{'cve_ids': ['CVE-9']}]})
         assert '2 CVEs' in ok and 'https://pr' in ok and '1 skipped' in ok
         un = rem._format_slack_message({
-            'status': 'unsupported', 'cve_ids': ['CVE-1'],
+            'status': 'unsupported', 'batch': True, 'cve_ids': ['CVE-1'],
             'message': 'nothing could be remediated.'})
         assert 'Manual review' in un
 
