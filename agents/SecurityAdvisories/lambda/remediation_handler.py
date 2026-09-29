@@ -1408,9 +1408,14 @@ def _derive_patched_version(
         f"[{request_id}] REMEDIATE_CVE_ADVISORY_LOOKUP: cve_id={cve_id!r} "
         f"package={package!r}"
     )
+    # A scan vulnerability id is usually a CVE, but can be a GHSA (no CVE
+    # assigned). The advisories list endpoint filters by cve_id OR ghsa_id, so
+    # pick the right param — querying a GHSA id via cve_id matches nothing and
+    # would wrongly report "no patched version" for an advisory that has a fix.
+    lookup_param = 'ghsa_id' if cve_id.upper().startswith('GHSA-') else 'cve_id'
     response = requests.get(
         f'{GITHUB_API}/advisories',
-        params={'cve_id': cve_id, 'per_page': 5},
+        params={lookup_param: cve_id, 'per_page': 5},
         headers=headers,
         timeout=GITHUB_TIMEOUT,
     )

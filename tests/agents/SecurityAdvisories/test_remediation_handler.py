@@ -494,6 +494,21 @@ class TestDerive:
         assert result['package'] == 'axios'
         assert result['patched_version'] == '1.6.0'
 
+    def test_ghsa_id_looked_up_by_ghsa_param(self):
+        # a scan vuln id can be a GHSA (no CVE); it must be queried via ghsa_id,
+        # not cve_id (which matches nothing -> false "no patched version").
+        mod, _ = _load_remediation_handler()
+        pkg = 'com.fasterxml.jackson.core/jackson-databind'
+        fake = _install_fake_github(mod, advisories=_advisory('maven', pkg, '2.18.10'))
+        gh_pkg, patched = mod._derive_patched_version(
+            'GHSA-mhm7-754m-9p8w', 'maven', pkg, '2.18.8', 'req')
+        assert patched == '2.18.10'
+        adv_call = next(c for c in fake.get.call_args_list
+                        if c.args and c.args[0].endswith('/advisories'))
+        params = adv_call.kwargs.get('params', {})
+        assert params.get('ghsa_id') == 'GHSA-mhm7-754m-9p8w'
+        assert 'cve_id' not in params
+
     def test_no_advisory_found_returns_no_patched_version(self):
         # cluster resolved the CVE (it's real), but GitHub has no advisory ->
         # not an error; we just can't determine a patched version
