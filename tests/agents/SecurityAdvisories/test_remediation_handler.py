@@ -1464,6 +1464,17 @@ class TestProjectVulnerabilities:
         ctx, _err = mod._project_vulnerabilities('OpenSearch', 'req')
         assert ctx['results_truncated'] is False
 
+    def test_bare_int_total_handled(self):
+        # cluster with rest_total_hits_as_int returns total as a plain int, not
+        # {value, relation} — must not crash and must still detect truncation
+        mod, _ = _load_remediation_handler()
+        hit = _project_hit(vulns=[('CVE-1', 'maven', 'g/a', '1.0.0')])
+        hit['inner_hits']['vulnerabilities']['hits']['total'] = 150
+        mod.opensearch_request = MagicMock(return_value=_scans_response([hit]))
+        ctx, err = mod._project_vulnerabilities('OpenSearch', 'req')
+        assert err is None
+        assert ctx['results_truncated'] is True
+
 
 class TestResolveProjectCves:
     """Loop _resolve_remediation over a project's entries -> (ready, skipped)."""
@@ -1527,6 +1538,17 @@ class TestResolveProjectCves:
             {'cve-2026-1'.upper()}, 'req',
         )
         assert [r['cve_id'] for r in ready] == ['CVE-2026-1']
+
+    def test_pr_exists_skip_carries_pr_url(self):
+        mod, _ = _load_remediation_handler()
+        mod._resolve_remediation = MagicMock(return_value={
+            'outcome': 'pr_exists', 'gh_package': 'g:a', 'patched_version': '1.0.1',
+            'pr': {'url': 'https://github.com/o/r/pull/5', 'title': 'Bump a',
+                   'matched_by': 'CVE id'}})
+        _ready, skipped = mod._resolve_project_cves(
+            self._ctx([self._entry('CVE-1')]), None, 'req')
+        assert skipped[0]['reason'] == 'pr_exists'
+        assert skipped[0]['pr_url'] == 'https://github.com/o/r/pull/5'
 
     def test_unexpected_resolve_error_skips_one_not_the_batch(self):
         # a raise from _resolve_remediation on one CVE must not abort the batch

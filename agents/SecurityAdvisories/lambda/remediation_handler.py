@@ -1070,8 +1070,16 @@ def _project_vulnerabilities(project_name: str, request_id: str):
     inner_meta = (
         ((hit.get('inner_hits') or {}).get('vulnerabilities') or {}).get('hits', {})
     )
-    total = (inner_meta.get('total') or {}).get('value', 0)
-    truncated = isinstance(total, int) and total > _PROJECT_VULN_INNER_SIZE
+    # `total` is normally {value, relation}, but a cluster with rest_total_hits_as_int
+    # returns a bare int — handle both (a raw int would break `.get`).
+    total_meta = inner_meta.get('total')
+    if isinstance(total_meta, dict):
+        total = total_meta.get('value', 0)
+    elif isinstance(total_meta, int):
+        total = total_meta
+    else:
+        total = 0
+    truncated = total > _PROJECT_VULN_INNER_SIZE
     if truncated:
         logger.warning(
             f"[{request_id}] REMEDIATE_PROJECT_TRUNCATED: {owner}/{name} has {total} "
@@ -1183,11 +1191,15 @@ def _resolve_project_cves(
                 'origin_files': _origin_build_files(e['origin']),
             })
         else:
-            skipped.append({
+            entry = {
                 'cve_id': cve_id,
                 'package': e['package'],
                 'reason': outcome['outcome'],
-            })
+            }
+            # surface the existing PR link so the report can point at it
+            if outcome['outcome'] == 'pr_exists':
+                entry['pr_url'] = (outcome.get('pr') or {}).get('url', '')
+            skipped.append(entry)
 
     # CVEs the user asked for that the project isn't actually affected by
     if cve_filter is not None:
