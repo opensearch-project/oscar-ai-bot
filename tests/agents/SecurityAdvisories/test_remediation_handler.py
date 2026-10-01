@@ -1692,6 +1692,25 @@ class TestRemediateProject:
         assert {s['cve_id'] for s in out['skipped']} == {'CVE-1', 'CVE-2'}
         assert all(s['reason'] == 'remediation_unavailable' for s in out['skipped'])
 
+    def test_gather_exception_returns_error(self):
+        # an OpenSearch failure during gather is surfaced, not crashed
+        mod = self._mod()
+        mod._project_vulnerabilities = MagicMock(side_effect=RuntimeError('os down'))
+        client = _install_fake_ecs(mod)
+        with patch.dict(os.environ, self._ENV, clear=False):
+            out = mod.handle_remediate_project({'project_name': 'OpenSearch'}, 'req', None)
+        assert out['status'] == 'error'
+        assert client.run_task.call_count == 0
+
+    def test_dispatch_exception_returns_error(self):
+        # a run_task launch failure is surfaced as a remediation error
+        mod = self._mod()
+        mod._dispatch_remediation = MagicMock(side_effect=RuntimeError('run_task boom'))
+        with patch.dict(os.environ, self._ENV, clear=False):
+            out = mod.handle_remediate_project({'project_name': 'OpenSearch'}, 'req', None)
+        assert out['status'] == 'error'
+        assert out['type'] == 'remediation_error'
+
     def test_project_not_found_returns_gather_error(self):
         mod, _ = _load_remediation_handler()
         mod.opensearch_request = MagicMock(return_value=_scans_response([]))

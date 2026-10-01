@@ -1383,7 +1383,10 @@ class TestBatchExecute:
         return e
 
     def _run(self, maven, rem, event, apply_side_effect=None,
-             changed=None, pr_url='https://github.com/o/r/pull/1'):
+             changed=None, pr_url='https://github.com/o/r/pull/1', pr_exc=None):
+        pr_patch = (patch.object(rem, '_commit_and_open_pr', side_effect=pr_exc)
+                    if pr_exc is not None
+                    else patch.object(rem, '_commit_and_open_pr', return_value=pr_url))
         cm = [
             patch.object(rem, '_resolve_token', return_value='tok'),
             patch.object(rem, 'WRITE_OWNER', 'v-e-e-m-a'),
@@ -1392,7 +1395,7 @@ class TestBatchExecute:
             patch.object(maven, 'regenerate'),
             patch.object(rem, '_changed_files',
                          return_value=['build.gradle'] if changed is None else changed),
-            patch.object(rem, '_commit_and_open_pr', return_value=pr_url),
+            pr_patch,
         ]
         if apply_side_effect is not None:
             cm.append(patch.object(maven, 'apply_fix', side_effect=apply_side_effect))
@@ -1556,3 +1559,56 @@ class TestBatchExecute:
         assert rg.call_count == 1
         assert captured['ctx']['is_core'] is True         # any core -> regen runs
         assert sorted(captured['ctx']['bumped_sections']) == ['build.gradle', 'log4j']
+
+    def test_batch_missing_repo_name_errors(self):
+        maven, rem = _load_maven()
+        with patch.object(rem, '_resolve_token', return_value='tok'), \
+                patch.object(rem, 'WRITE_OWNER', 'v-e-e-m-a'), \
+                patch.object(rem, 'BASE_OWNER', 'opensearch-project'):
+            # cve_batch present but no repo_name
+            result = rem._execute({'cve_batch': json.dumps(self._ENTRIES)}, maven)
+        assert result['status'] == 'error'
+        assert 'repo_name' in result['message']
+
+    def test_batch_unbuildable_entry_is_skipped(self):
+        # an entry whose build_context can't be built (missing package/version) is
+        # recorded as skipped, not fatal; the buildable one still gets a PR.
+        maven, rem = _load_maven()
+        entries = [
+            {'package': '', 'patched_version': '', 'cve_ids': ['CVE-BAD']},
+            {'package': 'org.apache.logging.log4j/log4j-core',
+             'patched_version': '2.25.4', 'cve_ids': ['CVE-OK'],
+             'installed_version': '2.20.0'},
+        ]
+        result, _ = self._run(maven, rem, self._event(entries))
+        assert result['status'] == 'success'
+        assert result['remediated'] == ['CVE-OK']
+        assert any(s['cve_ids'] == ['CVE-BAD'] for s in result['skipped'])
+
+    def test_batch_in_progress_when_branch_exists(self):
+        maven, rem = _load_maven()
+        result, _ = self._run(maven, rem, self._event(self._ENTRIES),
+                              pr_exc=rem.RemediationInProgress('branch exists'))
+        assert result['status'] == 'remediation_in_progress'
+        assert result['batch'] is True
+        assert result['cve_ids'] == ['CVE-1', 'CVE-2', 'CVE-3']
+
+    def test_batch_error_on_commit_failure(self):
+        maven, rem = _load_maven()
+        result, _ = self._run(maven, rem, self._event(self._ENTRIES),
+                              pr_exc=rem.RemediationError('gh pr create failed'))
+        assert result['status'] == 'error'
+        assert result['batch'] is True
+
+    def test_batch_slack_message_no_change_and_in_progress(self):
+        _maven, rem = _load_maven()
+        nc = rem._format_slack_message({
+            'status': 'no_change', 'batch': True, 'cve_ids': ['CVE-1'],
+            'message': 'already satisfies the patched versions.'})
+        assert 'already satisfies' in nc
+        ip = rem._format_slack_message({
+            'status': 'remediation_in_progress', 'batch': True, 'cve_ids': ['CVE-1']})
+        assert 'already in progress' in ip
+        err = rem._format_slack_message({
+            'status': 'error', 'batch': True, 'cve_ids': ['CVE-1'], 'message': 'boom'})
+        assert 'boom' in err
