@@ -31,6 +31,13 @@ logger = logging.getLogger()
 
 name = "npm"
 
+# Batch (project) remediation is supported via apply_batch: npm's regenerate is
+# per-method (one `yarn install` vs a per-package `yarn upgrade`), so the shared
+# generic "apply each + one regenerate" loop can't batch it. apply_batch applies
+# every edit, then reconciles the lockfile with one batched yarn upgrade + one
+# yarn install.
+supports_batch = True
+
 # package.json sections we will edit, in the order we report them.
 _MANIFEST_SECTIONS = ("dependencies", "devDependencies", "resolutions")
 
@@ -191,36 +198,26 @@ def _apply_fix_deterministic(pkg_path, content, manifest, ctx, in_lockfile):
         ctx["bumped_sections"] = ["resolutions (added)"]
 
 
-def regenerate(work_dir, ctx):
-    """Regenerate yarn.lock per ``ctx['method']`` (set by apply_fix):
+# Lambda only allows writes under /tmp — point HOME and caches there.
+# --ignore-scripts skips postinstall hooks (e.g. cypress) that fail in the
+# sandbox (we only need yarn.lock, not a usable node_modules). --ignore-engines
+# tolerates a Node/yarn engine mismatch between the baked image and the target
+# repo so the install/upgrade doesn't fail on it.
+_YARN_COMMON = ["--ignore-scripts", "--ignore-engines", "--non-interactive"]
 
-      - ``upgrade``: ``yarn upgrade <pkg>@<version>`` (direct dep).
-      - ``install``: ``yarn install`` (resolution / added resolution).
-      - ``none``: already patched; no-op.
-    """
-    method = ctx.get("method", "install")
-    if method == "none":
-        logger.info("Already at/above the patched version; no regenerate needed.")
-        return
 
-    # Lambda only allows writes under /tmp — point HOME and caches there.
-    # --ignore-scripts skips postinstall hooks (e.g. cypress) that fail in the
-    # sandbox (we only need yarn.lock, not a usable node_modules).
-    # --ignore-engines tolerates a Node/yarn engine mismatch between the baked
-    # image and the target repo so the install/upgrade doesn't fail on it.
-    env = {
+def _yarn_env():
+    return {
         **os.environ,
         "HOME": "/tmp",
         "YARN_CACHE_FOLDER": "/tmp/.yarn-cache",
         "npm_config_cache": "/tmp/.npm",
     }
-    common = ["--ignore-scripts", "--ignore-engines", "--non-interactive"]
-    if method == "upgrade":
-        spec = f"{ctx['package_name']}@{ctx['patched_version']}"
-        cmd = ["yarn", "upgrade", spec, *common]
-    else:
-        cmd = ["yarn", "install", *common]
 
+
+def _run_yarn(work_dir, cmd):
+    """Run a yarn command in ``work_dir``, raising RemediationError on failure."""
+    env = _yarn_env()
     logger.info("Toolchain: node %s, yarn %s", _tool_version("node", env),
                 _tool_version("yarn", env))
     logger.info("Running: %s", " ".join(cmd))
@@ -233,6 +230,61 @@ def regenerate(work_dir, ctx):
     if result.returncode != 0:
         logger.error("%s failed: %s", cmd[1], result.stderr[-500:])
         raise RemediationError(f"yarn {cmd[1]} failed: {result.stderr[-300:]}")
+
+
+def regenerate(work_dir, ctx):
+    """Regenerate yarn.lock per ``ctx['method']`` (set by apply_fix):
+
+      - ``upgrade``: ``yarn upgrade <pkg>@<version>`` (direct dep).
+      - ``install``: ``yarn install`` (resolution / added resolution).
+      - ``none``: already patched; no-op.
+    """
+    method = ctx.get("method", "install")
+    if method == "none":
+        logger.info("Already at/above the patched version; no regenerate needed.")
+        return
+    if method == "upgrade":
+        spec = f"{ctx['package_name']}@{ctx['patched_version']}"
+        _run_yarn(work_dir, ["yarn", "upgrade", spec, *_YARN_COMMON])
+    else:
+        _run_yarn(work_dir, ["yarn", "install", *_YARN_COMMON])
+
+
+def apply_batch(work_dir, entry_ctxs):
+    """Apply every package.json edit, then regenerate yarn.lock ONCE for the batch.
+
+    Called by the shared batch flow (``_execute_batch``) instead of the generic
+    apply-each-then-one-regenerate loop, because npm's regen is per-method:
+    ``install`` methods edit package.json (done in apply_fix here) and need one
+    holistic ``yarn install``; ``upgrade`` methods defer the edit to
+    ``yarn upgrade <pkg>@<ver>``. So we collect all upgrade specs into a single
+    ``yarn upgrade a@1 b@2 ...`` and run at most one ``yarn install`` to reconcile
+    the tree — one lockfile resolution for the whole PR.
+
+    Returns ``(applied, skipped)``; a package that can't be edited is skipped
+    (recorded with its cve_ids) rather than failing the batch.
+    """
+    applied, skipped = [], []
+    for ctx in entry_ctxs:
+        try:
+            apply_fix(work_dir, ctx)
+            applied.append(ctx)
+        except RemediationError as e:   # includes RemediationUnsupported
+            logger.info("Batch entry skipped (%s): %s", ctx.get("package_name"), e)
+            skipped.append({"package": ctx.get("package_name"),
+                            "cve_ids": ctx.get("cve_ids", []), "reason": str(e)})
+
+    upgrade_specs = [f"{c['package_name']}@{c['patched_version']}"
+                     for c in applied if c.get("method") == "upgrade"]
+    needs_install = any(c.get("method") == "install" for c in applied)
+
+    # yarn upgrade first (edits the direct-dep versions + lock), then a single
+    # yarn install reconciles any package.json edits and the full tree.
+    if upgrade_specs:
+        _run_yarn(work_dir, ["yarn", "upgrade", *upgrade_specs, *_YARN_COMMON])
+    if needs_install:
+        _run_yarn(work_dir, ["yarn", "install", *_YARN_COMMON])
+    return applied, skipped
 
 
 def _tool_version(tool, env):

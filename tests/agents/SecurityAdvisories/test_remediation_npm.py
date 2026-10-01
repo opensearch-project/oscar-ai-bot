@@ -452,6 +452,9 @@ class TestEcsEntrypoint:
             'base_branch': 'main',
             'slack_channel': 'C0APV94Q1JP',
             'slack_thread_ts': '1788210459.939479',
+            # read so remediation.handle can route to the batch path (npm batch
+            # itself is not yet supported -> returns a clean unsupported outcome)
+            'cve_batch': '',
         }
 
     def test_missing_env_vars_become_empty(self):
@@ -932,3 +935,117 @@ class TestApplyFixViaLlmPlan:
         assert 'dependencies' in sent and 'resolutions' in sent
         assert 'scripts' not in sent and 'jest' not in sent
         assert 'webpack' not in sent   # scripts content not leaked into the prompt
+
+
+class TestBatchNpm:
+    """npm batch remediation: apply_batch collects one `yarn upgrade <specs...>`
+    plus one `yarn install`, and the shared _execute uses the hook (not the
+    generic per-entry regenerate)."""
+
+    _ENTRIES = [
+        {'package': 'ws', 'patched_version': '7.5.11', 'cve_ids': ['CVE-1'],
+         'installed_version': '7.5.10'},
+        {'package': 'axios', 'patched_version': '1.7.9', 'cve_ids': ['CVE-2'],
+         'installed_version': '1.6.0'},
+    ]
+
+    @staticmethod
+    def _event(entries):
+        return {'repo_name': 'sec-analytics', 'base_branch': 'main',
+                'cve_batch': json.dumps(entries)}
+
+    def test_supports_batch_flag(self):
+        npm, _ = _load_npm()
+        assert npm.supports_batch is True
+
+    def test_apply_batch_one_upgrade_call_then_install(self):
+        npm, _ = _load_npm()
+        methods = {'ws': 'upgrade', 'axios': 'upgrade', 'lodash': 'install'}
+
+        def fake_apply(_wd, ctx):
+            ctx['method'] = methods[ctx['package_name']]
+
+        ctxs = [
+            {'package_name': 'ws', 'patched_version': '7.5.11', 'cve_ids': ['CVE-1']},
+            {'package_name': 'axios', 'patched_version': '1.7.9', 'cve_ids': ['CVE-2']},
+            {'package_name': 'lodash', 'patched_version': '4.17.21', 'cve_ids': ['CVE-3']},
+        ]
+        calls = []
+        with patch.object(npm, 'apply_fix', side_effect=fake_apply), \
+                patch.object(npm, '_run_yarn', side_effect=lambda wd, cmd: calls.append(cmd)):
+            applied, skipped = npm.apply_batch('/tmp/x', ctxs)
+        assert len(applied) == 3 and skipped == []
+        # one batched yarn upgrade carrying BOTH specs, then a single yarn install
+        assert calls[0][:2] == ['yarn', 'upgrade']
+        assert 'ws@7.5.11' in calls[0] and 'axios@1.7.9' in calls[0]
+        assert calls[1][:2] == ['yarn', 'install']
+        assert len(calls) == 2
+
+    def test_apply_batch_install_only_when_no_upgrades(self):
+        npm, _ = _load_npm()
+
+        def fake_apply(_wd, ctx):
+            ctx['method'] = 'install'
+
+        calls = []
+        with patch.object(npm, 'apply_fix', side_effect=fake_apply), \
+                patch.object(npm, '_run_yarn', side_effect=lambda wd, cmd: calls.append(cmd)):
+            npm.apply_batch('/tmp/x', [
+                {'package_name': 'lodash', 'patched_version': '4.17.21', 'cve_ids': ['CVE-3']}])
+        assert [c[:2] for c in calls] == [['yarn', 'install']]
+
+    def test_apply_batch_none_method_runs_no_yarn(self):
+        npm, _ = _load_npm()
+
+        def fake_apply(_wd, ctx):
+            ctx['method'] = 'none'
+
+        calls = []
+        with patch.object(npm, 'apply_fix', side_effect=fake_apply), \
+                patch.object(npm, '_run_yarn', side_effect=lambda wd, cmd: calls.append(cmd)):
+            applied, skipped = npm.apply_batch('/tmp/x', [
+                {'package_name': 'ws', 'patched_version': '7.5.11', 'cve_ids': ['CVE-1']}])
+        assert len(applied) == 1 and calls == []
+
+    def test_apply_batch_skips_failed_entry(self):
+        npm, rem = _load_npm()
+
+        def fake_apply(_wd, ctx):
+            if ctx['package_name'] == 'bad':
+                raise rem.RemediationError('not a dependency of this repository')
+            ctx['method'] = 'upgrade'
+
+        calls = []
+        with patch.object(npm, 'apply_fix', side_effect=fake_apply), \
+                patch.object(npm, '_run_yarn', side_effect=lambda wd, cmd: calls.append(cmd)):
+            applied, skipped = npm.apply_batch('/tmp/x', [
+                {'package_name': 'ws', 'patched_version': '7.5.11', 'cve_ids': ['CVE-1']},
+                {'package_name': 'bad', 'patched_version': '1.0.0', 'cve_ids': ['CVE-2']},
+            ])
+        assert [c['package_name'] for c in applied] == ['ws']
+        assert skipped[0]['package'] == 'bad'
+        assert skipped[0]['cve_ids'] == ['CVE-2']
+        assert 'ws@7.5.11' in calls[0]           # only the good one upgraded
+
+    def test_execute_uses_hook_not_generic_regenerate(self):
+        npm, rem = _load_npm()
+        applied_stub = [
+            {'package_name': 'ws', 'patched_version': '7.5.11', 'cve_ids': ['CVE-1'],
+             'installed_version': '7.5.10'},
+            {'package_name': 'axios', 'patched_version': '1.7.9', 'cve_ids': ['CVE-2'],
+             'installed_version': '1.6.0'},
+        ]
+        with patch.object(rem, '_resolve_token', return_value='tok'), \
+                patch.object(rem, 'WRITE_OWNER', 'v-e-e-m-a'), \
+                patch.object(rem, 'BASE_OWNER', 'v-e-e-m-a'), \
+                patch.object(rem, '_clone'), \
+                patch.object(npm, 'apply_batch', return_value=(applied_stub, [])) as ab, \
+                patch.object(npm, 'regenerate') as rg, \
+                patch.object(rem, '_changed_files', return_value=['package.json', 'yarn.lock']), \
+                patch.object(rem, '_commit_and_open_pr', return_value='https://pr/1') as pr:
+            result = rem._execute(self._event(self._ENTRIES), npm)
+        assert result['status'] == 'success'
+        assert sorted(result['remediated']) == ['CVE-1', 'CVE-2']
+        ab.assert_called_once()          # batch hook drove the apply + regen
+        rg.assert_not_called()           # generic per-entry regenerate NOT used
+        pr.assert_called_once()          # single PR

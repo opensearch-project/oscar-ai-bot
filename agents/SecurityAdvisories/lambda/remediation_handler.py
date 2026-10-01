@@ -37,12 +37,13 @@ Functions:
 import json
 import logging
 import os
+import re
 from typing import Any, Dict, List, Optional
 
 import boto3
 import requests
 import semver
-from aws_utils import get_latest_scans_index, opensearch_request
+from aws_utils import SCANS_INDEX, SCANS_RECENCY_WINDOW, opensearch_request
 from origin_classifier import classify_origin
 from query_utils import connection_error, error_response
 
@@ -93,6 +94,119 @@ SCANS_MAIN_TAG = 'origin/main'
 # and OpenSearch-Dashboards bundles — via the scans cluster's top-level
 # release_type field.
 SCANS_RELEASE_TYPES = ['bundle_opensearch', 'bundle_opensearch_dashboards']
+
+# Max vulnerabilities pulled per project scan for batch remediation. Bounded by
+# the cluster's index.max_inner_result_window (default 100). A project with more
+# than this many open vulns would be truncated -> a follow-up would paginate;
+# 100 comfortably covers current bundle components.
+_PROJECT_VULN_INNER_SIZE = 100
+
+
+def _resolve_remediation(
+    cve_id: str,
+    ecosystem: str,
+    package: str,
+    installed_version: str,
+    repo_owner: str,
+    repo_name: str,
+    request_id: str,
+) -> Dict[str, Any]:
+    """Run the per-CVE remediation gates for one resolved (cve, repo, package).
+
+    In order: ecosystem-supported gate, patched-version derivation (GitHub
+    advisory, line-aware), no-patch gate, already-patched gate, and the open-PR
+    dedup check. Returns a NEUTRAL outcome dict — no ECS dispatch, no Bedrock
+    envelope — so the single-CVE handler (one envelope) and the project batch
+    handler (aggregate report + CVE_BATCH) share the gate logic without
+    duplicating it. ``outcome`` is one of:
+
+      'ready'                -> gh_package, patched_version (dispatchable)
+      'unsupported_ecosystem'
+      'no_patched_version'   -> gh_package
+      'already_patched'      -> gh_package, patched_version
+      'pr_exists'            -> gh_package, patched_version, pr {url,title,matched_by}
+      'error'                -> code='github_error', message (derive/PR-check stage)
+
+    Network/API failures are caught and returned as 'error' (with the failing
+    stage's message) rather than raised, so a batch run can skip one CVE and
+    continue. Callers format the outcome and decide whether to dispatch.
+    """
+    # gate 1: ecosystem we can remediate at all? (cluster vocabulary, no GitHub call)
+    if ecosystem not in SUPPORTED_ECOSYSTEMS:
+        logger.info(
+            f"[{request_id}] REMEDIATE_CVE_UNSUPPORTED: ecosystem={ecosystem!r} "
+            f"for {cve_id} is not in scope"
+        )
+        return {'outcome': 'unsupported_ecosystem'}
+
+    # derive the patched version from the GitHub Advisory API — matched to OUR
+    # package and installed version (multi-package / multi-range advisories).
+    try:
+        gh_package, patched_version = _derive_patched_version(
+            cve_id, ecosystem, package, installed_version, request_id,
+        )
+    except Exception as e:  # advisory lookup failed (network / API error)
+        logger.error(f"[{request_id}] REMEDIATE_CVE_DERIVE_FAILED: {e}")
+        return {
+            'outcome': 'error', 'code': 'github_error',
+            'message': 'Failed to look up advisory details from GitHub.',
+        }
+
+    logger.info(
+        f"[{request_id}] REMEDIATE_CVE_DERIVED: package={package!r} "
+        f"github_package={gh_package!r} patched_version={patched_version!r}"
+    )
+
+    # gate 2: do we have a version to upgrade to?
+    if not patched_version:
+        logger.info(
+            f"[{request_id}] REMEDIATE_CVE_NO_PATCH: no patched version for {cve_id}"
+        )
+        return {'outcome': 'no_patched_version', 'gh_package': gh_package}
+
+    # gate 3: skip if the cluster's installed version is already >= patched.
+    # Semver only; unparseable versions (e.g. maven) proceed, can't prove safe.
+    if installed_version and _at_or_above_version(installed_version, patched_version):
+        logger.info(
+            f"[{request_id}] REMEDIATE_CVE_NOT_AFFECTED: {repo_owner}/{repo_name} "
+            f"has {package} {installed_version} >= patched {patched_version} for {cve_id}"
+        )
+        return {
+            'outcome': 'already_patched',
+            'gh_package': gh_package,
+            'patched_version': patched_version,
+        }
+
+    # pre-flight: is there already an OPEN PR fixing this CVE? (dedup)
+    try:
+        existing = _find_existing_pr(
+            repo_owner, repo_name, cve_id, gh_package or package, patched_version, request_id,
+        )
+    except Exception as e:  # network / API errors — surface, don't crash
+        logger.error(f"[{request_id}] REMEDIATE_CVE_PR_CHECK_FAILED: {e}")
+        return {
+            'outcome': 'error', 'code': 'github_error',
+            'message': 'Failed to check for existing pull requests on GitHub.',
+        }
+
+    if existing:
+        logger.info(
+            f"[{request_id}] REMEDIATE_CVE_SKIPPED: open PR already exists for "
+            f"{cve_id} on {repo_owner}/{repo_name} -> {existing['url']} "
+            f"(matched by {existing['matched_by']})"
+        )
+        return {
+            'outcome': 'pr_exists',
+            'gh_package': gh_package,
+            'patched_version': patched_version,
+            'pr': existing,
+        }
+
+    return {
+        'outcome': 'ready',
+        'gh_package': gh_package,
+        'patched_version': patched_version,
+    }
 
 
 def handle_remediate_cve(
@@ -207,6 +321,8 @@ def handle_remediate_cve(
         'package': one['package'],
         'installed_version': one.get('version', ''),
         'declaration_class': one.get('declaration_class', 'unknown'),
+        # raw origin paths (maven only) — distilled to build.gradle files for the payload.
+        'origin': one.get('origin'),
     }
 
     repo_owner = resolved['repo_owner']
@@ -221,14 +337,17 @@ def handle_remediate_cve(
         f"(project={resolved['project_name']!r})"
     )
 
-    # gate 1: is this an ecosystem we can remediate at all? The ecosystem comes
-    # from the scans cluster (repo-specific, cluster vocabulary), so this gate
-    # runs without any GitHub call — unsupported ecosystems short-circuit here.
-    if ecosystem not in SUPPORTED_ECOSYSTEMS:
-        logger.info(
-            f"[{request_id}] REMEDIATE_CVE_UNSUPPORTED: ecosystem={ecosystem!r} "
-            f"for {cve_id} is not in scope"
-        )
+    # --- per-CVE gates (shared with the project batch handler) ---------------
+    # Ecosystem gate, patched-version derivation, no-patch / already-patched
+    # gates, and the open-PR dedup all live in _resolve_remediation so both
+    # entry points share them. It returns a neutral outcome; we format it into
+    # this handler's status envelopes (batch aggregates them differently).
+    outcome = _resolve_remediation(
+        cve_id, ecosystem, package, installed_version, repo_owner, repo_name, request_id,
+    )
+    kind = outcome['outcome']
+
+    if kind == 'unsupported_ecosystem':
         return {
             'status': 'unsupported_ecosystem',
             'cve_id': cve_id,
@@ -240,33 +359,10 @@ def handle_remediate_cve(
             ),
         }
 
-    # --- derive the patched version from the GitHub Advisory API --------------
-    # Ecosystem AND the repo-specific package both come from the cluster (above);
-    # GitHub only supplies the fix version the cluster doesn't carry. We match the
-    # GitHub advisory entry to OUR package, so a multi-package CVE resolves to the
-    # version for the package this repo actually uses (not an arbitrary one), and
-    # to OUR installed version, so a multi-range advisory resolves to the fix for
-    # the version line this repo is on.
-    try:
-        gh_package, patched_version = _derive_patched_version(
-            cve_id, ecosystem, package, installed_version, request_id,
-        )
-    except Exception as e:  # advisory lookup failed (network / API error)
-        logger.error(f"[{request_id}] REMEDIATE_CVE_DERIVE_FAILED: {e}")
-        return error_response(
-            'github_error', 'Failed to look up advisory details from GitHub.',
-        )
+    if kind == 'error':
+        return error_response(outcome['code'], outcome['message'])
 
-    logger.info(
-        f"[{request_id}] REMEDIATE_CVE_DERIVED: package={package!r} "
-        f"github_package={gh_package!r} patched_version={patched_version!r}"
-    )
-
-    # gate 2: do we have a version to upgrade to?
-    if not patched_version:
-        logger.info(
-            f"[{request_id}] REMEDIATE_CVE_NO_PATCH: no patched version for {cve_id}"
-        )
+    if kind == 'no_patched_version':
         return {
             'status': 'no_patched_version',
             'cve_id': cve_id,
@@ -276,14 +372,9 @@ def handle_remediate_cve(
             ),
         }
 
-    # gate 3: cross-check GitHub's patched version against the cluster's installed
-    # version to avoid false positives — skip if installed >= patched. Semver
-    # only; unparseable versions (e.g. maven) proceed, since we can't prove safe.
-    if installed_version and _at_or_above_version(installed_version, patched_version):
-        logger.info(
-            f"[{request_id}] REMEDIATE_CVE_NOT_AFFECTED: {repo_owner}/{repo_name} "
-            f"has {package} {installed_version} >= patched {patched_version} for {cve_id}"
-        )
+    patched_version = outcome['patched_version']
+
+    if kind == 'already_patched':
         return {
             'status': 'already_patched',
             'cve_id': cve_id,
@@ -299,25 +390,8 @@ def handle_remediate_cve(
             ),
         }
 
-    # --- pre-flight: is there already an OPEN PR fixing this CVE? -----------
-    # Look for an open PR already fixing this CVE; if found, surface it and stop
-    # (dedup — don't open a duplicate).
-    try:
-        existing = _find_existing_pr(
-            repo_owner, repo_name, cve_id, gh_package or package, patched_version, request_id,
-        )
-    except Exception as e:  # network / API errors — surface, don't crash
-        logger.error(f"[{request_id}] REMEDIATE_CVE_PR_CHECK_FAILED: {e}")
-        return error_response(
-            'github_error', 'Failed to check for existing pull requests on GitHub.',
-        )
-
-    if existing:
-        logger.info(
-            f"[{request_id}] REMEDIATE_CVE_SKIPPED: open PR already exists for "
-            f"{cve_id} on {repo_owner}/{repo_name} -> {existing['url']} "
-            f"(matched by {existing['matched_by']})"
-        )
+    if kind == 'pr_exists':
+        existing = outcome['pr']
         return {
             'status': 'pr_exists',
             'cve_id': cve_id,
@@ -332,7 +406,7 @@ def handle_remediate_cve(
             ),
         }
 
-    # --- no existing PR: hand the fix to the ecosystem's Fargate worker -----
+    # kind == 'ready' -> hand the fix to the ecosystem's Fargate worker -------
     # Slack thread context rides along in the payload so the worker can post the
     # PR link back when it finishes. If no worker is wired for this ecosystem yet,
     # we fall back to remediation_unavailable below.
@@ -347,6 +421,10 @@ def handle_remediate_cve(
         # transitive -> resolutionStrategy.force; core_inherited -> manual review;
         # direct/unknown -> unsupported.
         'declaration_class': declaration_class,
+        # Distinct build.gradle files the coordinate resolves in (distilled from
+        # origin, JSON-encoded) — all the worker needs for force-target selection,
+        # and small enough to stay under the ECS container-override 8 KiB limit.
+        'origin_files': json.dumps(_origin_build_files(resolved.get('origin'))),
         # We remediate main only; the worker pushes to the fork's main.
         'base_branch': SCANS_MAIN_TAG.split('/')[-1],
         # Slack thread context so the worker replies in the originating thread
@@ -400,6 +478,197 @@ def handle_remediate_cve(
             f"To fix it manually, bump {package} to {patched_version}."
         ),
     }
+
+
+def handle_remediate_project(
+    params: Dict[str, str],
+    request_id: str,
+    session_attributes: Optional[Dict[str, str]] = None,
+) -> Dict[str, Any]:
+    """Remediate a set of CVEs across one project in a single pull request.
+
+    Gathers the project's affected CVEs from the scans cluster, optionally
+    narrows to a caller-supplied ``cve_ids`` subset, dedups per package (max
+    patched version), and dispatches the per-ecosystem Fargate worker with the
+    whole batch as one ``CVE_BATCH`` payload. Because the workers are
+    ecosystem-specific, a project with both npm and maven fixes yields one task
+    (and PR) per ecosystem.
+
+    Async, like remediate_cve: ``run_task`` is fire-and-forget; the worker posts
+    each PR link back to the Slack thread. Pre-flight outcomes (nothing to
+    remediate, unresolvable project) return synchronously.
+
+    Args:
+        params: Bedrock parameters. Recognized keys:
+            project_name (required) — as returned by list_projects.
+            cve_ids (optional)      — comma-separated subset to remediate; omitted
+                                      remediates every affected CVE in the project.
+            mode (optional)         — 'project' (default; one PR per project per
+                                      ecosystem) or 'per_cve' (one PR per package).
+        request_id: Short request ID for log correlation.
+        session_attributes: Slack thread context forwarded to the worker.
+    """
+    session_attributes = session_attributes or {}
+    project_name = (params.get('project_name') or '').strip()
+    mode = (params.get('mode') or 'project').strip().lower()
+    cve_ids_raw = (params.get('cve_ids') or '').strip()
+
+    if not project_name:
+        return error_response(
+            'invalid_request',
+            'project_name is required. Call list_projects first to get the exact '
+            'project name.',
+        )
+    if mode not in ('project', 'per_cve'):
+        return error_response(
+            'invalid_request', "mode must be 'project' or 'per_cve'.",
+        )
+
+    cve_filter = None
+    if cve_ids_raw:
+        cve_filter = {c.strip().upper() for c in cve_ids_raw.split(',') if c.strip()}
+
+    logger.info(
+        f"[{request_id}] REMEDIATE_PROJECT: project={project_name!r} mode={mode!r} "
+        f"cve_ids={sorted(cve_filter) if cve_filter else 'ALL'}"
+    )
+
+    # --- gather the project's affected CVEs from the scans cluster -----------
+    try:
+        project_ctx, error = _project_vulnerabilities(project_name, request_id)
+    except Exception as e:  # OpenSearch query failed
+        logger.error(f"[{request_id}] REMEDIATE_PROJECT_GATHER_FAILED: {e}")
+        return connection_error(e)
+    if error:
+        return error
+
+    repository = f"{project_ctx['repo_owner']}/{project_ctx['repo_name']}"
+
+    # --- resolve each CVE through the shared gates, then dedup per package ----
+    ready, skipped = _resolve_project_cves(project_ctx, cve_filter, request_id)
+    batch = _build_cve_batch(ready, request_id)
+
+    if not batch:
+        scope = ' from the requested set' if cve_filter else ''
+        return {
+            'status': 'nothing_to_remediate',
+            'project_name': project_name,
+            'repository': repository,
+            'skipped': skipped,
+            'message': (
+                f"No remediable CVEs for {repository}{scope}. "
+                f"{_summarize_skipped(skipped)}"
+            ),
+        }
+
+    # --- dispatch: workers are per-ecosystem, so group the batch by ecosystem;
+    # each ecosystem gets one task (mode=project) or one per package (per_cve) --
+    by_ecosystem: Dict[str, List[Dict[str, Any]]] = {}
+    for entry in batch:
+        by_ecosystem.setdefault(entry['ecosystem'], []).append(entry)
+
+    dispatched: List[Dict[str, Any]] = []
+    unavailable: List[str] = []
+    base_branch = SCANS_MAIN_TAG.split('/')[-1]
+    for ecosystem, group in sorted(by_ecosystem.items()):
+        task_batches = [group] if mode == 'project' else [[e] for e in group]
+        for tb in task_batches:
+            payload = {
+                'repo_name': project_ctx['repo_name'],
+                'base_branch': base_branch,
+                'cve_batch': json.dumps(tb),
+                'slack_channel': (session_attributes.get('slack_channel') or '').strip(),
+                'slack_thread_ts': (session_attributes.get('slack_thread_ts') or '').strip(),
+            }
+            try:
+                ok = _dispatch_remediation(ecosystem, payload, request_id)
+            except Exception as e:  # run_task launch failure
+                logger.error(f"[{request_id}] REMEDIATE_PROJECT_DISPATCH_FAILED: {e}")
+                return error_response(
+                    'remediation_error', 'Failed to start automated remediation.',
+                )
+            if not ok:
+                # No Fargate worker wired for this ecosystem — record its CVEs as
+                # unavailable (so the user sees them, not silently dropped) and stop
+                # retrying the rest of this ecosystem's tasks. Exclude any package
+                # already dispatched for this ecosystem: today _dispatch_remediation
+                # returns False only when no taskdef is configured (constant per
+                # ecosystem), so the first task fails before anything dispatches and
+                # this set is empty — but guard anyway so a double-count can't appear
+                # if that return contract ever changes.
+                unavailable.append(ecosystem)
+                dispatched_pkgs = {p for d in dispatched
+                                   if d['ecosystem'] == ecosystem for p in d['packages']}
+                for entry in group:
+                    if entry.get('package', '') in dispatched_pkgs:
+                        continue
+                    for c in entry['cve_ids']:
+                        skipped.append({'cve_id': c, 'package': entry.get('package', ''),
+                                        'reason': 'remediation_unavailable'})
+                break
+            dispatched.append({
+                'ecosystem': ecosystem,
+                'packages': [e['package'] for e in tb],
+                'cve_ids': sorted({c for e in tb for c in e['cve_ids']}),
+            })
+
+    covered = sorted({c for d in dispatched for c in d['cve_ids']})
+    if not dispatched:
+        return {
+            'status': 'remediation_unavailable',
+            'project_name': project_name,
+            'repository': repository,
+            'unsupported_ecosystems': sorted(set(unavailable)),
+            'skipped': skipped,
+            'message': (
+                f"Resolved fixes for {repository} but no automated remediation "
+                f"worker is wired for its ecosystem(s): "
+                f"{', '.join(sorted(set(unavailable)))}."
+            ),
+        }
+
+    logger.info(
+        f"[{request_id}] REMEDIATE_PROJECT_STARTED: {repository} mode={mode} "
+        f"{len(dispatched)} task(s), {len(covered)} CVE(s), {len(skipped)} skipped"
+    )
+    truncated = bool(project_ctx.get('results_truncated'))
+    truncation_note = (
+        (f" NOTE: {project_name} has more than {_PROJECT_VULN_INNER_SIZE} open "
+         f"vulnerabilities; only the first {_PROJECT_VULN_INNER_SIZE} were considered, "
+         f"so some CVEs may remain — re-run to catch the rest.") if truncated else ""
+    )
+    return {
+        'status': 'remediation_started',
+        'project_name': project_name,
+        'repository': repository,
+        'mode': mode,
+        'pull_requests_expected': len(dispatched),
+        'remediating_cves': covered,
+        'dispatched': dispatched,
+        'skipped': skipped,
+        'unsupported_ecosystems': sorted(set(unavailable)),
+        'results_truncated': truncated,
+        'message': (
+            f"Started remediation for {repository}: {len(dispatched)} pull "
+            f"request(s) covering {len(covered)} CVE(s). This runs in the "
+            f"background; the PR link(s) will be posted here shortly. "
+            f"{_summarize_skipped(skipped)}{truncation_note}"
+        ),
+    }
+
+
+def _summarize_skipped(skipped: List[Dict[str, Any]]) -> str:
+    """One-line human summary of the CVEs a batch skipped, grouped by reason."""
+    if not skipped:
+        return "No CVEs were skipped."
+    by_reason: Dict[str, List[str]] = {}
+    for s in skipped:
+        by_reason.setdefault(s['reason'], []).append(s['cve_id'])
+    parts = [
+        f"{reason.replace('_', ' ')}: {', '.join(sorted(cves))}"
+        for reason, cves in sorted(by_reason.items())
+    ]
+    return "Skipped — " + "; ".join(parts) + "."
 
 
 def handle_list_affected_repositories(
@@ -485,6 +754,12 @@ _PAYLOAD_TO_ENV = {
     'patched_version': 'PATCHED_VERSION',
     'installed_version': 'INSTALLED_VERSION',
     'declaration_class': 'DECLARATION_CLASS',
+    'origin_files': 'ORIGIN_FILES',
+    # JSON list of {package, patched_version, cve_ids, installed_version,
+    # declaration_class, origin_files} for batch (project) remediation. Empty for
+    # single-CVE dispatch; the worker reads it in preference to the scalar
+    # per-CVE vars when present.
+    'cve_batch': 'CVE_BATCH',
     'base_branch': 'BASE_BRANCH',
     'slack_channel': 'SLACK_CHANNEL',
     'slack_thread_ts': 'SLACK_THREAD_TS',
@@ -597,6 +872,8 @@ def _affected_candidates(cve_id: str, request_id: str):
                     # release_type is a text field with a keyword sub-field; use
                     # the keyword for exact matching. `terms` matches either bundle.
                     {'terms': {'release_type.keyword': SCANS_RELEASE_TYPES}},
+                    # Bound by scan recency so can_match can skip older indices.
+                    {'range': {'timestamp.scan': {'gte': SCANS_RECENCY_WINDOW}}},
                     {'nested': {
                         'path': 'vulnerabilities',
                         # inner_hits returns ONLY the matched (non-excluded)
@@ -640,7 +917,7 @@ def _affected_candidates(cve_id: str, request_id: str):
     })
 
     response = opensearch_request(
-        'POST', f'/{get_latest_scans_index()}/_search', body,
+        'POST', f'/{SCANS_INDEX}/_search', body,
     )
     hits = response.get('hits', {}).get('hits', [])
 
@@ -695,6 +972,256 @@ def _affected_candidates(cve_id: str, request_id: str):
         }
 
     return list(candidates.values()), None
+
+
+def _project_vulnerabilities(project_name: str, request_id: str):
+    """All non-excluded CVE/package pairs a project has on the main branch.
+
+    The INVERSE of ``_affected_candidates``: filters the latest main-branch scan
+    by ``project.name`` (not a ``cve_id``) and returns every non-excluded
+    vulnerability it carries — the gather step for batch remediation. Keyed on
+    ``project.name`` (the field the scans store is indexed on, per
+    ``list_projects``), so the caller passes the name ``list_projects`` returns.
+
+    Returns ``(project_ctx, error)``:
+      - ``project_ctx`` = ``{repo_owner, repo_name, project_name, entries}`` where
+        ``entries`` is one ``{cve_id, ecosystem, package, installed_version,
+        declaration_class, origin}`` per (CVE, package) the scan reports.
+      - ``error`` = a status dict when the project has no main-branch scan / no
+        open vulnerabilities / an unparseable repo URL; ``project_ctx`` is None.
+    """
+    body = json.dumps({
+        'size': 1,
+        '_source': ['project.name', 'project.repo', 'project.tag'],
+        # newest scan first so collapse keeps the LATEST main scan for the project
+        'sort': [{'timestamp.scan': {'order': 'desc'}}],
+        'collapse': {'field': 'project.name'},
+        'query': {
+            'bool': {
+                'filter': [
+                    {'term': {'project.name': project_name}},
+                    {'term': {'project.tag': SCANS_MAIN_TAG}},
+                    {'terms': {'release_type.keyword': SCANS_RELEASE_TYPES}},
+                    {'range': {'timestamp.scan': {'gte': SCANS_RECENCY_WINDOW}}},
+                    {'nested': {
+                        'path': 'vulnerabilities',
+                        # every non-excluded vulnerability (no cve_id filter);
+                        # inner_hits ships only the matched vulns, not the whole
+                        # array. Bounded by _PROJECT_VULN_INNER_SIZE.
+                        'inner_hits': {
+                            'size': _PROJECT_VULN_INNER_SIZE,
+                            '_source': [
+                                'vulnerabilities.id',
+                                'vulnerabilities.package.ecosystem',
+                                'vulnerabilities.package.name',
+                                'vulnerabilities.package.version',
+                                'vulnerabilities.package.origin',
+                            ],
+                        },
+                        'query': {'bool': {
+                            # ignore CVEs suppressed AT_PROJECT / AT_RULE
+                            'must_not': [
+                                {'exists': {'field': 'vulnerabilities.excluded'}},
+                            ],
+                        }},
+                    }},
+                ],
+            },
+        },
+    })
+
+    response = opensearch_request('POST', f'/{SCANS_INDEX}/_search', body)
+    hits = response.get('hits', {}).get('hits', [])
+    if not hits:
+        return None, {
+            'status': 'not_affected',
+            'project_name': project_name,
+            'message': (
+                f"No open vulnerabilities were found for project '{project_name}' on "
+                f"the main branch (origin/main). Automated remediation only covers "
+                f"origin/main of supported release-bundle components — so either this "
+                f"project is tracked only on a release branch (e.g. origin/3.x), which "
+                f"isn't supported for remediation yet, or it isn't a supported "
+                f"component. Use list_projects to see its available tags."
+            ),
+        }
+
+    hit = hits[0]
+    proj = hit.get('_source', {}).get('project', {})
+    owner, name = _parse_repo_url(proj.get('repo') or '')
+    if not owner or not name:
+        logger.warning(
+            f"[{request_id}] REMEDIATE_PROJECT_RESOLVE: unparseable repo url "
+            f"{proj.get('repo')!r} for project {proj.get('name')!r}"
+        )
+        return None, {
+            'status': 'error',
+            'project_name': project_name,
+            'message': (
+                f"Could not identify the GitHub repository for project "
+                f"'{project_name}' from the scans cluster."
+            ),
+        }
+
+    entries = _project_vuln_entries(hit)
+    if not entries:
+        return None, {
+            'status': 'not_affected',
+            'project_name': project_name,
+            'message': (
+                f"Project '{project_name}' has no open (non-excluded) "
+                f"vulnerabilities on the main branch."
+            ),
+        }
+
+    # Truncation guard: inner_hits is capped at _PROJECT_VULN_INNER_SIZE, so a
+    # project with more open vulnerabilities than that would be silently cut off.
+    # Compare against the reported total and flag it so the batch doesn't claim to
+    # "remediate everything" while quietly dropping CVEs.
+    inner_meta = (
+        ((hit.get('inner_hits') or {}).get('vulnerabilities') or {}).get('hits', {})
+    )
+    # `total` is normally {value, relation}, but a cluster with rest_total_hits_as_int
+    # returns a bare int — handle both (a raw int would break `.get`).
+    total_meta = inner_meta.get('total')
+    if isinstance(total_meta, dict):
+        total = total_meta.get('value', 0)
+    elif isinstance(total_meta, int):
+        total = total_meta
+    else:
+        total = 0
+    truncated = total > _PROJECT_VULN_INNER_SIZE
+    if truncated:
+        logger.warning(
+            f"[{request_id}] REMEDIATE_PROJECT_TRUNCATED: {owner}/{name} has {total} "
+            f"open vulnerabilities but only the first {_PROJECT_VULN_INNER_SIZE} were "
+            f"fetched; some CVEs will not be remediated in this run."
+        )
+
+    logger.info(
+        f"[{request_id}] REMEDIATE_PROJECT_SCANS: {owner}/{name} "
+        f"(project={proj.get('name')!r}) {len(entries)} vuln entr(ies)"
+    )
+    return {
+        'repo_owner': owner,
+        'repo_name': name,
+        'project_name': proj.get('name', ''),
+        'entries': entries,
+        'results_truncated': truncated,
+    }, None
+
+
+def _project_vuln_entries(hit: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """One ``{cve_id, ecosystem, package, installed_version, declaration_class,
+    origin}`` per (CVE, package) in a project scan's nested ``inner_hits``.
+
+    Unlike ``_matched_packages`` (which dedups to package names for one CVE), this
+    keeps the CVE id on every entry and dedups by ``(cve_id, package)`` — batch
+    dedup to one bump per package happens later in ``_build_cve_batch``, which
+    needs each contributing CVE id.
+    """
+    inner = (
+        ((hit.get('inner_hits') or {}).get('vulnerabilities') or {})
+        .get('hits', {}).get('hits', [])
+    )
+    entries: List[Dict[str, Any]] = []
+    seen = set()
+    for h in inner:
+        src = h.get('_source') or {}
+        cve_id = (src.get('id') or '').strip()
+        name = _vuln_package(src)
+        if not cve_id or not name:
+            continue
+        key = (cve_id, name)
+        if key in seen:
+            continue
+        seen.add(key)
+        ecosystem = _vuln_ecosystem(src)
+        declaration_class = (
+            classify_origin(_vuln_origin(src)) if ecosystem == 'maven' else 'unknown'
+        )
+        entries.append({
+            'cve_id': cve_id,
+            'ecosystem': ecosystem,
+            'package': name,
+            'installed_version': _vuln_version(src),
+            'declaration_class': declaration_class,
+            'origin': _vuln_origin(src) if ecosystem == 'maven' else None,
+        })
+    return entries
+
+
+def _resolve_project_cves(
+    project_ctx: Dict[str, Any],
+    cve_filter: Optional[set],
+    request_id: str,
+):
+    """Run ``_resolve_remediation`` over a project's gathered entries.
+
+    ``cve_filter`` = a set of upper-cased CVE ids to remediate, or None for all.
+    Returns ``(ready, skipped)``:
+      - ``ready`` = resolved entries for ``_build_cve_batch`` (``{gh_package,
+        patched_version, cve_id, ecosystem, declaration_class, origin_files}``).
+      - ``skipped`` = ``{cve_id, package, reason}`` for the partial-failure report
+        (``reason`` is the non-ready outcome: unsupported_ecosystem /
+        no_patched_version / already_patched / pr_exists / error). Requested CVEs
+        not present in the project's affected set are reported as ``not_affected``.
+    """
+    owner = project_ctx['repo_owner']
+    repo = project_ctx['repo_name']
+    ready: List[Dict[str, Any]] = []
+    skipped: List[Dict[str, Any]] = []
+    seen_cves = set()
+
+    for e in project_ctx['entries']:
+        cve_id = e['cve_id']
+        seen_cves.add(cve_id.upper())
+        if cve_filter is not None and cve_id.upper() not in cve_filter:
+            continue
+        try:
+            outcome = _resolve_remediation(
+                cve_id, e['ecosystem'], e['package'], e['installed_version'],
+                owner, repo, request_id,
+            )
+        except Exception as ex:  # noqa: BLE001 — one bad CVE must not abort the batch
+            logger.error(
+                f"[{request_id}] REMEDIATE_PROJECT_RESOLVE_UNEXPECTED: {cve_id}: {ex}"
+            )
+            skipped.append({'cve_id': cve_id, 'package': e['package'],
+                            'reason': 'error'})
+            continue
+        if outcome['outcome'] == 'ready':
+            ready.append({
+                'gh_package': outcome['gh_package'],   # canonical, dedup key only
+                'package': e['package'],               # scans coordinate the worker edits
+                'patched_version': outcome['patched_version'],
+                'cve_id': cve_id,
+                'installed_version': e['installed_version'],
+                'ecosystem': e['ecosystem'],
+                'declaration_class': e['declaration_class'],
+                'origin_files': _origin_build_files(e['origin']),
+            })
+        else:
+            entry = {
+                'cve_id': cve_id,
+                'package': e['package'],
+                'reason': outcome['outcome'],
+            }
+            # surface the existing PR link so the report can point at it
+            if outcome['outcome'] == 'pr_exists':
+                entry['pr_url'] = (outcome.get('pr') or {}).get('url', '')
+            skipped.append(entry)
+
+    # CVEs the user asked for that the project isn't actually affected by
+    if cve_filter is not None:
+        for missing in sorted(cve_filter - seen_cves):
+            skipped.append({'cve_id': missing, 'package': '', 'reason': 'not_affected'})
+
+    logger.info(
+        f"[{request_id}] REMEDIATE_PROJECT_RESOLVED: {owner}/{repo} "
+        f"{len(ready)} ready, {len(skipped)} skipped"
+    )
+    return ready, skipped
 
 
 def _select_candidate(
@@ -774,6 +1301,9 @@ def _matched_packages(hit: Dict[str, Any]) -> List[Dict[str, str]]:
                 # direct / transitive / core_inherited / unknown — routes the maven
                 # worker to a declaration edit, a force pin, or manual review.
                 'declaration_class': declaration_class,
+                # raw resolution paths (maven only); distilled to build.gradle files
+                # for the payload (_origin_build_files) to pick the force target.
+                'origin': _vuln_origin(src) if ecosystem == 'maven' else None,
             })
     return packages
 
@@ -808,6 +1338,22 @@ def _vuln_origin(vuln: Dict[str, Any]):
     on release-tag scans) for ``classify_origin`` to interpret; ``None`` when absent.
     """
     return _vuln_package_obj(vuln).get('origin')
+
+
+def _origin_build_files(origin) -> List[str]:
+    """Distinct build.gradle files a coordinate resolves in (element 0 of each rich
+    ``origin`` path) — all the maven worker needs for force-target selection. Sending
+    this instead of the full array-of-arrays keeps the ECS container-override payload
+    under its 8 KiB limit for large resolution graphs. ``[]`` for flat form/non-maven.
+    """
+    if not isinstance(origin, list):
+        return []
+    files = set()
+    for path in origin:
+        if (isinstance(path, list) and path and isinstance(path[0], str)
+                and path[0].endswith('build.gradle')):
+            files.add(path[0])
+    return sorted(files)
 
 
 # Resolved GitHub token, cached per container (None = not resolved yet, '' =
@@ -885,9 +1431,14 @@ def _derive_patched_version(
         f"[{request_id}] REMEDIATE_CVE_ADVISORY_LOOKUP: cve_id={cve_id!r} "
         f"package={package!r}"
     )
+    # A scan vulnerability id is usually a CVE, but can be a GHSA (no CVE
+    # assigned). The advisories list endpoint filters by cve_id OR ghsa_id, so
+    # pick the right param — querying a GHSA id via cve_id matches nothing and
+    # would wrongly report "no patched version" for an advisory that has a fix.
+    lookup_param = 'ghsa_id' if cve_id.upper().startswith('GHSA-') else 'cve_id'
     response = requests.get(
         f'{GITHUB_API}/advisories',
-        params={'cve_id': cve_id, 'per_page': 5},
+        params={lookup_param: cve_id, 'per_page': 5},
         headers=headers,
         timeout=GITHUB_TIMEOUT,
     )
@@ -1059,6 +1610,117 @@ def _normalize_pkg_name(name: str) -> str:
     this is a no-op for them (npm scopes like ``@scope/name`` are preserved).
     """
     return (name or '').strip().lower().replace(':', '/')
+
+
+def _patched_sort_key(version: str):
+    """Comparable key for choosing the higher of two patched versions.
+
+    Prefers a semver parse; falls back to the leading numeric release tuple for
+    maven-style versions semver can't parse (e.g. ``9.4.63.v20250814``,
+    ``12.0.36``). Returns ``(1, semver)`` for semver parses and ``(0, tuple)``
+    for the numeric fallback so semver always sorts as the more-precise form
+    within its own space; unparseable versions return ``(-1, ())`` and lose.
+
+    Only meaningful for comparing two patched versions of the SAME package, which
+    range-aware derivation guarantees are on the same maintenance line — so this
+    is a within-line ``max``, never a cross-major decision.
+    """
+    try:
+        return (1, semver.Version.parse(version))
+    except (ValueError, TypeError):
+        pass
+    m = re.search(r'(\d+(?:\.\d+)*)', version or '')
+    if m:
+        try:
+            return (0, tuple(int(p) for p in m.group(1).split('.')))
+        except ValueError:
+            pass
+    return (-1, ())
+
+
+def _max_patched(a: str, b: str) -> str:
+    """The higher of two patched-version strings (see ``_patched_sort_key``).
+
+    Ties / both-unparseable keep ``a`` (stable — callers fold left over the
+    contributing CVEs in encounter order).
+    """
+    return b if _patched_sort_key(b) > _patched_sort_key(a) else a
+
+
+def _build_cve_batch(
+    entries: List[Dict[str, Any]], request_id: str,
+) -> List[Dict[str, Any]]:
+    """Level-1 dedup: collapse per-CVE resolutions to one entry per package.
+
+    ``entries`` is the raw per-CVE list for ONE project — each item is a resolved
+    remediation ``{gh_package, package, patched_version, cve_id, installed_version,
+    ecosystem, declaration_class, origin_files}``. ``gh_package`` is GitHub's
+    canonical name from ``_derive_patched_version`` (used only as the dedup key);
+    ``package`` is the scans repo-specific coordinate the worker actually edits;
+    ``origin_files`` is already distilled.
+
+    Dedup key = ``_normalize_pkg_name(gh_package or package)`` — the canonical name
+    unifies the scans ``group/artifact`` vs advisory ``group:artifact`` forms and
+    lower-cases, so distinct packages are NOT falsely merged. Within a group it
+    takes ``max(patched_version)`` and keeps every contributing ``cve_ids``
+    (sorted, deduped) for PR/commit attribution. Entries missing a key or a patched
+    version are dropped (nothing to bump). The emitted ``package`` /
+    ecosystem / declaration_class / origin_files / installed_version come from the
+    max-version contributor — for one package in one repo they are identical anyway.
+
+    Returns the deduped batch — the ``CVE_BATCH`` payload the worker iterates
+    (each entry shaped like the single-CVE worker inputs, but with ``cve_ids`` in
+    place of a single ``cve_id``). Level-2 (regroup by the planner's resolved edit
+    target, e.g. a shared catalog key) happens in the worker, post-classification.
+    """
+    grouped: Dict[str, Dict[str, Any]] = {}
+    for e in entries:
+        gh_package = (e.get('gh_package') or '').strip()
+        scans_package = (e.get('package') or '').strip()
+        patched = (e.get('patched_version') or '').strip()
+        cve_id = (e.get('cve_id') or '').strip()
+        key = _normalize_pkg_name(gh_package or scans_package)
+        if not key or not patched:
+            continue
+        cur = grouped.get(key)
+        if cur is None:
+            grouped[key] = {
+                # scans coordinate the worker edits with (fall back to the
+                # canonical name if the scan somehow lacked one)
+                'package': scans_package or gh_package,
+                'patched_version': patched,
+                'cve_ids': {cve_id} if cve_id else set(),
+                'installed_version': e.get('installed_version', ''),
+                'ecosystem': e.get('ecosystem', ''),
+                'declaration_class': e.get('declaration_class', ''),
+                'origin_files': e.get('origin_files') or [],
+            }
+            continue
+        if cve_id:
+            cur['cve_ids'].add(cve_id)
+        winner = _max_patched(cur['patched_version'], patched)
+        if winner != cur['patched_version']:
+            # the new CVE carries the higher patch -> adopt its package-level fields
+            cur['patched_version'] = winner
+            cur['package'] = scans_package or gh_package or cur['package']
+            cur['installed_version'] = e.get('installed_version', cur['installed_version'])
+            cur['ecosystem'] = e.get('ecosystem', cur['ecosystem'])
+            cur['declaration_class'] = e.get('declaration_class', cur['declaration_class'])
+            cur['origin_files'] = e.get('origin_files') or cur['origin_files']
+
+    batch = []
+    for g in grouped.values():
+        g['cve_ids'] = sorted(g['cve_ids'])
+        batch.append(g)
+    # deterministic order for stable payloads / test assertions
+    batch.sort(key=lambda g: g['package'])
+
+    logger.info(
+        f"[{request_id}] BUILD_CVE_BATCH: {len(entries)} resolution(s) -> "
+        f"{len(batch)} package(s); "
+        + str([f"{g['package']}@{g['patched_version']}({len(g['cve_ids'])} cve)" for g in batch])
+    )
+    return batch
 
 
 def _find_existing_pr(

@@ -28,7 +28,8 @@ from typing import Any, Dict, List
 from config import config
 from projects_handler import handle_list_projects
 from remediation_handler import (handle_list_affected_repositories,
-                                 handle_remediate_cve)
+                                 handle_remediate_cve,
+                                 handle_remediate_project)
 from response_builder import create_response
 from tickets_handler import handle_list_ticket_projects, handle_query_tickets
 from vulnerabilities_handler import handle_query_vulnerabilities
@@ -36,7 +37,7 @@ from vulnerabilities_handler import handle_query_vulnerabilities
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
-AVAILABLE_FUNCTIONS = ['query_vulnerabilities', 'list_projects', 'query_tickets', 'list_ticket_projects', 'list_affected_repositories', 'remediate_cve']
+AVAILABLE_FUNCTIONS = ['query_vulnerabilities', 'list_projects', 'query_tickets', 'list_ticket_projects', 'list_affected_repositories', 'remediate_cve', 'remediate_project']
 
 
 def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
@@ -85,6 +86,8 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             result = handle_list_affected_repositories(params, request_id)
         elif function_name == 'remediate_cve':
             result = handle_remediate_cve(params, request_id, session_attributes)
+        elif function_name == 'remediate_project':
+            result = handle_remediate_project(params, request_id, session_attributes)
         else:
             result = {
                 'status': 'error',

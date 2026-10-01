@@ -10,6 +10,7 @@ sorting, descending tag sorting, and error handling.
 """
 
 import importlib
+import json
 import os
 from unittest.mock import MagicMock, patch
 
@@ -33,6 +34,8 @@ def _load_projects_handler(mock_config=None, mock_aws_utils=None):
         mock_config = _make_mock_config()
     if mock_aws_utils is None:
         mock_aws_utils = MagicMock()
+    mock_aws_utils.SCANS_INDEX = 'scans'
+    mock_aws_utils.SCANS_RECENCY_WINDOW = 'now-7d'
 
     with patch.dict('sys.modules', {
         'config': mock_config,
@@ -268,3 +271,19 @@ class TestEmptyAggregation:
         assert result['status'] == 'success'
         assert result['project_count'] == 0
         assert result['projects'] == []
+
+
+class TestScanRecencyBound:
+    """The list_projects aggregation is bounded by the timestamp.scan recency floor
+    so can_match can skip older indices."""
+
+    def test_query_includes_scan_recency_range(self):
+        mock_aws = MagicMock()
+        mock_aws.opensearch_request.return_value = SAMPLE_AGG_RESPONSE
+        mod, _ = _load_projects_handler(mock_aws_utils=mock_aws)
+
+        mod.handle_list_projects('test-recency')
+
+        _, _, body = mock_aws.opensearch_request.call_args[0]
+        filters = json.loads(body)['query']['bool']['filter']
+        assert {'range': {'timestamp.scan': {'gte': 'now-7d'}}} in filters
