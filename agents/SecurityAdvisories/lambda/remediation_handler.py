@@ -1029,9 +1029,12 @@ def _project_vulnerabilities(project_name: str, request_id: str):
             'status': 'not_affected',
             'project_name': project_name,
             'message': (
-                f"No main-branch scan with open vulnerabilities was found for "
-                f"project '{project_name}'. Check the name via list_projects, or "
-                f"the project may be a non-release component that is not supported."
+                f"No open vulnerabilities were found for project '{project_name}' on "
+                f"the main branch (origin/main). Automated remediation only covers "
+                f"origin/main of supported release-bundle components — so either this "
+                f"project is tracked only on a release branch (e.g. origin/3.x), which "
+                f"isn't supported for remediation yet, or it isn't a supported "
+                f"component. Use list_projects to see its available tags."
             ),
         }
 
