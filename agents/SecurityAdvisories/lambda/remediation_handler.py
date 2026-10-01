@@ -588,12 +588,20 @@ def handle_remediate_project(
                     'remediation_error', 'Failed to start automated remediation.',
                 )
             if not ok:
-                # No Fargate worker wired for this ecosystem — none of its tasks
-                # can dispatch, so record every one of its CVEs as unavailable (so
-                # the user sees them rather than having them silently dropped) and
-                # stop retrying the rest of this ecosystem's tasks.
+                # No Fargate worker wired for this ecosystem — record its CVEs as
+                # unavailable (so the user sees them, not silently dropped) and stop
+                # retrying the rest of this ecosystem's tasks. Exclude any package
+                # already dispatched for this ecosystem: today _dispatch_remediation
+                # returns False only when no taskdef is configured (constant per
+                # ecosystem), so the first task fails before anything dispatches and
+                # this set is empty — but guard anyway so a double-count can't appear
+                # if that return contract ever changes.
                 unavailable.append(ecosystem)
+                dispatched_pkgs = {p for d in dispatched
+                                   if d['ecosystem'] == ecosystem for p in d['packages']}
                 for entry in group:
+                    if entry.get('package', '') in dispatched_pkgs:
+                        continue
                     for c in entry['cve_ids']:
                         skipped.append({'cve_id': c, 'package': entry.get('package', ''),
                                         'reason': 'remediation_unavailable'})

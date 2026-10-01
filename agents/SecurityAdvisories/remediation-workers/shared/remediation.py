@@ -329,7 +329,10 @@ def _execute_batch(event, strategy):
                base_branch=base_branch,
                sparse_paths=getattr(strategy, "sparse_paths", None))
 
-        # Entries whose context couldn't even be built are skipped up front.
+        # Entries whose context couldn't even be built are skipped up front. These
+        # marker dicts hold only package/cve_ids/reason (+ __batch_skip__) and are
+        # consumed ONLY here — `buildable` below excludes them, so a marker never
+        # reaches strategy.apply_fix/apply_batch (which expect a full ctx).
         skipped = [{"package": ctx["package"], "cve_ids": ctx["cve_ids"],
                     "reason": ctx["reason"]}
                    for ctx in entry_ctxs if ctx.get("__batch_skip__")]
