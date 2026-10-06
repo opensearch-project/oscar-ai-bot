@@ -37,6 +37,7 @@ Functions:
 import json
 import logging
 import os
+import re
 from typing import Any, Dict, List, Optional
 
 import boto3
@@ -91,10 +92,11 @@ SCANS_MAIN_TAG = 'origin/main'
 # Release branches that remediation is allowed to target (besides main).
 # Configurable via the ALLOWED_RELEASE_BRANCHES env var (comma-separated,
 # e.g. "2.19,2.20") so new branches can be added without a code change.
+_BRANCH_RE = re.compile(r'^\d+\.\d+$')
 ALLOWED_RELEASE_BRANCHES = {
-    b.strip() for b in
+    b.strip().removeprefix('origin/') for b in
     os.environ.get('ALLOWED_RELEASE_BRANCHES', '2.19').split(',')
-    if b.strip()
+    if b.strip() and _BRANCH_RE.match(b.strip().removeprefix('origin/'))
 }
 
 _ALLOWED_BRANCHES = {'main'} | ALLOWED_RELEASE_BRANCHES

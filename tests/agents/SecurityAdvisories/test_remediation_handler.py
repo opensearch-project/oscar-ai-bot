@@ -1283,7 +1283,10 @@ class TestRemediateCveBranch:
             'rb2',
         )
         # Check that the PR search included base:2.19
+        checked = False
         for call in fake_requests.get.call_args_list:
             if '/search/issues' in str(call):
                 q = call.kwargs.get('params', call[1].get('params', {})).get('q', '')
                 assert 'base:2.19' in q
+                checked = True
+        assert checked, "expected at least one /search/issues call"

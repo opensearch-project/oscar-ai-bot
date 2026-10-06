@@ -491,5 +491,8 @@ def new_branch_name(cve_id, package_name, base_branch='main'):
     slug = "".join(c if c.isalnum() else "-" for c in package_name.lower()).strip("-")
     ref = f"{cve_id.lower()}-{slug}"
     if base_branch and base_branch != 'main':
-        return f"oscar/{base_branch}/{ref}"
+        safe_base = "".join(
+            c if c.isalnum() or c in '.-' else '-' for c in base_branch
+        ).strip('-')
+        return f"oscar/{safe_base}/{ref}"
     return f"oscar/{ref}"
