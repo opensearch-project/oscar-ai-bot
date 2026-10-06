@@ -1262,6 +1262,16 @@ class TestRemediateCveBranch:
         'REMEDIATION_ECS_SECURITY_GROUP': 'sg-123',
     }
 
+    def test_unsupported_branch_returns_error(self):
+        mod = _npm_form_data_handler()
+        result = mod.handle_remediate_cve(
+            {'cve_id': 'CVE-2023-45857', 'repo_name': 'OpenSearch-Dashboards',
+             'branch': '3.0'},
+            'rb-err',
+        )
+        assert result['status'] == 'error'
+        assert 'Unsupported branch' in result['message']
+
     def test_dispatch_passes_release_branch(self):
         mod = _npm_form_data_handler()
         client = _install_fake_ecs(mod)
