@@ -100,10 +100,19 @@ def _load_remediation_handler(mock_aws=None):
     query_utils_mod = importlib.util.module_from_spec(query_utils_spec)
     query_utils_spec.loader.exec_module(query_utils_mod)
 
+    # Load origin_classifier (imported by remediation_handler for Maven routing)
+    oc_spec = importlib.util.spec_from_file_location(
+        'origin_classifier',
+        os.path.join(_LAMBDA_PATH, 'origin_classifier.py'),
+    )
+    oc_mod = importlib.util.module_from_spec(oc_spec)
+    oc_spec.loader.exec_module(oc_mod)
+
     with patch.dict('sys.modules', {
         'aws_utils': mock_aws,
         'config': MagicMock(),
         'query_utils': query_utils_mod,
+        'origin_classifier': oc_mod,
     }):
         spec = importlib.util.spec_from_file_location(
             'sa_remediation_handler',
@@ -1170,3 +1179,103 @@ class TestGithubToken:
         with patch.dict(os.environ, {'GH_TOKEN_SECRET_NAME': 'sa-tok'}, clear=True):
             headers = mod._github_headers()
         assert 'Authorization' not in headers
+
+
+# ---------------------------------------------------------------------------
+# Branch support: release-branch remediation (e.g. origin/2.19)
+# ---------------------------------------------------------------------------
+
+class TestBranchNormalization:
+
+    def test_empty_defaults_to_main(self):
+        mod, _ = _load_remediation_handler()
+        assert mod._normalize_branch('') == 'origin/main'
+        assert mod._normalize_branch(None) == 'origin/main'
+
+    def test_bare_version_gets_origin_prefix(self):
+        mod, _ = _load_remediation_handler()
+        assert mod._normalize_branch('2.19') == 'origin/2.19'
+
+    def test_origin_prefixed_passes_through(self):
+        mod, _ = _load_remediation_handler()
+        assert mod._normalize_branch('origin/2.19') == 'origin/2.19'
+
+    def test_main_gets_origin_prefix(self):
+        mod, _ = _load_remediation_handler()
+        assert mod._normalize_branch('main') == 'origin/main'
+
+    def test_whitespace_stripped(self):
+        mod, _ = _load_remediation_handler()
+        assert mod._normalize_branch('  2.19  ') == 'origin/2.19'
+
+    def test_invalid_values_rejected(self):
+        mod, _ = _load_remediation_handler()
+        assert mod._normalize_branch('main is:issue') == 'origin/main'
+        assert mod._normalize_branch('2.19"OR 1=1') == 'origin/main'
+        assert mod._normalize_branch('../something') == 'origin/main'
+        assert mod._normalize_branch('feature/foo') == 'origin/main'
+        assert mod._normalize_branch('release-2.19') == 'origin/main'
+
+
+class TestListAffectedRepositoriesBranch:
+
+    def test_query_scopes_to_specified_branch(self):
+        mod, mock_aws = _load_remediation_handler()
+        mod.handle_list_affected_repositories(
+            {'cve_id': 'CVE-2023-45857', 'branch': '2.19'}, 'lb1',
+        )
+        _method, _path, body = mock_aws.opensearch_request.call_args[0]
+        assert 'origin/2.19' in body
+        assert 'origin/main' not in body
+
+    def test_omitted_branch_defaults_to_main(self):
+        mod, mock_aws = _load_remediation_handler()
+        mod.handle_list_affected_repositories(
+            {'cve_id': 'CVE-2023-45857'}, 'lb2',
+        )
+        _method, _path, body = mock_aws.opensearch_request.call_args[0]
+        assert 'origin/main' in body
+
+    def test_not_affected_message_includes_branch(self):
+        mod, _ = _load_remediation_handler(mock_aws=_make_mock_aws(hits=[]))
+        result = mod.handle_list_affected_repositories(
+            {'cve_id': 'CVE-2023-45857', 'branch': '2.19'}, 'lb3',
+        )
+        assert result['status'] == 'not_affected'
+        assert 'origin/2.19' in result['message']
+
+
+class TestRemediateCveBranch:
+
+    _ENV = {
+        'NPM_REMEDIATION_TASKDEF': 'oscar-remediation-npm-dev',
+        'REMEDIATION_ECS_CLUSTER': 'oscar-remediation-dev',
+        'REMEDIATION_ECS_SUBNETS': 'subnet-aaa,subnet-bbb',
+        'REMEDIATION_ECS_SECURITY_GROUP': 'sg-123',
+    }
+
+    def test_dispatch_passes_release_branch(self):
+        mod = _npm_form_data_handler()
+        client = _install_fake_ecs(mod)
+        with patch.dict(os.environ, self._ENV, clear=False):
+            mod.handle_remediate_cve(
+                {'cve_id': 'CVE-2023-45857', 'repo_name': 'OpenSearch-Dashboards',
+                 'branch': '2.19'},
+                'rb1',
+            )
+        env_map = _override_env(client)
+        assert env_map['BASE_BRANCH'] == '2.19'
+
+    def test_existing_pr_search_scopes_to_branch(self):
+        mod = _npm_form_data_handler()
+        fake_requests = mod.requests
+        mod.handle_remediate_cve(
+            {'cve_id': 'CVE-2023-45857', 'repo_name': 'OpenSearch-Dashboards',
+             'branch': '2.19'},
+            'rb2',
+        )
+        # Check that the PR search included base:2.19
+        for call in fake_requests.get.call_args_list:
+            if '/search/issues' in str(call):
+                q = call.kwargs.get('params', call[1].get('params', {})).get('q', '')
+                assert 'base:2.19' in q

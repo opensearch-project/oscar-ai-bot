@@ -480,8 +480,16 @@ def _run(cmd, label, env=None, timeout=GIT_TIMEOUT):
     return result
 
 
-def new_branch_name(cve_id, package_name):
+def new_branch_name(cve_id, package_name, base_branch='main'):
     """Deterministic branch name (no random suffix) so racing workers collide on
-    the same ref — the push-rejection concurrency guard in ``_push_branch``."""
+    the same ref — the push-rejection concurrency guard in ``_push_branch``.
+
+    When targeting a release branch (not main), the branch name includes the
+    target to avoid collisions between parallel remediations of the same CVE on
+    different branches (e.g. ``oscar/2.19/cve-xxx-pkg`` vs ``oscar/cve-xxx-pkg``).
+    """
     slug = "".join(c if c.isalnum() else "-" for c in package_name.lower()).strip("-")
-    return f"oscar/{cve_id.lower()}-{slug}"
+    ref = f"{cve_id.lower()}-{slug}"
+    if base_branch and base_branch != 'main':
+        return f"oscar/{base_branch}/{ref}"
+    return f"oscar/{ref}"

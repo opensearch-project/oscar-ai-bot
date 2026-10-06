@@ -113,7 +113,10 @@ def build_context(event, write_owner, base_owner):
         "write_owner": write_owner,
         "base_owner": base_owner,
         "base_branch": (event.get("base_branch") or "main").strip(),
-        "branch_name": new_branch_name(cve_id, artifact),
+        "branch_name": new_branch_name(
+            cve_id, artifact,
+            base_branch=(event.get("base_branch") or "main").strip(),
+        ),
         "bumped_sections": [],
     }
     ctx["commit_message"] = f"Bump {artifact} to {patched_version}"

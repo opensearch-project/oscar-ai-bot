@@ -85,9 +85,31 @@ GITHUB_TIMEOUT = _int_env('GITHUB_API_TIMEOUT', 15)
 # build tooling, not a bundle release component, so it's out of scope here.
 SUPPORTED_ECOSYSTEMS = {'npm', 'maven'}
 
-# We remediate the main branch only; release-branch propagation is handled by the
-# repos' existing backport workflow. So repo resolution is scoped to main scans.
+# Default remediation branch — used when no branch is specified.
 SCANS_MAIN_TAG = 'origin/main'
+
+# Release branches that remediation is allowed to target (besides main).
+# Add the next release branch here when the release cycle starts.
+ALLOWED_RELEASE_BRANCHES = {'2.19'}
+
+_ALLOWED_BRANCHES = {'main'} | ALLOWED_RELEASE_BRANCHES
+
+
+def _normalize_branch(raw: Optional[str]) -> str:
+    """Normalize a user-provided branch to the scans-cluster tag form (origin/X).
+
+    Accepts 'main' or a release branch listed in ``ALLOWED_RELEASE_BRANCHES``
+    (with or without the 'origin/' prefix). Returns origin/main for empty,
+    None, or unrecognized values.
+    """
+    tag = (raw or '').strip().removeprefix('origin/').strip()
+    if not tag:
+        return SCANS_MAIN_TAG
+    if tag not in _ALLOWED_BRANCHES:
+        logger.warning("Invalid branch value rejected: %r", tag)
+        return SCANS_MAIN_TAG
+    return f'origin/{tag}'
+
 
 # Scope resolution to the OpenSearch bundle release components — the OpenSearch
 # and OpenSearch-Dashboards bundles — via the scans cluster's top-level
@@ -133,6 +155,7 @@ def handle_remediate_cve(
     session_attributes = session_attributes or {}
     cve_id = (params.get('cve_id') or '').strip()
     repo_name_in = (params.get('repo_name') or '').strip()
+    branch = _normalize_branch(params.get('branch'))
 
     if not cve_id or not repo_name_in:
         logger.warning(
@@ -146,15 +169,16 @@ def handle_remediate_cve(
         )
 
     logger.info(
-        f"[{request_id}] REMEDIATE_CVE: cve_id={cve_id!r} repo_name={repo_name_in!r}"
+        f"[{request_id}] REMEDIATE_CVE: cve_id={cve_id!r} repo_name={repo_name_in!r} "
+        f"branch={branch!r}"
     )
 
-    # --- resolve the chosen repo from the scans cluster (main branch) --------
+    # --- resolve the chosen repo from the scans cluster ----------------------
     # Membership guard, NOT intent-matching: re-run the affected-repos query and
     # confirm the caller's chosen repo is in the set (also derives the GitHub
     # owner, ecosystem, and repo-specific package).
     try:
-        candidates, not_affected = _affected_candidates(cve_id, request_id)
+        candidates, not_affected = _affected_candidates(cve_id, request_id, branch=branch)
     except Exception as e:  # OpenSearch query failed
         logger.error(f"[{request_id}] REMEDIATE_CVE_RESOLVE_FAILED: {e}")
         return connection_error(e)
@@ -174,9 +198,9 @@ def handle_remediate_cve(
             'requested_repository': repo_name_in,
             'affected_repositories': affected,
             'message': (
-                f"{cve_id} does not affect '{repo_name_in}' on the main branch of "
-                f"a supported release-bundle component. It affects: "
-                f"{', '.join(affected)}."
+                f"{cve_id} does not affect '{repo_name_in}' on the "
+                f"{branch} branch of a supported release-bundle component. "
+                f"It affects: {', '.join(affected)}."
             ),
         }
 
@@ -304,7 +328,8 @@ def handle_remediate_cve(
     # (dedup — don't open a duplicate).
     try:
         existing = _find_existing_pr(
-            repo_owner, repo_name, cve_id, gh_package or package, patched_version, request_id,
+            repo_owner, repo_name, cve_id, gh_package or package, patched_version,
+            request_id, base_branch=branch.removeprefix('origin/'),
         )
     except Exception as e:  # network / API errors — surface, don't crash
         logger.error(f"[{request_id}] REMEDIATE_CVE_PR_CHECK_FAILED: {e}")
@@ -347,8 +372,7 @@ def handle_remediate_cve(
         # transitive -> resolutionStrategy.force; core_inherited -> manual review;
         # direct/unknown -> unsupported.
         'declaration_class': declaration_class,
-        # We remediate main only; the worker pushes to the fork's main.
-        'base_branch': SCANS_MAIN_TAG.split('/')[-1],
+        'base_branch': branch.removeprefix('origin/'),
         # Slack thread context so the worker replies in the originating thread
         # (empty when invoked outside Slack — the worker then just logs).
         'slack_channel': (session_attributes.get('slack_channel') or '').strip(),
@@ -407,19 +431,20 @@ def handle_list_affected_repositories(
 ) -> Dict[str, Any]:
     """Handle a list_affected_repositories request.
 
-    Returns the repositories a CVE affects on the main branch of the supported
-    release-bundle components. The release_type scoping already limits these to
-    the OpenSearch and OpenSearch-Dashboards bundles, which are structurally
-    maven and npm only — so every repo listed is remediable; remediate_cve's
-    ecosystem gate is the per-repo backstop if a stray ecosystem ever slips
-    through the scan data. Each repo is annotated with its ecosystem for context.
-    The agent uses this list (with full conversational context) to resolve the
-    user's phrasing to one exact repo before calling ``remediate_cve`` —
-    mirroring how ``list_projects`` precedes ``query_vulnerabilities``. This
-    function does NO name matching itself.
+    Returns the repositories a CVE affects on the specified branch (defaults to
+    main) of the supported release-bundle components. The release_type scoping
+    already limits these to the OpenSearch and OpenSearch-Dashboards bundles,
+    which are structurally maven and npm only — so every repo listed is
+    remediable; remediate_cve's ecosystem gate is the per-repo backstop if a
+    stray ecosystem ever slips through the scan data. Each repo is annotated
+    with its ecosystem for context. The agent uses this list (with full
+    conversational context) to resolve the user's phrasing to one exact repo
+    before calling ``remediate_cve`` — mirroring how ``list_projects`` precedes
+    ``query_vulnerabilities``. This function does NO name matching itself.
 
     Args:
-        params: Flat parameter dict; recognized key: cve_id (required).
+        params: Flat parameter dict; recognized keys: cve_id (required),
+            branch (optional, e.g. '2.19' or 'origin/2.19'; defaults to main).
         request_id: Short request ID for log correlation.
 
     Returns:
@@ -431,9 +456,12 @@ def handle_list_affected_repositories(
         logger.warning(f"[{request_id}] LIST_AFFECTED_REPOS: missing cve_id")
         return error_response('invalid_request', 'cve_id is required.')
 
-    logger.info(f"[{request_id}] LIST_AFFECTED_REPOS: cve_id={cve_id!r}")
+    branch = _normalize_branch(params.get('branch'))
+    logger.info(
+        f"[{request_id}] LIST_AFFECTED_REPOS: cve_id={cve_id!r} branch={branch!r}"
+    )
     try:
-        candidates, not_affected = _affected_candidates(cve_id, request_id)
+        candidates, not_affected = _affected_candidates(cve_id, request_id, branch=branch)
     except Exception as e:  # OpenSearch query failed
         logger.error(f"[{request_id}] LIST_AFFECTED_REPOS_FAILED: {e}")
         return connection_error(e)
@@ -460,8 +488,8 @@ def handle_list_affected_repositories(
         'cve_id': cve_id,
         'repositories': repositories,
         'message': (
-            f"{cve_id} affects {len(repositories)} repository(ies) on the main "
-            f"branch of the supported release-bundle components."
+            f"{cve_id} affects {len(repositories)} repository(ies) on the "
+            f"{branch} branch of the supported release-bundle components."
         ),
     }
 
@@ -563,13 +591,14 @@ def _dispatch_remediation(ecosystem: str, payload: Dict[str, Any], request_id: s
     return True
 
 
-def _affected_candidates(cve_id: str, request_id: str):
-    """Repositories a CVE affects on the main branch, from the scans index.
+def _affected_candidates(cve_id: str, request_id: str, *, branch: str = SCANS_MAIN_TAG):
+    """Repositories a CVE affects on the given branch, from the scans index.
 
-    Queries the latest scans index for main-branch (``origin/main``) scans in the
-    supported release-bundle components whose vulnerabilities include ``cve_id``
-    (by ``id`` or ``aliases``) and are not ``excluded``, then parses each
-    project's authoritative ``project.repo`` URL into owner/repo.
+    Queries the latest scans index for scans on ``branch`` (e.g. ``origin/main``
+    or ``origin/2.19``) in the supported release-bundle components whose
+    vulnerabilities include ``cve_id`` (by ``id`` or ``aliases``) and are not
+    ``excluded``, then parses each project's authoritative ``project.repo`` URL
+    into owner/repo.
 
     Returns ``(candidates, response)``:
       - ``candidates`` = a list of ``{'repo_owner', 'repo_name', 'project_name',
@@ -577,7 +606,7 @@ def _affected_candidates(cve_id: str, request_id: str):
         is the distinct ``{'ecosystem', 'package', 'version'}`` set the CVE hits
         in that repo (usually one). ``response`` is None.
       - ``response`` = a ``not_affected`` status dict (with ``candidates`` == [])
-        when the CVE affects no supported main-branch repo.
+        when the CVE affects no supported repo on the given branch.
 
     Does NO name matching — selecting among candidates is the caller's job (the
     agent, which has full conversational context, mirroring list_projects).
@@ -593,7 +622,7 @@ def _affected_candidates(cve_id: str, request_id: str):
         'query': {
             'bool': {
                 'filter': [
-                    {'term': {'project.tag': SCANS_MAIN_TAG}},
+                    {'term': {'project.tag': branch}},
                     # release_type is a text field with a keyword sub-field; use
                     # the keyword for exact matching. `terms` matches either bundle.
                     {'terms': {'release_type.keyword': SCANS_RELEASE_TYPES}},
@@ -686,11 +715,11 @@ def _affected_candidates(cve_id: str, request_id: str):
             'status': 'not_affected',
             'cve_id': cve_id,
             'message': (
-                f"{cve_id} was not found on the main branch of any supported "
+                f"{cve_id} was not found on the {branch} branch of any supported "
                 f"component. Remediation currently only covers the OpenSearch and "
                 f"OpenSearch-Dashboards release-bundle components — so either the CVE "
-                f"does not affect them / is already fixed on main, or the target is a "
-                f"non-release component that is not supported yet."
+                f"does not affect them / is already fixed on {branch}, or the target "
+                f"is a non-release component that is not supported yet."
             ),
         }
 
@@ -1068,6 +1097,7 @@ def _find_existing_pr(
     package: str,
     patched_version: str,
     request_id: str,
+    base_branch: Optional[str] = None,
 ) -> Optional[Dict[str, str]]:
     """Return an open PR that appears to fix this CVE, or None.
 
@@ -1093,7 +1123,7 @@ def _find_existing_pr(
     positives.
     """
     # 1) CVE id
-    hit = _search_open_prs(owner, repo, [cve_id], request_id)
+    hit = _search_open_prs(owner, repo, [cve_id], request_id, base_branch=base_branch)
     if hit:
         hit['matched_by'] = f'CVE id ({cve_id})'
         return hit
@@ -1107,7 +1137,7 @@ def _find_existing_pr(
         terms = [f'"{package}"']
         if patched_version:
             terms.append(f'"{patched_version}"')
-        hit = _search_open_prs(owner, repo, terms, request_id)
+        hit = _search_open_prs(owner, repo, terms, request_id, base_branch=base_branch)
         if hit:
             label = package + (f' {patched_version}' if patched_version else '')
             hit['matched_by'] = f'package/version ({label})'
@@ -1121,14 +1151,19 @@ def _search_open_prs(
     repo: str,
     terms: List[str],
     request_id: str,
+    base_branch: Optional[str] = None,
 ) -> Optional[Dict[str, str]]:
     """Search a repo's open PRs for the given terms; return the first, or None.
 
     Uses GitHub's issue-search API scoped to open PRs in one repo (matching the
-    terms in the title or body). Reading a public repo needs no auth; a token
-    from the environment is used only to raise the rate limit, if present.
+    terms in the title or body). When ``base_branch`` is provided, results are
+    further scoped to PRs targeting that branch, preventing a PR targeting main
+    from blocking remediation of a release branch (and vice versa).
     """
-    query = ' '.join([f'repo:{owner}/{repo}', 'is:pr', 'is:open', *terms])
+    qualifiers = [f'repo:{owner}/{repo}', 'is:pr', 'is:open']
+    if base_branch:
+        qualifiers.append(f'base:{base_branch}')
+    query = ' '.join([*qualifiers, *terms])
     logger.info(f"[{request_id}] REMEDIATE_CVE_PR_SEARCH: q={query!r}")
 
     headers = _github_headers()

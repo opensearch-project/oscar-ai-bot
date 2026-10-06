@@ -110,6 +110,21 @@ class TestBuildContext:
         with pytest.raises(rem.RemediationError):
             npm.build_context(self._event(patched_version=''), 'v-e-e-m-a', 'opensearch-project')
 
+    def test_release_branch_included_in_branch_name(self):
+        npm, _ = _load_npm()
+        ctx = npm.build_context(
+            self._event(base_branch='2.19'), 'v-e-e-m-a', 'opensearch-project',
+        )
+        assert ctx['base_branch'] == '2.19'
+        assert ctx['branch_name'] == 'oscar/2.19/cve-2026-12143-form-data'
+
+    def test_main_branch_uses_original_branch_name_format(self):
+        npm, _ = _load_npm()
+        ctx = npm.build_context(
+            self._event(base_branch='main'), 'v-e-e-m-a', 'opensearch-project',
+        )
+        assert ctx['branch_name'] == 'oscar/cve-2026-12143-form-data'
+
 
 # ---------------------------------------------------------------------------
 # declaration detection + apply_fix

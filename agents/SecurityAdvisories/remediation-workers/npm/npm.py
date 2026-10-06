@@ -64,7 +64,10 @@ def build_context(event, write_owner, base_owner):
         "write_owner": write_owner,
         "base_owner": base_owner,
         "base_branch": (event.get("base_branch") or "main").strip(),
-        "branch_name": new_branch_name(cve_id, package_name),
+        "branch_name": new_branch_name(
+            cve_id, package_name,
+            base_branch=(event.get("base_branch") or "main").strip(),
+        ),
     }
     # Generic title/commit (the CVE id is kept out of public-facing titles); the
     # CVE is recorded in the PR body and the branch name.
