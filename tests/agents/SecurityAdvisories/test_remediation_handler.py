@@ -1210,11 +1210,19 @@ class TestBranchNormalization:
 
     def test_invalid_values_rejected(self):
         mod, _ = _load_remediation_handler()
-        assert mod._normalize_branch('main is:issue') == 'origin/main'
-        assert mod._normalize_branch('2.19"OR 1=1') == 'origin/main'
-        assert mod._normalize_branch('../something') == 'origin/main'
-        assert mod._normalize_branch('feature/foo') == 'origin/main'
-        assert mod._normalize_branch('release-2.19') == 'origin/main'
+        assert mod._normalize_branch('main is:issue') is None
+        assert mod._normalize_branch('2.19"OR 1=1') is None
+        assert mod._normalize_branch('../something') is None
+        assert mod._normalize_branch('feature/foo') is None
+        assert mod._normalize_branch('release-2.19') is None
+
+    def test_unsupported_branch_returns_error(self):
+        mod, _ = _load_remediation_handler()
+        result = mod.handle_list_affected_repositories(
+            {'cve_id': 'CVE-2023-45857', 'branch': '3.0'}, 'lb-err',
+        )
+        assert result['status'] == 'error'
+        assert 'Unsupported branch' in result['message']
 
 
 class TestListAffectedRepositoriesBranch:

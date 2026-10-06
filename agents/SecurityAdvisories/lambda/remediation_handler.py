@@ -89,25 +89,31 @@ SUPPORTED_ECOSYSTEMS = {'npm', 'maven'}
 SCANS_MAIN_TAG = 'origin/main'
 
 # Release branches that remediation is allowed to target (besides main).
-# Add the next release branch here when the release cycle starts.
-ALLOWED_RELEASE_BRANCHES = {'2.19'}
+# Configurable via the ALLOWED_RELEASE_BRANCHES env var (comma-separated,
+# e.g. "2.19,2.20") so new branches can be added without a code change.
+ALLOWED_RELEASE_BRANCHES = {
+    b.strip() for b in
+    os.environ.get('ALLOWED_RELEASE_BRANCHES', '2.19').split(',')
+    if b.strip()
+}
 
 _ALLOWED_BRANCHES = {'main'} | ALLOWED_RELEASE_BRANCHES
 
 
-def _normalize_branch(raw: Optional[str]) -> str:
+def _normalize_branch(raw: Optional[str]) -> Optional[str]:
     """Normalize a user-provided branch to the scans-cluster tag form (origin/X).
 
     Accepts 'main' or a release branch listed in ``ALLOWED_RELEASE_BRANCHES``
-    (with or without the 'origin/' prefix). Returns origin/main for empty,
-    None, or unrecognized values.
+    (with or without the 'origin/' prefix). Returns ``None`` for unrecognized
+    values so the caller can return an explicit error. Returns
+    ``origin/main`` only when the input is empty/omitted (the default).
     """
     tag = (raw or '').strip().removeprefix('origin/').strip()
     if not tag:
         return SCANS_MAIN_TAG
     if tag not in _ALLOWED_BRANCHES:
         logger.warning("Invalid branch value rejected: %r", tag)
-        return SCANS_MAIN_TAG
+        return None
     return f'origin/{tag}'
 
 
@@ -156,6 +162,13 @@ def handle_remediate_cve(
     cve_id = (params.get('cve_id') or '').strip()
     repo_name_in = (params.get('repo_name') or '').strip()
     branch = _normalize_branch(params.get('branch'))
+
+    if branch is None:
+        return error_response(
+            'invalid_request',
+            f"Unsupported branch: {params.get('branch')!r}. "
+            f"Allowed branches: {', '.join(sorted(_ALLOWED_BRANCHES))}.",
+        )
 
     if not cve_id or not repo_name_in:
         logger.warning(
@@ -457,6 +470,12 @@ def handle_list_affected_repositories(
         return error_response('invalid_request', 'cve_id is required.')
 
     branch = _normalize_branch(params.get('branch'))
+    if branch is None:
+        return error_response(
+            'invalid_request',
+            f"Unsupported branch: {params.get('branch')!r}. "
+            f"Allowed branches: {', '.join(sorted(_ALLOWED_BRANCHES))}.",
+        )
     logger.info(
         f"[{request_id}] LIST_AFFECTED_REPOS: cve_id={cve_id!r} branch={branch!r}"
     )
