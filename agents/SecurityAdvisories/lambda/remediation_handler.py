@@ -87,6 +87,9 @@ GITHUB_TIMEOUT = _int_env('GITHUB_API_TIMEOUT', 15)
 SUPPORTED_ECOSYSTEMS = {'npm', 'maven'}
 
 # Default remediation branch — used when no branch is specified.
+# TODO: The 'origin/' prefix is hardcoded to match the scans-cluster tag format
+# (project.tag = "origin/main"). If we expand to other remotes, this prefix and
+# _normalize_branch() will need to accept a configurable remote name.
 SCANS_MAIN_TAG = 'origin/main'
 
 # Release branches that remediation is allowed to target (besides main).
