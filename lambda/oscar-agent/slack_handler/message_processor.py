@@ -85,6 +85,11 @@ class MessageProcessor:
         """
         attrs = {'current_user_id': current_user_id}
 
+        # Track pending-state disposition so the rejection path in
+        # process_message can decide whether to restore, skip, or create.
+        self._consumed_pending = None
+        self._had_pending = False
+
         stored_context = self.storage.get_context(thread_key)
         if stored_context:
             pending_requester = stored_context.get('pending_approval_requester')
@@ -100,11 +105,16 @@ class MessageProcessor:
                 attrs['approval_expired'] = 'True'
 
             if pending_requester:
+                self._had_pending = True
                 attrs['requester_user_id'] = pending_requester
                 self._enrich_user_attrs(attrs, pending_requester, 'requester')
                 if current_user_id != pending_requester:
                     attrs['approver_user_id'] = current_user_id
                     self._enrich_user_attrs(attrs, current_user_id, 'approver')
+                    self._consumed_pending = {
+                        'requester': pending_requester,
+                        'expires_at': expires_at,
+                    }
                     self.storage.clear_pending_approval_requester(thread_key)
             else:
                 attrs['requester_user_id'] = current_user_id
@@ -176,6 +186,7 @@ class MessageProcessor:
             re.compile(r'<\s*/?system\s*>', re.IGNORECASE),
             re.compile(r'\[INST\]|\[/INST\]', re.IGNORECASE),
             re.compile(r'```\s*system', re.IGNORECASE),
+            re.compile(r'\[(?:2PR_PENDING|CONFIRMATION_REQUIRED)\]', re.IGNORECASE),
             re.compile(r'(ignore|disregard|override|forget)\s+(all\s+)?(previous|prior|above)\s+(instructions?|rules?|prompts?)', re.IGNORECASE),
             re.compile(r'(new|updated?)\s+system\s+prompt', re.IGNORECASE),
             re.compile(r'you\s+are\s+now', re.IGNORECASE),
@@ -466,7 +477,21 @@ class MessageProcessor:
                 if not existing_requester or self.is_fully_authorized_user(user_id):
                     self.storage.set_pending_approval_requester(thread_key, user_id)
             elif response and self._is_approval_rejection(response):
-                self.storage.set_pending_approval_requester(thread_key, user_id)
+                consumed = getattr(self, '_consumed_pending', None)
+                if consumed:
+                    # Rejected approval consumed the pending state (different
+                    # user was paired as approver). Restore the original
+                    # requester with the original TTL — don't re-stamp.
+                    self.storage.set_pending_approval_requester(
+                        thread_key, consumed['requester'],
+                        expires_at=consumed['expires_at'],
+                    )
+                elif not getattr(self, '_had_pending', False):
+                    # No pending state existed — first-time 2PR rejection.
+                    # Record the current user as requester.
+                    self.storage.set_pending_approval_requester(thread_key, user_id)
+                # Otherwise: same-user self-approval — pending is still in
+                # storage with its original TTL; nothing to do.
                 response = response.replace('[2PR_PENDING]', '').strip()
             else:
                 self.storage.clear_pending_approval_requester(thread_key)

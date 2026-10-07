@@ -42,8 +42,14 @@ class StorageInterface(ABC):
         """Update the conversation context with the new query and response."""
 
     @abstractmethod
-    def set_pending_approval_requester(self, thread_key: str, user_id: str) -> None:
-        """Record which user triggered a confirmation prompt (the 2PR requester)."""
+    def set_pending_approval_requester(self, thread_key: str, user_id: str,
+                                       expires_at: int = None) -> None:
+        """Record which user triggered a confirmation prompt (the 2PR requester).
+
+        If ``expires_at`` is provided the deadline is preserved as-is (used to
+        restore prior state after a rejected approval attempt).  Otherwise a
+        fresh 10-minute TTL is stamped.
+        """
 
     @abstractmethod
     def clear_pending_approval_requester(self, thread_key: str) -> None:
@@ -224,14 +230,17 @@ class StorageManager(StorageInterface):
                 "history": [{"query": query, "response": response, "timestamp": int(time.time())}]
             }
 
-    def set_pending_approval_requester(self, thread_key: str, user_id: str) -> None:
+    def set_pending_approval_requester(self, thread_key: str, user_id: str,
+                                       expires_at: int = None) -> None:
         """Record which user triggered a confirmation prompt (the 2PR requester)."""
         try:
             context = self.get_context(thread_key)
             if context is None:
                 context = {"session_id": None, "history": [], "thread_user_ids": []}
             context['pending_approval_requester'] = user_id
-            context['pending_approval_expires_at'] = int(time.time()) + 300
+            context['pending_approval_expires_at'] = (
+                expires_at if expires_at is not None else int(time.time()) + 600
+            )
             self.store_context(thread_key, context)
             logger.info(f"Set pending_approval_requester={user_id} for thread {thread_key}")
         except Exception as e:
