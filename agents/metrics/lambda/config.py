@@ -64,14 +64,23 @@ class MetricsConfig:
         self.large_query_size = int(os.environ.get('OPENSEARCH_LARGE_QUERY_SIZE', 1000))
         self.opensearch_request_timeout = int(os.environ.get('OPENSEARCH_REQUEST_TIMEOUT', 60))
 
-        # Index names are no longer needed — the conversational agent
-        # handles index routing via ListIndexTool/IndexMappingTool.
+        # Build and test index names are not needed — the conversational agent handles
+        # that routing via ListIndexTool/IndexMappingTool. The release indices are named
+        # explicitly because the deterministic release handlers build their own DSL and
+        # the release flow agent needs the index in the request path.
+        self.release_state_index = os.environ.get('RELEASE_STATE_INDEX', 'opensearch_release_state')
+        self.release_schedule_index = os.environ.get('RELEASE_SCHEDULE_INDEX', 'opensearch_release_schedule')
 
         # Response configuration
         self.bedrock_message_version = os.environ.get('BEDROCK_RESPONSE_MESSAGE_VERSION', '1.0')
 
-        # Agentic search pipeline configuration
+        # Agentic search pipeline configuration. The metrics pipeline is backed by a
+        # conversational agent (index routing + memory); the release pipeline by a flow
+        # agent (single QueryPlanningTool, index supplied per request, no memory).
         self.agentic_pipeline = os.environ.get('AGENTIC_PIPELINE', 'metrics-agentic-pipeline')
+        self.release_agentic_pipeline = os.environ.get(
+            'RELEASE_AGENTIC_PIPELINE', 'release-flow-agentic-pipeline'
+        )
 
         logger.info(f"Initialized MetricsConfig - Region: {self.region}")
 

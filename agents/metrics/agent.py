@@ -24,6 +24,13 @@ _METRICS_ENV_KEYS = [
 # Agentic pipeline configuration keys.
 _AGENTIC_ENV_KEYS = [
     "AGENTIC_PIPELINE",
+    "RELEASE_AGENTIC_PIPELINE",
+]
+
+# Release-readiness index names (config.py has defaults for each).
+_RELEASE_ENV_KEYS = [
+    "RELEASE_STATE_INDEX",
+    "RELEASE_SCHEDULE_INDEX",
 ]
 
 
@@ -46,7 +53,7 @@ class MetricsAgent(OscarAgent):
             reserved_concurrency=100,
             needs_vpc=True,
             environment_variables=_passthrough_env(
-                _METRICS_ENV_KEYS + _AGENTIC_ENV_KEYS
+                _METRICS_ENV_KEYS + _AGENTIC_ENV_KEYS + _RELEASE_ENV_KEYS
             ),
         )
 
@@ -99,5 +106,15 @@ class MetricsAgent(OscarAgent):
                 pattern="CROSS_ACCOUNT_ROLE_FAILED",
                 alarm_threshold=1,
                 description="Cross-account role assumption failure",
+            ),
+            MonitoringConfig(
+                pattern="RELEASE_STATE_QUERY_FAILED",
+                alarm_threshold=3,
+                description="Release-state index query failures",
+            ),
+            MonitoringConfig(
+                pattern="RELEASE_SCHEDULE_QUERY_FAILED",
+                alarm_threshold=3,
+                description="Release-schedule index query failures",
             ),
         ]

@@ -80,17 +80,29 @@ def enhance_query(query: str, version: str, filters: Optional[Dict[str, Any]] = 
     return enhanced
 
 
-def agentic_search(pipeline: str, query_text: str, memory_id: Optional[str] = None) -> Dict[str, Any]:
+def agentic_search(
+    pipeline: str,
+    query_text: str,
+    memory_id: Optional[str] = None,
+    index: Optional[str] = None,
+) -> Dict[str, Any]:
     """Send agentic search request to OpenSearch.
 
-    Sends a GET to /_search?search_pipeline={pipeline} with the agentic
-    query body. The conversational agent handles index routing internally,
-    so no index name is needed in the request path.
+    Sends a GET to /{index}/_search?search_pipeline={pipeline} with the agentic query
+    body. Which of the two arguments is needed depends on the agent behind the pipeline:
+
+    - A conversational agent (metrics) routes indices itself via ListIndexTool and
+      IndexMappingTool, so index is omitted, and memory_id gives it conversational
+      context across follow-up queries.
+    - A flow agent (release state) holds only a QueryPlanningTool and has no memory, so
+      the index MUST be supplied - it is the only way the planner receives a mapping -
+      and memory_id must be left unset.
 
     Args:
         pipeline: Agentic pipeline name (e.g., 'metrics-agentic-pipeline')
         query_text: Enhanced natural language query
-        memory_id: Optional memory ID for conversational context continuity
+        memory_id: Optional memory ID; only meaningful for a conversational agent
+        index: Optional index to scope the search to; required for a flow agent
 
     Returns:
         Raw OpenSearch response dict
@@ -100,7 +112,8 @@ def agentic_search(pipeline: str, query_text: str, memory_id: Optional[str] = No
     """
     from aws_utils import opensearch_request
 
-    path = f'/_search?search_pipeline={pipeline}'
+    scope = f'/{index}' if index else ''
+    path = f'{scope}/_search?search_pipeline={pipeline}'
     body = {
         "query": {
             "agentic": {

@@ -14,11 +14,14 @@ import logging
 import os
 from typing import Any, Dict, List, Optional
 
-from aws_cdk import Duration, Stack
+from aws_cdk import Duration, RemovalPolicy, Stack
+from aws_cdk import aws_ecr_assets as ecr_assets
+from aws_cdk import aws_ecs as ecs
 from aws_cdk import aws_events as events
 from aws_cdk import aws_events_targets as targets
 from aws_cdk import aws_iam as iam
 from aws_cdk import aws_lambda
+from aws_cdk import aws_logs as logs
 from aws_cdk.aws_lambda_python_alpha import PythonFunction
 from constructs import Construct
 
@@ -85,9 +88,24 @@ class OscarLambdaStack(Stack):
         if storage_stack.identity_table:
             self._create_identity_lambda()
 
+        # The CVE remediation worker runs as a Fargate task (below), not a
+        # Lambda — large repos (core, and defensively all repos) exceed Lambda's
+        # 15-min / disk / memory limits. The SecurityAdvisories handler dispatches
+        # to it via ecs.run_task.
+        self.remediation_cluster: Optional[ecs.Cluster] = None
+        self.remediation_npm_task_def: Optional[ecs.FargateTaskDefinition] = None
+        self.remediation_maven_task_def: Optional[ecs.FargateTaskDefinition] = None
+        self._create_remediation_ecs()
+
         # Agent lambdas
         if agents:
             self._create_agent_lambdas(agents)
+
+        # Release notifier, created after the agents so the metrics Lambda it invokes exists
+        self._create_release_notifier_lambda()
+
+        # Let the SecurityAdvisories agent Lambda dispatch to the worker.
+        self._wire_remediation_dispatch()
 
     # ------------------------------------------------------------------ core
     def _create_supervisor_agent_lambda(self) -> None:
@@ -219,6 +237,71 @@ class OscarLambdaStack(Stack):
 
         self.lambda_functions["identity"] = function
 
+    # --------------------------------------------------- release notifier
+    def _create_release_notifier_lambda(self) -> None:
+        """Create the scheduled Lambda that posts release readiness to Slack.
+
+        The notifier owns no verdict logic - it invokes the metrics Lambda, which owns the
+        rubric, so what an RM reads in Slack matches what they get by asking OSCAR. Without
+        that Lambda there is nothing to report, so the notifier is skipped entirely.
+        """
+        metrics_function = self.lambda_functions.get("metrics")
+        if not metrics_function:
+            logger.warning(
+                "Metrics agent Lambda not created - skipping the release notifier, which "
+                "depends on it for the release verdict"
+            )
+            return
+
+        role = self.permissions_stack.release_notifier_role
+
+        env = {
+            "ENVIRONMENT": self.env_name,
+            "CENTRAL_SECRET_NAME": self.secrets_stack.central_env_secret.secret_name,
+            "METRICS_FUNCTION_NAME": metrics_function.function_name,
+            "RELEASE_NOTIFY_TABLE_NAME": self.storage_stack.release_notify_table.table_name,
+        }
+        # Lets the notifier mention the release manager by resolving the GitHub handle on the
+        # schedule to a Slack user. Guarded because the storage stack builds the table only
+        # when a workspace id is configured; without it the notifier falls back to naming the
+        # manager with a link to their GitHub profile.
+        if self.storage_stack.identity_table:
+            env["IDENTITY_TABLE_NAME"] = self.storage_stack.identity_table.table_name
+
+        function = PythonFunction(
+            self, "ReleaseNotifierLambda",
+            function_name=f"oscar-release-notifier-{self.env_name}",
+            runtime=aws_lambda.Runtime.PYTHON_3_12,
+            handler="lambda_handler",
+            entry="lambda/oscar-release-notifier",
+            index="lambda_function.py",
+            timeout=Duration.seconds(300),
+            memory_size=256,
+            environment=env,
+            role=role,
+            description="Scheduled release readiness notifications for release managers",
+            reserved_concurrent_executions=2,
+        )
+
+        self.storage_stack.release_notify_table.grant_read_write_data(role)
+        self.secrets_stack.grant_read_access(role)
+        if self.storage_stack.identity_table:
+            self.storage_stack.identity_table.grant_read_data(role)
+        # Invoke on the metrics Lambda is granted in the permissions stack - see
+        # _create_release_notifier_role for why it cannot be granted from here.
+
+        # Wake every six hours to match the tightest cadence phase. The Lambda itself decides
+        # whether any given release is actually due for a post.
+        rule = events.Rule(
+            self, "ReleaseNotifierSchedule",
+            rule_name=f"oscar-release-notifier-{self.env_name}",
+            schedule=events.Schedule.rate(Duration.hours(6)),
+            description="Six-hourly release readiness check",
+        )
+        rule.add_target(targets.LambdaFunction(function))
+
+        self.lambda_functions["release-notifier"] = function
+
     def _create_github_webhook_handler_lambda(self) -> None:
         execution_role = self.permissions_stack.github_webhook_role
         fn_name = self.get_github_webhook_handler_function_name(self.env_name)
@@ -242,6 +325,239 @@ class OscarLambdaStack(Stack):
             layers=[self.shared_layer],
         )
         self.lambda_functions[fn_name] = function
+
+    # ------------------------------------------------- remediation worker
+    def _remediation_worker_env(self) -> Dict[str, str]:
+        """Environment for the remediation worker (the Fargate task).
+
+        The write-target fork plus whichever GitHub + Slack credential source is
+        set (a dev PAT via *_TOKEN, or a Secrets Manager name via *_SECRET_NAME —
+        never both required). Kept as a helper so the container and task
+        definition can't drift apart.
+        """
+        # WRITE_OWNER = fork the fix branch is pushed to; BASE_OWNER = repo cloned
+        # from and the PR opened against. Both required — no default, so a deploy
+        # that omits either fails at synth. Dev sets both to the personal fork;
+        # prod sets BASE_OWNER to the upstream org and WRITE_OWNER to the bot fork.
+        write_owner = os.environ.get("REMEDIATION_WRITE_OWNER")
+        base_owner = os.environ.get("REMEDIATION_BASE_OWNER")
+        git_name = os.environ.get("REMEDIATION_GIT_NAME")
+        git_email = os.environ.get("REMEDIATION_GIT_EMAIL")
+        if not write_owner or not base_owner or not git_name or not git_email:
+            raise ValueError(
+                "REMEDIATION_WRITE_OWNER (push-target fork), "
+                "REMEDIATION_BASE_OWNER (clone/PR-target repo), "
+                "REMEDIATION_GIT_NAME and REMEDIATION_GIT_EMAIL (commit identity) "
+                "must all be set. Set them in the deploy env / .env."
+            )
+        env = {
+            "REMEDIATION_WRITE_OWNER": write_owner,
+            "REMEDIATION_BASE_OWNER": base_owner,
+            "REMEDIATION_GIT_NAME": git_name,
+            "REMEDIATION_GIT_EMAIL": git_email,
+            # Unbuffered stdout so logs reach CloudWatch: a short Fargate task
+            # exits before block-buffered Python output flushes to the awslogs
+            # driver, otherwise leaving an empty log stream.
+            "PYTHONUNBUFFERED": "1",
+        }
+        # Secrets Manager NAMES only — never raw token VALUES (which would sit in
+        # plaintext in the task definition, visible via ecs:DescribeTaskDefinition).
+        # The worker fetches the values at runtime. Both are CDK-managed: the
+        # central secret and the agent-declared GitHub token secret.
+        if self.secrets_stack:
+            env["CENTRAL_SECRET_NAME"] = self.secrets_stack.central_env_secret.secret_name
+            gh_secret = self.secrets_stack.get_agent_secret("SecurityAdvisories", "gh-token")
+            if gh_secret:
+                env["GH_TOKEN_SECRET_NAME"] = gh_secret.secret_name
+        return env
+
+    def _create_remediation_ecs(self) -> None:
+        """Fargate cluster + npm task definition for the remediation worker.
+
+        Fargate runs the clone/build/PR work that exceeds Lambda's limits. The
+        image is built from the npm worker Dockerfile (a Lambda base image), so
+        the container command is overridden to run ``main.py``, bypassing the
+        Lambda runtime client.
+        """
+        if not self.vpc_stack:
+            logger.warning("No VPC stack; skipping remediation Fargate cluster")
+            return
+
+        self.remediation_cluster = ecs.Cluster(
+            self, "RemediationCluster",
+            cluster_name=f"oscar-remediation-{self.env_name}",
+            vpc=self.vpc_stack.vpc,
+            container_insights=True,
+        )
+
+        # The task + execution roles live HERE, not permissions_stack, alongside
+        # the task def and log group: the log driver auto-grants the execution
+        # role write access to the log group, and a role in permissions_stack
+        # would make that grant a permissions->lambda edge and cycle (lambda
+        # already depends on permissions). Co-locating avoids it.
+        task_role = iam.Role(
+            self, "RemediationEcsTaskRole",
+            # Deterministic name so the SA lambda's iam:PassRole can be scoped to
+            # this exact ARN (see iam_policies.py) instead of "*".
+            role_name=f"oscar-remediation-ecs-task-{self.env_name}",
+            assumed_by=iam.ServicePrincipal("ecs-tasks.amazonaws.com"),
+            description="Task role for the OSCAR CVE remediation Fargate worker",
+        )
+        # Read the CDK-managed GitHub token secret (declared via the agent's
+        # get_secrets(); the SA Lambda is granted it separately by the agent loop).
+        gh_secret = (self.secrets_stack.get_agent_secret("SecurityAdvisories", "gh-token")
+                     if self.secrets_stack else None)
+        if gh_secret:
+            gh_secret.grant_read(task_role)
+        if self.secrets_stack:
+            self.secrets_stack.grant_read_access(task_role)
+        # Invoke the LLM edit-planner (Bedrock). Cross-region inference profiles
+        # route to foundation models in several regions, so allow both.
+        task_role.add_to_policy(iam.PolicyStatement(
+            actions=["bedrock:InvokeModel"],
+            resources=[
+                f"arn:aws:bedrock:*:{self.account}:inference-profile/*",
+                "arn:aws:bedrock:*::foundation-model/anthropic.claude-*",
+            ],
+        ))
+        execution_role = iam.Role(
+            self, "RemediationEcsExecutionRole",
+            role_name=f"oscar-remediation-ecs-exec-{self.env_name}",
+            assumed_by=iam.ServicePrincipal("ecs-tasks.amazonaws.com"),
+            managed_policies=[
+                iam.ManagedPolicy.from_aws_managed_policy_name(
+                    "service-role/AmazonECSTaskExecutionRolePolicy")
+            ],
+            description="Execution role for the OSCAR CVE remediation Fargate task",
+        )
+
+        task_def = ecs.FargateTaskDefinition(
+            self, "RemediationNpmTaskDef",
+            family=f"oscar-remediation-npm-{self.env_name}",
+            cpu=2048,                 # 2 vCPU
+            memory_limit_mib=8192,    # 8 GB (OSD install peaked ~4 GB; headroom)
+            ephemeral_storage_gib=50,  # clone + node_modules + yarn cache; up to 200 for core
+            # Match the image platform (x86_64), as the knowledge-base image does.
+            runtime_platform=ecs.RuntimePlatform(
+                cpu_architecture=ecs.CpuArchitecture.X86_64,
+                operating_system_family=ecs.OperatingSystemFamily.LINUX,
+            ),
+            task_role=task_role,
+            execution_role=execution_role,
+        )
+
+        task_def.add_container(
+            "worker",
+            container_name="worker",
+            image=ecs.ContainerImage.from_asset(
+                # Context is the workers dir so the image can COPY shared/ + npm/.
+                directory="agents/SecurityAdvisories/remediation-workers",
+                file="npm/Dockerfile",
+                platform=ecr_assets.Platform.LINUX_AMD64,
+            ),
+            # Bypass the Lambda runtime client baked into the base image and run
+            # the env-driven Fargate entrypoint directly. Files are under
+            # /var/task (LAMBDA_TASK_ROOT); python is the base image's runtime.
+            entry_point=["/var/lang/bin/python"],
+            command=["/var/task/main.py"],
+            environment=self._remediation_worker_env(),
+            logging=ecs.LogDriver.aws_logs(
+                stream_prefix="npm",
+                log_group=logs.LogGroup(
+                    self, "RemediationNpmLogGroup",
+                    log_group_name=f"/ecs/oscar-remediation-npm-{self.env_name}",
+                    retention=logs.RetentionDays.TWO_WEEKS,
+                    removal_policy=RemovalPolicy.DESTROY,
+                ),
+            ),
+        )
+        self.remediation_npm_task_def = task_def
+
+        # maven worker (unified plugin + core): the plugin path is a build.gradle
+        # text edit; the core path bumps the version catalog and runs a real gradle
+        # build to regenerate .jar.sha1 checksums (see maven.py). Reuses the same
+        # cluster + task/execution roles. x86_64 to match the CI runner + npm worker
+        # (arm64 fails to build on the x64 runner).
+        maven_task_def = ecs.FargateTaskDefinition(
+            self, "RemediationMavenTaskDef",
+            family=f"oscar-remediation-maven-{self.env_name}",
+            # Sized for the heavier of the two paths this worker handles: the core
+            # path runs ``./gradlew updateShas`` over OpenSearch core (buildSrc
+            # compile + configuring the whole multi-project build + downloading
+            # every dependency jar), which needs real CPU/RAM. The plugin path (a
+            # text edit) fits easily within the same envelope.
+            cpu=4096,                 # 4 vCPU (speeds the gradle build)
+            memory_limit_mib=8192,    # 8 GB (OpenSearch gradle build is memory-hungry)
+            ephemeral_storage_gib=50,  # core clone + gradle dist + dependency jars
+            runtime_platform=ecs.RuntimePlatform(
+                cpu_architecture=ecs.CpuArchitecture.X86_64,
+                operating_system_family=ecs.OperatingSystemFamily.LINUX,
+            ),
+            task_role=task_role,
+            execution_role=execution_role,
+        )
+        maven_task_def.add_container(
+            "worker",
+            container_name="worker",
+            image=ecs.ContainerImage.from_asset(
+                directory="agents/SecurityAdvisories/remediation-workers",
+                file="maven/Dockerfile",
+                platform=ecr_assets.Platform.LINUX_AMD64,
+            ),
+            entry_point=["/var/lang/bin/python"],
+            command=["/var/task/main.py"],
+            environment=self._remediation_worker_env(),
+            logging=ecs.LogDriver.aws_logs(
+                stream_prefix="maven",
+                log_group=logs.LogGroup(
+                    self, "RemediationMavenLogGroup",
+                    log_group_name=f"/ecs/oscar-remediation-maven-{self.env_name}",
+                    retention=logs.RetentionDays.TWO_WEEKS,
+                    removal_policy=RemovalPolicy.DESTROY,
+                ),
+            ),
+        )
+        self.remediation_maven_task_def = maven_task_def
+
+    def _wire_remediation_dispatch(self) -> None:
+        """Point the SecurityAdvisories agent Lambda at the Fargate worker.
+
+        Injects the ECS cluster, per-ecosystem task definition ARN, and the
+        network config (public subnets + security group) so the remediation
+        handler's dispatch step can ``run_task``. The RunTask/PassRole
+        PERMISSIONS are granted as identity policies on the SA role (see
+        iam_policies.py) using deterministic ARNs — granting them here via
+        construct refs would add a lambda-stack ARN to the permissions-stack role
+        and create a cyclic permissions<->lambda stack dependency.
+        """
+        if not (self.remediation_npm_task_def and self.remediation_cluster
+                and self.vpc_stack):
+            return
+        sa_fn = self.lambda_functions.get("SecurityAdvisories")
+        if not sa_fn:
+            logger.warning(
+                "SecurityAdvisories Lambda not found; remediation dispatch not wired"
+            )
+            return
+        sa_fn.add_environment(
+            "NPM_REMEDIATION_TASKDEF", self.remediation_npm_task_def.task_definition_arn
+        )
+        if self.remediation_maven_task_def:
+            sa_fn.add_environment(
+                "MAVEN_REMEDIATION_TASKDEF",
+                self.remediation_maven_task_def.task_definition_arn,
+            )
+        sa_fn.add_environment(
+            "REMEDIATION_ECS_CLUSTER", self.remediation_cluster.cluster_name
+        )
+        sa_fn.add_environment(
+            "REMEDIATION_ECS_SUBNETS",
+            ",".join(s.subnet_id for s in self.vpc_stack.vpc.public_subnets),
+        )
+        sa_fn.add_environment(
+            "REMEDIATION_ECS_SECURITY_GROUP",
+            self.vpc_stack.lambda_security_group.security_group_id,
+        )
 
     # ------------------------------------------------------------ agents
     def _create_agent_lambdas(self, agents) -> None:

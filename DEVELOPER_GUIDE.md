@@ -18,10 +18,10 @@ The CDK deploys:
 |-------|---------|-----------|
 | `OscarPermissionsStack` | IAM roles and policies | Bedrock agent role, Lambda execution roles (base, Jenkins, metrics), API Gateway role |
 | `OscarSecretsStack` | Configuration management | Central secret (`oscar-central-env-{env}`) with all environment variables |
-| `OscarStorageStack` | Data persistence | DynamoDB table for session/context/deduplication with TTL and monitoring |
+| `OscarStorageStack` | Data persistence | DynamoDB tables for session/context/deduplication (with TTL and monitoring) and release-notifier state |
 | `OscarVpcStack` | Networking | VPC, security groups, VPC endpoints (S3, DynamoDB, Secrets Manager) |
 | `OscarKnowledgeBaseStack` | Bedrock Knowledge Base | S3 bucket, OpenSearch Serverless collection, document sync Lambda |
-| `OscarLambdaStack` | Compute functions | Supervisor agent, Jenkins agent, metrics agent (VPC-enabled), shared Lambda layer |
+| `OscarLambdaStack` | Compute functions | Supervisor agent, Jenkins agent, metrics agent (VPC-enabled), release notifier (scheduled), shared Lambda layer |
 | `OscarApiGatewayStack` | Slack integration | REST API (`POST /slack/events`) with Lambda proxy integration |
 | `OscarAgentsStack` | Bedrock Agents | Supervisor agents (privileged & limited), collaborator agents (Jenkins, Build, Test, Release) |
 
@@ -118,6 +118,7 @@ aws secretsmanager put-secret-value \
 | `FULLY_AUTHORIZED_USERS` | Comma-separated user IDs with full access (Jenkins, communication) |
 | `CHANNEL_ALLOW_LIST` | Comma-separated channel IDs the bot responds in |
 | `ALERTS_CHANNELS` | Comma-separated channel IDs for CloudWatch alarm notifications |
+| `RELEASE_CHANNELS` | Comma-separated channel IDs for proactive release-readiness notifications (leave unset to disable) |
 
 Agent-specific secrets (e.g., Jenkins API token) are documented in each agent's README.
 

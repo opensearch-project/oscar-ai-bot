@@ -16,16 +16,44 @@ Functions:
     deduplicate_by_highest_build_number: Deduplicate by highest build number
     deduplicate_integration_test_results: Deduplicate integration test results
     deduplicate_release_results: Deduplicate release results
+    deduplicate_release_state_results: Keep the newest release-state criterion per key
     extract_test_results: Extract test results from OpenSearch response
     extract_build_results: Extract build results from OpenSearch response
     extract_release_results: Extract release results from OpenSearch response
+    extract_release_state_results: Extract release-state criteria from OpenSearch response
 """
 
 import logging
-from typing import Any, Dict, List
+from datetime import datetime, timezone
+from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
+
+
+def parse_timestamp(value: Optional[str]) -> Optional[datetime]:
+    """Parse 'YYYY-MM-DD' or ISO 8601 (trailing 'Z' allowed) into an aware datetime.
+
+    Returned values are safe to compare with each other. Comparing the raw strings is
+    not: 'Z' and '+00:00' offsets, and differing fractional-second precision, sort
+    lexicographically in the wrong order even though they denote the same instant.
+    """
+    if not value:
+        return None
+    text = str(value).strip()
+    if text.endswith('Z'):
+        text = text[:-1] + '+00:00'
+    try:
+        parsed = datetime.fromisoformat(text)
+    except ValueError:
+        try:
+            parsed = datetime.strptime(text, '%Y-%m-%d')
+        except ValueError:
+            logger.warning(f"Could not parse timestamp value: {value!r}")
+            return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed
 
 
 def deduplicate_by_highest_build_number(results: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -180,6 +208,82 @@ def deduplicate_release_results(results: List[Dict[str, Any]]) -> List[Dict[str,
     deduplicated_results = list(groups.values()) + ungrouped
 
     return deduplicated_results
+
+
+def deduplicate_release_state_results(results: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Keep only the newest entry for each (version, product, criterion_name) combination.
+
+    opensearch_release_state is append-only: Jenkins writes a fresh document for every
+    criterion on every check run, so the raw hits contain many stale copies. Only the
+    document with the greatest last_checked reflects current state.
+
+    Args:
+        results: List of release-state criterion dictionaries
+
+    Returns:
+        List holding one current document per criterion and product
+    """
+    if not results:
+        return results
+
+    groups = {}
+    ungrouped = []
+
+    for result in results:
+        version = result.get('version')
+        product = result.get('product')
+        criterion_name = result.get('criterion_name')
+        last_checked = result.get('last_checked')
+
+        if version and criterion_name:
+            key = (str(version), str(product), criterion_name)
+            if key not in groups:
+                groups[key] = result
+                continue
+            candidate = parse_timestamp(last_checked)
+            if candidate is None:
+                continue
+            existing = parse_timestamp(groups[key].get('last_checked'))
+            if existing is None or candidate > existing:
+                groups[key] = result
+        else:
+            ungrouped.append(result)
+
+    return list(groups.values()) + ungrouped
+
+
+def extract_release_state_results(opensearch_result: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """Extract release-readiness criteria and reduce them to current state.
+
+    Args:
+        opensearch_result: Raw OpenSearch response
+
+    Returns:
+        List of current criterion documents, newest per criterion and product
+    """
+    results = []
+    hits = opensearch_result.get('hits', {}).get('hits', [])
+
+    for hit in hits:
+        source = hit.get('_source', {})
+        if source.get('doc_type') not in (None, 'criterion'):
+            continue
+
+        results.append({
+            'version': source.get('version'),
+            'product': source.get('product'),
+            'criterion_name': source.get('criterion_name'),
+            'criterion_type': source.get('criterion_type'),
+            'status': source.get('status'),
+            'details': source.get('details'),
+            'blocking_components': source.get('blocking_components') or [],
+            'source': source.get('source'),
+            'release_issue': source.get('release_issue'),
+            'checked_by': source.get('checked_by'),
+            'last_checked': source.get('last_checked'),
+        })
+
+    return deduplicate_release_state_results(results)
 
 
 def extract_test_results(opensearch_result: Dict[str, Any]) -> List[Dict[str, Any]]:

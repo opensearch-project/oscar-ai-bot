@@ -24,9 +24,9 @@ def template():
 class TestStorageStack:
     """Test cases for OscarStorageStack."""
 
-    def test_one_dynamodb_table_created(self, template):
-        """Only the context table should be created."""
-        template.resource_count_is("AWS::DynamoDB::Table", 1)
+    def test_dynamodb_tables_created(self, template):
+        """Context table plus the release notifier's state table."""
+        template.resource_count_is("AWS::DynamoDB::Table", 2)
 
     def test_context_table_key_schema(self, template):
         """Context table uses thread_key as partition key."""
@@ -96,8 +96,8 @@ class TestStorageStack:
         })
 
     def test_cloudwatch_alarms_created(self, template):
-        """Five CloudWatch alarms should be created for monitoring."""
-        template.resource_count_is("AWS::CloudWatch::Alarm", 5)
+        """Three alarms each for the context and release-notify tables."""
+        template.resource_count_is("AWS::CloudWatch::Alarm", 10)
 
     def test_read_throttle_alarm(self, template):
         """Read throttle alarm exists with correct metric."""
@@ -129,3 +129,46 @@ class TestStorageStack:
         template.has_resource_properties("AWS::DynamoDB::Table", {
             "TableName": "oscar-agent-context-dev",
         })
+
+
+class TestReleaseNotifyStateTable:
+    """The release notifier's per-version last-posted record."""
+
+    def test_table_keyed_on_version(self, template):
+        template.has_resource_properties("AWS::DynamoDB::Table", {
+            "TableName": "oscar-release-notify-state-dev",
+            "KeySchema": [{"AttributeName": "version", "KeyType": "HASH"}],
+            "AttributeDefinitions": [{"AttributeName": "version", "AttributeType": "S"}],
+            "BillingMode": "PAY_PER_REQUEST",
+        })
+
+    def test_table_is_monitored(self, template):
+        """Throttling here silently drops duplicate suppression, so it must alarm."""
+        for name in ("oscar-releasenotify-read-throttles-dev",
+                     "oscar-releasenotify-write-throttles-dev",
+                     "oscar-releasenotify-errors-dev"):
+            template.has_resource_properties("AWS::CloudWatch::Alarm", {"AlarmName": name})
+
+    def test_table_is_exposed_to_other_stacks(self):
+        """The Lambda stack reads the table name off the stack to set an env var."""
+        app = App()
+        stack = OscarStorageStack(
+            app, "TestStorageStack",
+            environment="dev",
+            env=Environment(account="123456789012", region="us-east-1"),
+        )
+        assert stack.release_notify_table is not None
+        assert OscarStorageStack.get_release_notify_table_name("dev") == \
+            "oscar-release-notify-state-dev"
+
+    def test_created_without_a_workspace_id(self, template):
+        """Unlike the identity table, this one does not depend on a Slack workspace."""
+        tables = Template.from_stack(
+            OscarStorageStack(
+                App(), "NoWorkspaceStorageStack",
+                environment="dev",
+                env=Environment(account="123456789012", region="us-east-1"),
+            )
+        ).find_resources("AWS::DynamoDB::Table")
+        names = {t["Properties"]["TableName"] for t in tables.values()}
+        assert "oscar-release-notify-state-dev" in names

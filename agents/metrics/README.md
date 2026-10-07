@@ -104,6 +104,47 @@ This single pipeline is used for all metrics indices:
 - `opensearch-integration-test-results-{month}-{year}`
 - `opensearch_release_metrics`
 
+### 4. Release Readiness Pipeline
+
+Release readiness uses a **second, differently shaped pipeline**. The metrics pipeline is
+backed by a *conversational* agent that routes indices itself (`ListIndexTool` +
+`IndexMappingTool`) and keeps conversation memory. The release pipeline is backed by a
+*flow* agent holding a single `QueryPlanningTool`:
+
+```bash
+PUT /_search/pipeline/release-flow-agentic-pipeline
+{
+  "request_processors": [
+    { "agentic_query_translator": { "agent_id": "<release-flow-agent-id>" } }
+  ],
+  "response_processors": [
+    { "agentic_context": { "dsl_query": true } }
+  ]
+}
+```
+
+Two consequences for the Lambda, both handled in `agentic_search()`:
+
+- The **index must be in the request path** (`/opensearch_release_state/_search?...`). It
+  is the only way a flow agent's planner receives a mapping, and it keeps index selection
+  deterministic rather than LLM-decided.
+- **No `memory_id`**: a flow agent has no memory, unlike the conversational metrics agent.
+
+The flow agent carries a release-specific `query_planner_system_prompt` describing both
+release indices. Its most important rules: filter on `.keyword` sub-fields (both indices
+are dynamically mapped, so `product` is analyzed text and a bare `term` misses
+`opensearch-dashboards`), always sort by `last_checked` descending because
+`opensearch_release_state` is append-only history, and never answer timing questions from
+the state index because its `release_date`/`days_to_release` are stale snapshots.
+
+The planner's output is never trusted for completeness: `get_release_status` and
+`get_release_window` build fixed DSL instead, since the rubric's verdict is only correct if
+it sees every criterion. Only `query_release_state` goes through this pipeline.
+
+Release indices:
+- `opensearch_release_state` — per-criterion readiness history
+- `opensearch_release_schedule` — one record per release version
+
 ## IAM Permissions
 
 The cross-account role assumed by the Lambda needs the following permissions on the OpenSearch domain:
@@ -244,11 +285,15 @@ These are passed through from `.env` to the Lambda as environment variables. All
 | `OPENSEARCH_SERVICE` | AWS service name for SigV4 signing | `es` |
 | `OPENSEARCH_LARGE_QUERY_SIZE` | Max documents per query | `1000` |
 | `OPENSEARCH_REQUEST_TIMEOUT` | Request timeout in seconds | `60` |
-| `AGENTIC_PIPELINE` | Agentic search pipeline name (shared across all indices) | `metrics-agentic-pipeline` |
+| `AGENTIC_PIPELINE` | Agentic search pipeline name for the build, test and release-metrics indices (conversational agent) | `metrics-agentic-pipeline` |
 | `AGENTIC_SEARCH_TIMEOUT` | Timeout in seconds for agentic search requests | `120` |
+| `RELEASE_AGENTIC_PIPELINE` | Agentic search pipeline name for the release indices (flow agent) | `release-flow-agentic-pipeline` |
+| `RELEASE_STATE_INDEX` | Per-criterion release readiness index | `opensearch_release_state` |
+| `RELEASE_SCHEDULE_INDEX` | Release schedule index | `opensearch_release_schedule` |
 
-> **Note:** Index names (`OPENSEARCH_INTEGRATION_TEST_INDEX`, etc.) are no longer configured as env vars.
-> The conversational agent on OpenSearch handles index routing automatically via `ListIndexTool` and `IndexMappingTool`.
+> **Note:** Build and test index names (`OPENSEARCH_INTEGRATION_TEST_INDEX`, etc.) are no longer configured as env vars.
+> The conversational agent on OpenSearch handles that index routing automatically via `ListIndexTool` and `IndexMappingTool`.
+> The release indices are named explicitly because the deterministic release handlers build their own DSL and the release flow agent needs the index in the request path.
 
 ## Cross-Account Role Setup
 

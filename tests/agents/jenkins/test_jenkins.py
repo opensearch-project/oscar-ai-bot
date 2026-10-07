@@ -14,8 +14,10 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', '..', 'ag
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', '..', 'lambda', 'shared-layer', 'python'))
 
 from jenkins_client import JenkinsClient, JenkinsCredentials  # noqa: E402
+from jenkinsfile_parser import JenkinsfileParser  # noqa: E402
 from job_definitions import (JobDefinition, JobParameter,  # noqa: E402
                              JobRegistry)
+from lambda_function import _inject_authenticated_requester  # noqa: E402
 from lambda_function import _validate_build_params  # noqa: E402
 from lambda_function import format_parameters_as_bullets  # noqa: E402
 
@@ -440,6 +442,103 @@ class TestValidateBuildParams(unittest.TestCase):
         self.assertIn('must be an integer', error['message'])
 
 
+class TestInjectAuthenticatedRequester(unittest.TestCase):
+    """Identity-bearing job parameters must come from Slack, not from the model."""
+
+    def test_injected_when_the_job_declares_it_even_if_the_caller_sent_nothing(self):
+        """The model is told never to populate these, so keying on what it sent would inject
+        nothing in exactly the case this exists for and the job would refuse the request."""
+        params = _inject_authenticated_requester(
+            'release-state',
+            {'VERSION': '3.9.0', 'DECISION': 'go'},
+            {'requester_user_id': 'U_REAL', 'requester_display_name': 'Real Person'},
+            {'VERSION', 'DECISION', 'DECIDED_BY_SLACK_USER', 'DECIDED_BY_DISPLAY_NAME'},
+        )
+        self.assertEqual(params['DECIDED_BY_SLACK_USER'], 'U_REAL')
+        self.assertEqual(params['DECIDED_BY_DISPLAY_NAME'], 'Real Person')
+
+    def test_not_injected_when_the_job_does_not_declare_it(self):
+        original = {'IMAGE_FULL_NAME': 'alpine:3.19'}
+        params = _inject_authenticated_requester(
+            'docker-scan', original, {'requester_user_id': 'U_REAL'}, {'IMAGE_FULL_NAME'},
+        )
+        self.assertEqual(params, original)
+
+    def test_authenticated_requester_replaces_a_model_supplied_value(self):
+        """Every trigger shares one Jenkins token, so a claimed identity is worth nothing."""
+        params = _inject_authenticated_requester(
+            'release-state',
+            {'VERSION': '3.9.0', 'DECISION': 'go', 'DECIDED_BY_SLACK_USER': 'U_SOMEONE_ELSE'},
+            {'requester_user_id': 'U_REAL'},
+        )
+        self.assertEqual(params['DECIDED_BY_SLACK_USER'], 'U_REAL')
+        self.assertEqual(params['VERSION'], '3.9.0')
+
+    def test_override_is_logged(self):
+        with self.assertLogs('lambda_function', level='WARNING') as logs:
+            _inject_authenticated_requester(
+                'release-state',
+                {'DECIDED_BY_SLACK_USER': 'U_CLAIMED'},
+                {'requester_user_id': 'U_REAL'},
+            )
+        self.assertIn('JENKINS_IDENTITY_OVERRIDDEN', '\n'.join(logs.output))
+
+    def test_empty_when_there_is_no_authenticated_requester(self):
+        """The job refuses an unattributable decision rather than crediting it to the bot."""
+        params = _inject_authenticated_requester(
+            'release-state', {'DECIDED_BY_SLACK_USER': 'U_CLAIMED'}, {},
+        )
+        self.assertEqual(params['DECIDED_BY_SLACK_USER'], '')
+
+    def test_display_name_is_injected_from_the_authenticated_profile(self):
+        """A readable name the model could edit would name the wrong person in the record."""
+        params = _inject_authenticated_requester(
+            'release-state',
+            {'DECIDED_BY_SLACK_USER': '', 'DECIDED_BY_DISPLAY_NAME': 'Someone Else'},
+            {'requester_user_id': 'U_REAL', 'requester_display_name': 'Real Person'},
+        )
+        self.assertEqual(params['DECIDED_BY_SLACK_USER'], 'U_REAL')
+        self.assertEqual(params['DECIDED_BY_DISPLAY_NAME'], 'Real Person')
+
+    def test_display_name_is_empty_when_slack_could_not_resolve_one(self):
+        params = _inject_authenticated_requester(
+            'release-state',
+            {'DECIDED_BY_DISPLAY_NAME': 'Guessed Name'},
+            {'requester_user_id': 'U_REAL'},
+        )
+        self.assertEqual(params['DECIDED_BY_DISPLAY_NAME'], '')
+
+    def test_jobs_without_the_parameter_are_untouched(self):
+        original = {'IMAGE_FULL_NAME': 'alpine:3.19'}
+        params = _inject_authenticated_requester(
+            'docker-scan', original, {'requester_user_id': 'U_REAL'},
+        )
+        self.assertEqual(params, original)
+
+    def test_a_registry_miss_still_discards_a_supplied_identity(self):
+        """An unknown job is rejected downstream, but the safeguard must not rely on that."""
+        params = _inject_authenticated_requester(
+            'mystery-job',
+            {'DECIDED_BY_SLACK_USER': 'U_CLAIMED'},
+            {'requester_user_id': 'U_REAL'},
+            set({'DECIDED_BY_SLACK_USER': 'U_CLAIMED'}),
+        )
+        self.assertEqual(params['DECIDED_BY_SLACK_USER'], 'U_REAL')
+
+    def test_a_registry_miss_does_not_add_identity_params_to_other_jobs(self):
+        """Most jobs declare no identity parameter; a miss must not push one at them."""
+        original = {'IMAGE_FULL_NAME': 'alpine:3.19'}
+        params = _inject_authenticated_requester(
+            'docker-scan', original, {'requester_user_id': 'U_REAL'}, set(original),
+        )
+        self.assertEqual(params, original)
+
+    def test_the_caller_mapping_is_not_mutated(self):
+        original = {'DECIDED_BY_SLACK_USER': 'U_CLAIMED'}
+        _inject_authenticated_requester('release-state', original, {'requester_user_id': 'U_REAL'})
+        self.assertEqual(original['DECIDED_BY_SLACK_USER'], 'U_CLAIMED')
+
+
 @patch.dict(os.environ, _JENKINS_ENV)
 class TestGetBuildFailureDetailsHandler(unittest.TestCase):
     """Test get_build_failure_details Lambda handler routing."""
@@ -541,3 +640,72 @@ class TestJenkinsfileDiscovery(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class TestJenkinsfileAnnotations(unittest.TestCase):
+    """A job's registry entry comes from its annotations, so nothing in them may be dropped."""
+
+    @staticmethod
+    def _parse(header: str):
+        return JenkinsfileParser().parse(header + '\npipeline {\n    agent none\n}\n')
+
+    def test_description_continues_across_comment_lines(self):
+        """Authors wrap a useful description over several lines; the registry needs all of it."""
+        job = self._parse(
+            '// @job-name: release-state\n'
+            '// @description: Indexes release readiness for every active release,\n'
+            '// and records a Go/No-Go decision when DECISION is set.\n'
+        )
+        self.assertEqual(
+            job.description,
+            'Indexes release readiness for every active release, '
+            'and records a Go/No-Go decision when DECISION is set.',
+        )
+
+    def test_a_single_line_description_is_unchanged(self):
+        job = self._parse('// @job-name: docker-scan\n// @description: Triggers a Docker scan\n')
+        self.assertEqual(job.description, 'Triggers a Docker scan')
+
+    def test_continuation_stops_at_the_next_annotation(self):
+        """A following annotation belongs to itself, not to the description."""
+        job = self._parse(
+            '// @description: Validates distribution artifacts\n'
+            '// @job-name: distribution-validation\n'
+        )
+        self.assertEqual(job.description, 'Validates distribution artifacts')
+        self.assertEqual(job.job_name, 'distribution-validation')
+
+    def test_continuation_stops_at_a_blank_comment(self):
+        job = self._parse(
+            '// @job-name: docker-scan\n'
+            '// @description: Triggers a Docker scan\n'
+            '//\n'
+            '// An unrelated note that is not part of the description.\n'
+        )
+        self.assertEqual(job.description, 'Triggers a Docker scan')
+
+    def test_continuation_stops_at_a_non_comment_line(self):
+        job = self._parse(
+            '// @job-name: docker-scan\n'
+            '// @description: Triggers a Docker scan\n'
+            '\n'
+            "lib = library(identifier: 'jenkins@1.0.0')\n"
+        )
+        self.assertEqual(job.description, 'Triggers a Docker scan')
+
+    def test_job_name_never_absorbs_a_following_comment(self):
+        """A job name is a lookup key - gluing a comment onto it would make the job unfindable."""
+        job = self._parse(
+            '// @job-name: docker-scan\n'
+            '// some incidental note about the job\n'
+            '// @description: Triggers a Docker scan\n'
+        )
+        self.assertEqual(job.job_name, 'docker-scan')
+
+    def test_missing_description_is_empty_not_none(self):
+        job = self._parse('// @job-name: docker-scan\n')
+        self.assertEqual(job.description, '')
+
+    def test_missing_job_name_is_rejected(self):
+        with self.assertRaises(ValueError):
+            self._parse('// @description: A job with no name\n')

@@ -44,12 +44,12 @@ def template_no_workspace():
 class TestIdentityTables:
 
     def test_creates_identity_table(self, template_with_workspace):
-        # 1 context table + 1 identity table = 2
-        template_with_workspace.resource_count_is("AWS::DynamoDB::Table", 2)
+        # context + release-notify + identity = 3
+        template_with_workspace.resource_count_is("AWS::DynamoDB::Table", 3)
 
     def test_no_identity_table_when_no_workspace(self, template_no_workspace):
-        # Only the context table
-        template_no_workspace.resource_count_is("AWS::DynamoDB::Table", 1)
+        # Only the context and release-notify tables, which need no workspace
+        template_no_workspace.resource_count_is("AWS::DynamoDB::Table", 2)
 
     def test_identity_table_has_github_id_as_pk(self, template_with_workspace):
         template_with_workspace.has_resource_properties("AWS::DynamoDB::Table", {

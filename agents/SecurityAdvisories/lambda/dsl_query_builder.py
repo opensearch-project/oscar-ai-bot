@@ -28,10 +28,16 @@ logger.setLevel(logging.INFO)
 # Default query size — matches the previous agentic search configuration
 _DEFAULT_QUERY_SIZE = 1000
 
+# Release-bundle component types (scans-cluster ``release_type`` field). Scoping a
+# query to these returns only the OpenSearch and OpenSearch-Dashboards release
+# bundles, excluding non-bundle components (build tooling, out-of-bundle repos).
+_RELEASE_BUNDLE_TYPES = ['bundle_opensearch', 'bundle_opensearch_dashboards']
+
 
 def _build_dsl_query(
     resolved_tag: Optional[str] = None,
     project_name: Optional[str] = None,
+    release_components: bool = False,
 ) -> Dict[str, Any]:
     """Build the OpenSearch Query DSL body.
 
@@ -41,6 +47,8 @@ def _build_dsl_query(
     Args:
         resolved_tag: Resolved version tag for project.tag filter.
         project_name: Exact project name for project.name filter.
+        release_components: When True, scope to the release-bundle components
+            (``release_type.keyword`` in the two bundles).
 
     Returns:
         A dict ready for json.dumps() containing the query body.
@@ -52,6 +60,11 @@ def _build_dsl_query(
 
     if project_name:
         filters.append({'term': {'project.name': project_name}})
+
+    if release_components:
+        # release_type is a text field with a keyword sub-field; use the keyword
+        # for exact matching against the two release-bundle values.
+        filters.append({'terms': {'release_type.keyword': _RELEASE_BUNDLE_TYPES}})
 
     # Sort by scan timestamp descending so the newest scan per project
     # appears first when combined with collapse.
@@ -125,6 +138,7 @@ def _execute_query(index: str, query_body: str) -> Dict[str, Any]:
 def query_vulnerabilities(
     version: Optional[str] = None,
     project_name: Optional[str] = None,
+    release_components: bool = False,
 ) -> Dict[str, Any]:
     """Construct and execute a DSL query for vulnerability scan documents.
 
@@ -134,6 +148,7 @@ def query_vulnerabilities(
     Args:
         version: User-provided version string (resolved via resolve_version_tag).
         project_name: Exact project name for term filter.
+        release_components: When True, scope to the release-bundle components only.
 
     Returns:
         On success: The standard OpenSearch response envelope {"hits": {"hits": [...]}}.
@@ -164,6 +179,7 @@ def query_vulnerabilities(
     query_body_dict = _build_dsl_query(
         resolved_tag=resolved_tag,
         project_name=project_name,
+        release_components=release_components,
     )
     query_body = json.dumps(query_body_dict)
 

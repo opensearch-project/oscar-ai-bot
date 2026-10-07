@@ -89,6 +89,9 @@ def main() -> None:
     )
 
     # 3. Storage (DynamoDB tables + identity tables)
+    # Required in every environment: the deployed environments do not all use distinct
+    # ENVIRONMENT names, so gating the identity table on the name would drop the live table
+    # out of a deployment that already has one.
     workspace_id = os.environ.get("SLACK_WORKSPACE_ID", "").strip()
     if not workspace_id:
         raise ValueError("SLACK_WORKSPACE_ID environment variable is required for deployment")
@@ -137,13 +140,17 @@ def main() -> None:
     lambda_stack.add_dependency(storage_stack)
 
     # 7. API Gateway
+    # Custom domain hosted zone is driven per-environment via API_CUSTOM_DOMAIN
+    api_custom_domain = os.environ.get("API_CUSTOM_DOMAIN", "").strip() or None
+
     api_gateway_stack = OscarApiGatewayStack(
         app, f"OscarApiGatewayStack-{environment}",
         lambda_stack=lambda_stack,
         permissions_stack=permissions_stack,
         env=env,
         description="OSCAR API Gateway",
-        environment=environment
+        environment=environment,
+        custom_domain=api_custom_domain
     )
     api_gateway_stack.add_dependency(permissions_stack)
     api_gateway_stack.add_dependency(lambda_stack)

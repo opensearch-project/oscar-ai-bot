@@ -230,6 +230,11 @@ def stacks():
     """Synthesise the Lambda stack with all agents (no Docker bundling)."""
     os.environ["CDK_DEFAULT_ACCOUNT"] = "123456789012"
     os.environ["CDK_DEFAULT_REGION"] = "us-east-1"
+    # Required by the remediation Fargate worker env (fail-closed in _remediation_worker_env).
+    os.environ["REMEDIATION_WRITE_OWNER"] = "test-owner"
+    os.environ["REMEDIATION_BASE_OWNER"] = "test-owner"
+    os.environ["REMEDIATION_GIT_NAME"] = "test-bot"
+    os.environ["REMEDIATION_GIT_EMAIL"] = "test-bot@users.noreply.github.com"
 
     app = App(context={"aws:cdk:bundling-stacks": []})
 
@@ -279,15 +284,17 @@ class TestAgentStackWiring:
         assert github_fn is not metrics_fn
 
     def test_lambda_function_count(self, stacks):
-        """Should be 4 agent entries + 3 core = 7 keys in lambda_functions dict."""
-        # 4 agents + supervisor-agent + communication-handler + github-webhook-handler = 7 entries
-        assert len(stacks.lambda_functions) == 7
+        """Should be 4 agent entries + 4 non-agent = 8 keys in lambda_functions dict."""
+        # 4 agents + supervisor-agent + communication-handler + github-webhook-handler
+        # + release-notifier = 8 entries
+        assert len(stacks.lambda_functions) == 8
 
     def test_lambda_template_function_count(self, stacks):
-        """CloudFormation template should have 7 Lambda functions
-        (supervisor + communication + github-webhook-handler + jenkins + metrics + security-advisories + github)."""
+        """CloudFormation template should have 8 Lambda functions
+        (supervisor + communication + github-webhook-handler + release-notifier
+        + jenkins + metrics + security-advisories + github)."""
         template = Template.from_stack(stacks)
-        template.resource_count_is("AWS::Lambda::Function", 7)
+        template.resource_count_is("AWS::Lambda::Function", 8)
 
 
 # ---------------------------------------------------------------------------
@@ -605,6 +612,11 @@ def agents_template():
     """Synthesise the Bedrock agents stack with its own App."""
     os.environ["CDK_DEFAULT_ACCOUNT"] = "123456789012"
     os.environ["CDK_DEFAULT_REGION"] = "us-east-1"
+    # Required by the remediation Fargate worker env (fail-closed in _remediation_worker_env).
+    os.environ["REMEDIATION_WRITE_OWNER"] = "test-owner"
+    os.environ["REMEDIATION_BASE_OWNER"] = "test-owner"
+    os.environ["REMEDIATION_GIT_NAME"] = "test-bot"
+    os.environ["REMEDIATION_GIT_EMAIL"] = "test-bot@users.noreply.github.com"
 
     app = App(context={"aws:cdk:bundling-stacks": []})
 

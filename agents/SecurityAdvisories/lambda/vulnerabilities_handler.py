@@ -41,6 +41,17 @@ def _parse_severity(raw: Optional[str]) -> Optional[Set[str]]:
     return {s.strip().upper() for s in raw.split(',') if s.strip()}
 
 
+def _parse_bool(raw: Optional[Any]) -> bool:
+    """Parse an action-group boolean param, which may arrive as a bool or string.
+
+    True for ``True``/``"true"``/``"1"``/``"yes"`` (case-insensitive); anything
+    else (including missing) is False.
+    """
+    if isinstance(raw, bool):
+        return raw
+    return str(raw).strip().lower() in ('true', '1', 'yes')
+
+
 def _parse_age_days(raw: Optional[str]) -> Optional[int]:
     """Parse an age-in-days value to an integer.
 
@@ -178,11 +189,13 @@ def handle_query_vulnerabilities(params: Dict[str, Any], request_id: str) -> Dic
     project_name = params.get('project_name')
     severity = _parse_severity(params.get('severity'))
     age_days = _parse_age_days(params.get('age_days'))
+    release_components = _parse_bool(params.get('release_components'))
 
     logger.info(
         f"[{request_id}] QUERY_VULNERABILITIES: query='{query}', "
         f"version={version}, project_name={project_name}, "
-        f"severity={severity}, age_days={age_days}",
+        f"severity={severity}, age_days={age_days}, "
+        f"release_components={release_components}",
     )
 
     # Resolve version to canonical project.tag format
@@ -195,7 +208,10 @@ def handle_query_vulnerabilities(params: Dict[str, Any], request_id: str) -> Dic
             )
 
     # Execute DSL query
-    response = query_vulnerabilities(version=version, project_name=project_name)
+    response = query_vulnerabilities(
+        version=version, project_name=project_name,
+        release_components=release_components,
+    )
 
     # Check for error response
     if response.get('status') == 'error':

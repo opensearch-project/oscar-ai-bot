@@ -27,6 +27,8 @@ logger = logging.getLogger(__name__)
 class MessageProcessor:
     """Processes Slack messages and generates agent responses."""
 
+    DISPLAY_NAME_CACHE_LIMIT = 500
+
     def __init__(self, storage, oscar_agent, reaction_manager, timeout_handler,
                  slack_client=None) -> None:
         """Initialize with required dependencies.
@@ -43,6 +45,7 @@ class MessageProcessor:
         self.reaction_manager = reaction_manager
         self.timeout_handler = timeout_handler
         self.slack_client = slack_client
+        self._display_names: dict = {}
 
     def extract_query(self, text: str) -> str:
         """Extract the query from the message text by removing mentions.
@@ -123,6 +126,10 @@ class MessageProcessor:
             attrs['requester_user_id'] = current_user_id
             self._enrich_user_attrs(attrs, current_user_id, 'requester')
 
+        display_name = self._resolve_display_name(attrs['requester_user_id'])
+        if display_name:
+            attrs['requester_display_name'] = display_name
+
         return attrs
 
     @staticmethod
@@ -134,6 +141,40 @@ class MessageProcessor:
         tag rather than fuzzy keyword heuristics.
         """
         return '[2PR_PENDING]' in response
+
+    def _resolve_display_name(self, user_id: str) -> str:
+        """Resolve a Slack user id to a display name, asking Slack rather than the model.
+
+        A record of who asked for something is only worth keeping if it names the right person, so
+        the name has to come from the same authenticated source as the id. Slack's event payload
+        carries the id alone, which leaves users.info as the way to get a label for it.
+
+        Returns an empty string when it cannot be resolved: a missing label costs readability, and
+        must never cost the action itself. Cached per execution environment, since a display name
+        changes rarely and one call per message would be paid for nothing.
+        """
+        if not user_id or not self.slack_client:
+            return ''
+        if user_id in self._display_names:
+            return self._display_names[user_id]
+
+        name = ''
+        try:
+            user = self.slack_client.users_info(user=user_id)['user']
+            name = (user.get('profile', {}).get('display_name')
+                    or user.get('real_name')
+                    or user.get('name')
+                    or '')
+        except Exception as e:
+            logger.warning(f'SLACK_DISPLAY_NAME_LOOKUP_FAILED: user={user_id} error={e}')
+
+        # Bounded so a long-lived container serving many users cannot grow this without limit.
+        # Dropping the whole cache rather than evicting one entry keeps it to a single branch; the
+        # cost of a refill is one API call per user, and a name is only ever a label.
+        if len(self._display_names) >= self.DISPLAY_NAME_CACHE_LIMIT:
+            self._display_names.clear()
+        self._display_names[user_id] = name
+        return name
 
     def _handle_confirmation_detection(self, response: str, channel: str, thread_ts: str) -> str:
         """Handle confirmation detection and warning reaction management.
@@ -429,6 +470,11 @@ class MessageProcessor:
 
             # Build out-of-band identity attributes from authenticated Slack event
             identity_attrs = self._build_identity_attributes(thread_key, user_id)
+            # Carry the Slack thread context so long-running async work (e.g. CVE
+            # remediation) can post its result back into this thread when it
+            # finishes — the agent turn ends before the worker is done.
+            identity_attrs['slack_channel'] = str(channel or '')
+            identity_attrs['slack_thread_ts'] = str(thread_ts or '')
             logger.info(f"Identity attributes: {identity_attrs}")
 
             # Get context from storage and format for query

@@ -34,6 +34,8 @@ class SecurityAdvisoriesAgent(OscarAgent):
     def get_lambda_config(self):
         return LambdaConfig(
             entry="agents/SecurityAdvisories/lambda",
+            # Dispatch is fire-and-forget (ecs.run_task), so this handler only
+            # does fast pre-flight and never waits for the remediation to finish.
             timeout_seconds=180,
             memory_size=1024,
             reserved_concurrency=10,
@@ -69,6 +71,11 @@ class SecurityAdvisoriesAgent(OscarAgent):
                 description="Security advisories agent secrets (OpenSearch host, etc.)",
                 env_var="SECURITY_ADVISORIES_SECRET_NAME",
             ),
+            SecretConfig(
+                name_suffix="gh-token",
+                description="GitHub token for CVE remediation (pre-flight + worker push/PR)",
+                env_var="GH_TOKEN_SECRET_NAME",
+            ),
         ]
 
     def get_managed_policies(self):
@@ -77,22 +84,20 @@ class SecurityAdvisoriesAgent(OscarAgent):
         ]
 
     def get_monitoring_config(self):
-        # TODO: Re-enable after first deployment so the log group exists.
-        # return [
-        #     MonitoringConfig(
-        #         pattern="SECURITY_ADVISORIES_AGENTIC_SEARCH_FAILED",
-        #         alarm_threshold=5,
-        #         description="OpenSearch agentic query failures",
-        #     ),
-        #     MonitoringConfig(
-        #         pattern="SECURITY_ADVISORIES_OPENSEARCH_CONNECTION_FAILED",
-        #         alarm_threshold=2,
-        #         description="OpenSearch connectivity issues",
-        #     ),
-        #     MonitoringConfig(
-        #         pattern="SECURITY_ADVISORIES_CROSS_ACCOUNT_ROLE_FAILED",
-        #         alarm_threshold=1,
-        #         description="Cross-account role assumption failure",
-        #     ),
-        # ]
-        return []
+        return [
+            MonitoringConfig(
+                pattern="SECURITY_ADVISORIES_AGENTIC_SEARCH_FAILED",
+                alarm_threshold=5,
+                description="OpenSearch agentic query failures",
+            ),
+            MonitoringConfig(
+                pattern="SECURITY_ADVISORIES_OPENSEARCH_CONNECTION_FAILED",
+                alarm_threshold=2,
+                description="OpenSearch connectivity issues",
+            ),
+            MonitoringConfig(
+                pattern="SECURITY_ADVISORIES_CROSS_ACCOUNT_ROLE_FAILED",
+                alarm_threshold=1,
+                description="Cross-account role assumption failure",
+            ),
+        ]
