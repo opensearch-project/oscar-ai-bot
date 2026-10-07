@@ -95,7 +95,7 @@ SCANS_MAIN_TAG = 'origin/main'
 _BRANCH_RE = re.compile(r'^\d+\.\d+$')
 ALLOWED_RELEASE_BRANCHES = {
     b.strip().removeprefix('origin/') for b in
-    os.environ.get('ALLOWED_RELEASE_BRANCHES', '2.19').split(',')
+    os.environ.get('ALLOWED_RELEASE_BRANCHES', '').split(',')
     if b.strip() and _BRANCH_RE.match(b.strip().removeprefix('origin/'))
 }
 
@@ -387,6 +387,8 @@ def handle_remediate_cve(
         # transitive -> resolutionStrategy.force; core_inherited -> manual review;
         # direct/unknown -> unsupported.
         'declaration_class': declaration_class,
+        # `branch` carries the origin/ prefix for the scans-cluster query
+        # (project.tag = "origin/main"); strip it for the git base branch.
         'base_branch': branch.removeprefix('origin/'),
         # Slack thread context so the worker replies in the originating thread
         # (empty when invoked outside Slack — the worker then just logs).

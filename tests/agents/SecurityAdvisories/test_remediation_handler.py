@@ -1185,6 +1185,7 @@ class TestGithubToken:
 # Branch support: release-branch remediation (e.g. origin/2.19)
 # ---------------------------------------------------------------------------
 
+@patch.dict(os.environ, {'ALLOWED_RELEASE_BRANCHES': '2.19'})
 class TestBranchNormalization:
 
     def test_empty_defaults_to_main(self):
@@ -1225,6 +1226,7 @@ class TestBranchNormalization:
         assert 'Unsupported branch' in result['message']
 
 
+@patch.dict(os.environ, {'ALLOWED_RELEASE_BRANCHES': '2.19'})
 class TestListAffectedRepositoriesBranch:
 
     def test_query_scopes_to_specified_branch(self):
@@ -1253,6 +1255,7 @@ class TestListAffectedRepositoriesBranch:
         assert 'origin/2.19' in result['message']
 
 
+@patch.dict(os.environ, {'ALLOWED_RELEASE_BRANCHES': '2.19'})
 class TestRemediateCveBranch:
 
     _ENV = {
