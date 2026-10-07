@@ -18,6 +18,8 @@ from config import config
 
 logger = logging.getLogger(__name__)
 
+PENDING_APPROVAL_TTL_SECONDS = 600
+
 
 class StorageInterface(ABC):
     """Abstract storage interface."""
@@ -48,7 +50,7 @@ class StorageInterface(ABC):
 
         If ``expires_at`` is provided the deadline is preserved as-is (used to
         restore prior state after a rejected approval attempt).  Otherwise a
-        fresh 10-minute TTL is stamped.
+        fresh PENDING_APPROVAL_TTL_SECONDS-second TTL is stamped.
         """
 
     @abstractmethod
@@ -239,7 +241,7 @@ class StorageManager(StorageInterface):
                 context = {"session_id": None, "history": [], "thread_user_ids": []}
             context['pending_approval_requester'] = user_id
             context['pending_approval_expires_at'] = (
-                expires_at if expires_at is not None else int(time.time()) + 600
+                expires_at if expires_at is not None else int(time.time()) + PENDING_APPROVAL_TTL_SECONDS
             )
             self.store_context(thread_key, context)
             logger.info(f"Set pending_approval_requester={user_id} for thread {thread_key}")

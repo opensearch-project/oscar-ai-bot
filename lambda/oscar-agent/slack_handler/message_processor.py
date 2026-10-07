@@ -83,8 +83,9 @@ class MessageProcessor:
         Enriches each with github_handle, is_maintainer, and tier for
         downstream group gate and function gate enforcement.
 
-        Pending approvals expire after 5 minutes and are single-use: once an
-        approver is paired with a requester the pending state is consumed.
+        Pending approvals expire after PENDING_APPROVAL_TTL_SECONDS seconds
+        and are single-use: once an approver is paired with a requester the
+        pending state is consumed.
         """
         attrs = {'current_user_id': current_user_id}
 
