@@ -121,6 +121,7 @@ class TestBuildIdentityAttributes:
         client = Mock()
         client.users_info.return_value = {'user': {'profile': {'display_name': 'Foo Bar'}}}
         mp = _make_processor(storage=storage, slack_client=client)
+        self._mock_identity(mp)
         result = mp._build_identity_attributes('C123_ts1', 'U_FIRST')
         assert result['requester_display_name'] == 'Foo Bar'
 
@@ -128,6 +129,7 @@ class TestBuildIdentityAttributes:
         storage = Mock()
         storage.get_context.return_value = None
         mp = _make_processor(storage=storage)
+        self._mock_identity(mp)
         result = mp._build_identity_attributes('C123_ts1', 'U_FIRST')
         assert 'requester_display_name' not in result
 
