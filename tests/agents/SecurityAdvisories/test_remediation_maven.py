@@ -135,6 +135,17 @@ class TestBuildContext:
             maven.build_context({'cve_id': 'x', 'repo_name': 'r', 'package': 'g:a'},
                                 'w', 'b')
 
+    def test_release_branch_included_in_branch_name(self):
+        maven, _ = _load_maven()
+        ctx = _ctx(maven, base_branch='2.19')
+        assert ctx['base_branch'] == '2.19'
+        assert ctx['branch_name'] == 'oscar/2.19/cve-2026-0001-log4j-core'
+
+    def test_main_branch_uses_original_branch_name_format(self):
+        maven, _ = _load_maven()
+        ctx = _ctx(maven, base_branch='main')
+        assert ctx['branch_name'] == 'oscar/cve-2026-0001-log4j-core'
+
 
 class TestApplyFix:
     def test_force_literal_edited(self, tmp_path):
