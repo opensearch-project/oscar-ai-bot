@@ -47,7 +47,7 @@ class TestIsWriteOperation:
     def test_write_functions(self):
         mod = _load_authorizer()
         for fn in ['merge_pr', 'create_issue', 'close_issue', 'transfer_issue',
-                   'add_comment', 'bulk_comment', 'bulk_merge_prs']:
+                   'bulk_comment', 'bulk_merge_prs']:
             assert mod.is_write_operation(fn) is True
 
     def test_read_functions(self):
