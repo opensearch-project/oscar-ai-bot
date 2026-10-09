@@ -145,10 +145,10 @@ def _privileged_action_group(
                     name="list_affected_repositories",
                     description=(
                         "List the OpenSearch project repositories that a specific CVE "
-                        "affects on the main branch. Call this FIRST when the user asks "
-                        "to remediate a CVE: use the returned list to resolve which "
-                        "repository the user means before calling remediate_cve. Do NOT "
-                        "guess or hardcode repository names."
+                        "affects on a given branch (defaults to main). Call this FIRST "
+                        "when the user asks to remediate a CVE: use the returned list to "
+                        "resolve which repository the user means before calling "
+                        "remediate_cve. Do NOT guess or hardcode repository names."
                     ),
                     parameters={
                         "cve_id": bedrock.CfnAgent.ParameterDetailProperty(
@@ -157,6 +157,15 @@ def _privileged_action_group(
                                 "The CVE identifier to look up (e.g., 'CVE-2026-1225')."
                             ),
                             required=True,
+                        ),
+                        "branch": bedrock.CfnAgent.ParameterDetailProperty(
+                            type="string",
+                            description=(
+                                "Branch or version to scope the lookup "
+                                "(e.g., '2.19', 'origin/2.19'). "
+                                "Defaults to main if omitted."
+                            ),
+                            required=False,
                         ),
                     },
                 ),
@@ -188,6 +197,16 @@ def _privileged_action_group(
                                 "repositories that CVE affects."
                             ),
                             required=True,
+                        ),
+                        "branch": bedrock.CfnAgent.ParameterDetailProperty(
+                            type="string",
+                            description=(
+                                "Branch or version to remediate on "
+                                "(e.g., '2.19', 'origin/2.19'). "
+                                "Defaults to main if omitted. Must match the branch "
+                                "used in list_affected_repositories."
+                            ),
+                            required=False,
                         ),
                     },
                 ),
