@@ -358,6 +358,11 @@ _CORE_CATALOG_CACHE: dict = {}
 def _core_catalog_text(branch="main"):
     """Core's version catalog for ``branch``, or ``None`` on failure.
 
+    ``branch`` is validated upstream by ``_normalize_branch`` in the Lambda
+    handler (allows only ``main`` or ``^\\d+\\.\\d+$``), so path-traversal in
+    the interpolated URL is not possible. The cache is scoped to the Fargate
+    task lifetime (one-shot per batch run).
+
     Memoized per branch so a batched run resolving many coordinates fetches it
     once rather than per coordinate — but ONLY a successful fetch is cached. A
     failure returns ``None`` without caching, so a transient network error on
