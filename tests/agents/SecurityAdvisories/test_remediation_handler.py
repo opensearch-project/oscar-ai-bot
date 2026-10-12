@@ -1894,6 +1894,7 @@ class TestRemediateProject:
     def test_truncation_note_in_response(self):
         mod = self._mod()
         original_pv = mod._project_vulnerabilities
+
         def truncated_pv(*a, **k):
             ctx, err = original_pv(*a, **k)
             if ctx:
