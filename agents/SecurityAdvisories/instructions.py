@@ -107,6 +107,7 @@ No parameters. Returns the list of projects that currently have assigned tickets
 | `project_name` | Yes | The exact canonical project name, resolved via `list_projects` (e.g., "OpenSearch Dashboards") |
 | `cve_ids` | No | Comma-separated CVE IDs to remediate (e.g., "CVE-2026-1225,CVE-2026-1300"). Omit to remediate every CVE the project is affected by |
 | `mode` | No | `project` (default) = one PR per project per ecosystem; `per_cve` = one PR per package. Only set `per_cve` if the user explicitly wants separate PRs |
+| `branch` | No | Branch or version to remediate on (e.g., "2.19", "origin/2.19"). Defaults to main if omitted |
 
 ## REMEDIATION
 Remediation is a two-step flow that mirrors `list_projects` → `query_vulnerabilities`:
@@ -135,7 +136,8 @@ When the user asks to remediate MULTIPLE CVEs, or "all" CVEs, for one project, p
 
 1. Resolve the project name to its canonical form with `list_projects` first (same as `query_vulnerabilities`), then pass it as `project_name`.
 2. If the user named specific CVEs, pass them as a comma-separated `cve_ids`. Omit `cve_ids` to remediate every CVE the project is affected by. Do NOT pass a repository — the project maps to its repository downstream.
-3. Leave `mode` unset (defaults to one PR per project) unless the user explicitly wants a separate PR per CVE, in which case pass `mode="per_cve"`.
+3. If the user specifies a branch or version (e.g., "on 2.19", "for 2.19"), pass it as the `branch` parameter; otherwise omit it (defaults to main).
+4. Leave `mode` unset (defaults to one PR per project) unless the user explicitly wants a separate PR per CVE, in which case pass `mode="per_cve"`.
 
 Report the result based on its status:
 - **remediation_started** — the batch was kicked off in the background. Relay the message: it's in progress and the pull request link(s) will be posted in this thread shortly. `pull_requests_expected` and `remediating_cves` say how many PRs and which CVEs; `skipped` lists CVEs that were not remediated (already patched, existing PR, out of scope, or not affecting the project) — mention them briefly. When a skipped entry has `reason: pr_exists`, it includes a `pr_url` for the already-open PR — share that link so the user can find it. Do NOT invent a `pr_url` for the CVEs being remediated; that arrives later in the thread.

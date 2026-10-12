@@ -515,6 +515,47 @@ class TestEcsEntrypoint:
             assert main.main() == 1
 
 
+class TestRegenerate:
+    """regenerate delegates to the right yarn command per method."""
+
+    def test_upgrade_method_runs_yarn_upgrade_with_spec(self):
+        npm, _ = _load_npm()
+        ctx = {'method': 'upgrade', 'package_name': 'axios',
+               'patched_version': '1.6.0'}
+        calls = []
+        npm._run_yarn = lambda work_dir, cmd: calls.append(cmd)
+        npm.regenerate('/tmp/repo', ctx)
+        assert len(calls) == 1
+        assert calls[0][1] == 'upgrade'
+        assert 'axios@1.6.0' in calls[0]
+
+    def test_install_method_runs_yarn_install(self):
+        npm, _ = _load_npm()
+        ctx = {'method': 'install'}
+        calls = []
+        npm._run_yarn = lambda work_dir, cmd: calls.append(cmd)
+        npm.regenerate('/tmp/repo', ctx)
+        assert len(calls) == 1
+        assert calls[0][1] == 'install'
+
+    def test_none_method_is_noop(self):
+        npm, _ = _load_npm()
+        ctx = {'method': 'none'}
+        calls = []
+        npm._run_yarn = lambda work_dir, cmd: calls.append(cmd)
+        npm.regenerate('/tmp/repo', ctx)
+        assert calls == []
+
+    def test_default_method_is_install(self):
+        npm, _ = _load_npm()
+        ctx = {}
+        calls = []
+        npm._run_yarn = lambda work_dir, cmd: calls.append(cmd)
+        npm.regenerate('/tmp/repo', ctx)
+        assert len(calls) == 1
+        assert calls[0][1] == 'install'
+
+
 class TestRegenerateTimeout:
     """A hung yarn must fail fast (Fargate has no max task duration)."""
 

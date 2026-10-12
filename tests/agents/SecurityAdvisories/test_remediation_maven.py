@@ -1611,6 +1611,26 @@ class TestBatchExecute:
         assert result['status'] == 'error'
         assert result['batch'] is True
 
+    def test_batch_require_config_missing_base_owner(self):
+        maven, rem = _load_maven()
+        event = self._event(self._ENTRIES)
+        with patch.object(rem, '_resolve_token', return_value='tok'), \
+                patch.object(rem, 'WRITE_OWNER', 'v-e-e-m-a'), \
+                patch.object(rem, 'BASE_OWNER', ''):
+            result = rem._execute(event, maven)
+        assert result['status'] == 'error'
+        assert 'BASE_OWNER' in result['message']
+
+    def test_batch_require_config_missing_write_owner(self):
+        maven, rem = _load_maven()
+        event = self._event(self._ENTRIES)
+        with patch.object(rem, '_resolve_token', return_value='tok'), \
+                patch.object(rem, 'WRITE_OWNER', ''), \
+                patch.object(rem, 'BASE_OWNER', 'opensearch-project'):
+            result = rem._execute(event, maven)
+        assert result['status'] == 'error'
+        assert 'WRITE_OWNER' in result['message']
+
     def test_batch_slack_message_no_change_and_in_progress(self):
         _maven, rem = _load_maven()
         nc = rem._format_slack_message({

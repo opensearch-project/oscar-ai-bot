@@ -252,6 +252,15 @@ def _privileged_action_group(
                             ),
                             required=False,
                         ),
+                        "branch": bedrock.CfnAgent.ParameterDetailProperty(
+                            type="string",
+                            description=(
+                                "Branch or version to remediate on "
+                                "(e.g., '2.19', 'origin/2.19'). "
+                                "Defaults to main if omitted."
+                            ),
+                            required=False,
+                        ),
                     },
                 ),
             ]

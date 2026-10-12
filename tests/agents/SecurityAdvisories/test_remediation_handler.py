@@ -1877,3 +1877,86 @@ class TestRemediateProject:
         env = self._envs(client)[0]
         assert env['SLACK_CHANNEL'] == 'C1'
         assert env['SLACK_THREAD_TS'] == '123.45'
+
+    def test_invalid_branch_returns_error(self):
+        mod = self._mod()
+        out, _ = self._run(mod, {'project_name': 'OpenSearch', 'branch': 'invalid-branch'})
+        assert out['status'] == 'error'
+        assert 'Unsupported branch' in out.get('message', '')
+
+    def test_too_many_cve_ids_returns_error(self):
+        mod = self._mod()
+        many_cves = ','.join(f'CVE-{i}' for i in range(mod._MAX_BATCH_CVES + 1))
+        out, _ = self._run(mod, {'project_name': 'OpenSearch', 'cve_ids': many_cves})
+        assert out['status'] == 'error'
+        assert 'Too many CVE IDs' in out.get('message', '')
+
+    def test_truncation_note_in_response(self):
+        mod = self._mod()
+        original_pv = mod._project_vulnerabilities
+        def truncated_pv(*a, **k):
+            ctx, err = original_pv(*a, **k)
+            if ctx:
+                ctx['results_truncated'] = True
+            return ctx, err
+        mod._project_vulnerabilities = truncated_pv
+        out, _ = self._run(mod, {'project_name': 'OpenSearch'})
+        assert out.get('results_truncated') is True
+        assert 'NOTE:' in out.get('message', '')
+
+
+class TestResolveRemediation:
+    """Unit tests for the extracted _resolve_remediation function."""
+
+    def test_derive_failure_returns_error(self):
+        mod, _ = _load_remediation_handler()
+        _install_fake_github(mod, advisory_error=RuntimeError('network'))
+        result = mod._resolve_remediation(
+            'CVE-1', 'npm', 'axios', '1.0.0', 'org', 'repo', 'req')
+        assert result['outcome'] == 'error'
+        assert result['code'] == 'github_error'
+
+    def test_pr_check_failure_returns_error(self):
+        mod, _ = _load_remediation_handler()
+        _install_fake_github(mod, advisories=_advisory(),
+                             search_error=RuntimeError('network'))
+        result = mod._resolve_remediation(
+            'CVE-1', 'npm', 'axios', '1.0.0', 'org', 'repo', 'req')
+        assert result['outcome'] == 'error'
+        assert result['code'] == 'github_error'
+
+    def test_skip_pr_check_bypasses_search(self):
+        mod, _ = _load_remediation_handler()
+        fake = _install_fake_github(mod, advisories=_advisory())
+        result = mod._resolve_remediation(
+            'CVE-1', 'npm', 'axios', '1.0.0', 'org', 'repo', 'req',
+            skip_pr_check=True)
+        assert result['outcome'] == 'ready'
+        calls = [c for c in fake.get.call_args_list
+                 if '/search/' in str(c)]
+        assert len(calls) == 0
+
+    def test_unsupported_ecosystem_returns_immediately(self):
+        mod, _ = _load_remediation_handler()
+        result = mod._resolve_remediation(
+            'CVE-1', 'pypi', 'pkg', '1.0', 'org', 'repo', 'req')
+        assert result['outcome'] == 'unsupported_ecosystem'
+
+    def test_no_patched_version_returns_no_patch(self):
+        mod, _ = _load_remediation_handler()
+        _install_fake_github(mod, advisories=[{
+            'vulnerabilities': [{
+                'package': {'ecosystem': 'npm', 'name': 'axios'},
+                'first_patched_version': None,
+            }],
+        }])
+        result = mod._resolve_remediation(
+            'CVE-1', 'npm', 'axios', '1.0.0', 'org', 'repo', 'req')
+        assert result['outcome'] == 'no_patched_version'
+
+    def test_already_patched_skips(self):
+        mod, _ = _load_remediation_handler()
+        _install_fake_github(mod, advisories=_advisory(patched='1.6.0'))
+        result = mod._resolve_remediation(
+            'CVE-1', 'npm', 'axios', '2.0.0', 'org', 'repo', 'req')
+        assert result['outcome'] == 'already_patched'

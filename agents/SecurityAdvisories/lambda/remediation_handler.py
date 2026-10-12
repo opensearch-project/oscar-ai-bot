@@ -557,6 +557,8 @@ def handle_remediate_project(
                                       remediates every affected CVE in the project.
             mode (optional)         — 'project' (default; one PR per project per
                                       ecosystem) or 'per_cve' (one PR per package).
+            branch (optional)       — branch or version to remediate on (e.g.,
+                                      '2.19', 'origin/2.19'). Defaults to main.
         request_id: Short request ID for log correlation.
         session_attributes: Slack thread context forwarded to the worker.
     """
@@ -564,6 +566,14 @@ def handle_remediate_project(
     project_name = (params.get('project_name') or '').strip()
     mode = (params.get('mode') or 'project').strip().lower()
     cve_ids_raw = (params.get('cve_ids') or '').strip()
+    branch = _normalize_branch(params.get('branch'))
+
+    if branch is None:
+        return error_response(
+            'invalid_request',
+            f"Unsupported branch: {params.get('branch')!r}. "
+            f"Allowed branches: {', '.join(sorted(_ALLOWED_BRANCHES))}.",
+        )
 
     if not project_name:
         return error_response(
@@ -588,12 +598,13 @@ def handle_remediate_project(
 
     logger.info(
         f"[{request_id}] REMEDIATE_PROJECT: project={project_name!r} mode={mode!r} "
-        f"cve_ids={sorted(cve_filter) if cve_filter else 'ALL'}"
+        f"branch={branch!r} cve_ids={sorted(cve_filter) if cve_filter else 'ALL'}"
     )
 
     # --- gather the project's affected CVEs from the scans cluster -----------
     try:
-        project_ctx, error = _project_vulnerabilities(project_name, request_id)
+        project_ctx, error = _project_vulnerabilities(
+            project_name, request_id, branch=branch)
     except Exception as e:  # OpenSearch query failed
         logger.error(f"[{request_id}] REMEDIATE_PROJECT_GATHER_FAILED: {e}")
         return connection_error(e)
@@ -601,9 +612,11 @@ def handle_remediate_project(
         return error
 
     repository = f"{project_ctx['repo_owner']}/{project_ctx['repo_name']}"
+    base_branch = branch.removeprefix('origin/')
 
     # --- resolve each CVE through the shared gates, then dedup per package ----
-    ready, skipped = _resolve_project_cves(project_ctx, cve_filter, request_id)
+    ready, skipped = _resolve_project_cves(
+        project_ctx, cve_filter, request_id, base_branch=base_branch)
     batch = _build_cve_batch(ready, request_id)
 
     if not batch:
@@ -627,7 +640,6 @@ def handle_remediate_project(
 
     dispatched: List[Dict[str, Any]] = []
     unavailable: List[str] = []
-    base_branch = SCANS_MAIN_TAG.split('/')[-1]
     for ecosystem, group in sorted(by_ecosystem.items()):
         task_batches = [group] if mode == 'project' else [[e] for e in group]
         for tb in task_batches:
@@ -1043,21 +1055,24 @@ def _affected_candidates(cve_id: str, request_id: str, *, branch: str = SCANS_MA
     return list(candidates.values()), None
 
 
-def _project_vulnerabilities(project_name: str, request_id: str):
-    """All non-excluded CVE/package pairs a project has on the main branch.
+def _project_vulnerabilities(project_name: str, request_id: str,
+                             *, branch: str = SCANS_MAIN_TAG):
+    """All non-excluded CVE/package pairs a project has on the given branch.
 
-    The INVERSE of ``_affected_candidates``: filters the latest main-branch scan
-    by ``project.name`` (not a ``cve_id``) and returns every non-excluded
-    vulnerability it carries — the gather step for batch remediation. Keyed on
-    ``project.name`` (the field the scans store is indexed on, per
-    ``list_projects``), so the caller passes the name ``list_projects`` returns.
+    The INVERSE of ``_affected_candidates``: filters the latest scan on
+    ``branch`` by ``project.name`` (not a ``cve_id``) and returns every
+    non-excluded vulnerability it carries — the gather step for batch
+    remediation. Keyed on ``project.name`` (the field the scans store is
+    indexed on, per ``list_projects``), so the caller passes the name
+    ``list_projects`` returns.
 
     Returns ``(project_ctx, error)``:
       - ``project_ctx`` = ``{repo_owner, repo_name, project_name, entries}`` where
         ``entries`` is one ``{cve_id, ecosystem, package, installed_version,
         declaration_class, origin}`` per (CVE, package) the scan reports.
-      - ``error`` = a status dict when the project has no main-branch scan / no
-        open vulnerabilities / an unparseable repo URL; ``project_ctx`` is None.
+      - ``error`` = a status dict when the project has no scan on the given
+        branch / no open vulnerabilities / an unparseable repo URL;
+        ``project_ctx`` is None.
     """
     body = json.dumps({
         'size': 1,
@@ -1069,7 +1084,7 @@ def _project_vulnerabilities(project_name: str, request_id: str):
             'bool': {
                 'filter': [
                     {'term': {'project.name': project_name}},
-                    {'term': {'project.tag': SCANS_MAIN_TAG}},
+                    {'term': {'project.tag': branch}},
                     {'terms': {'release_type.keyword': SCANS_RELEASE_TYPES}},
                     {'range': {'timestamp.scan': {'gte': SCANS_RECENCY_WINDOW}}},
                     {'nested': {
@@ -1107,11 +1122,9 @@ def _project_vulnerabilities(project_name: str, request_id: str):
             'project_name': project_name,
             'message': (
                 f"No open vulnerabilities were found for project '{project_name}' on "
-                f"the main branch (origin/main). Automated remediation only covers "
-                f"origin/main of supported release-bundle components — so either this "
-                f"project is tracked only on a release branch (e.g. origin/3.x), which "
-                f"isn't supported for remediation yet, or it isn't a supported "
-                f"component. Use list_projects to see its available tags."
+                f"the {branch} branch. Either the project has no scan on this branch, "
+                f"it isn't a supported release-bundle component, or all vulnerabilities "
+                f"are already excluded. Use list_projects to see its available tags."
             ),
         }
 
@@ -1139,7 +1152,7 @@ def _project_vulnerabilities(project_name: str, request_id: str):
             'project_name': project_name,
             'message': (
                 f"Project '{project_name}' has no open (non-excluded) "
-                f"vulnerabilities on the main branch."
+                f"vulnerabilities on the {branch} branch."
             ),
         }
 
@@ -1224,6 +1237,7 @@ def _resolve_project_cves(
     project_ctx: Dict[str, Any],
     cve_filter: Optional[set],
     request_id: str,
+    base_branch: Optional[str] = None,
 ):
     """Run ``_resolve_remediation`` over a project's gathered entries.
 
@@ -1255,6 +1269,7 @@ def _resolve_project_cves(
             outcome = _resolve_remediation(
                 cve_id, e['ecosystem'], e['package'], e['installed_version'],
                 owner, repo, request_id,
+                base_branch=base_branch,
                 skip_pr_check=True,
             )
         except Exception as ex:  # noqa: BLE001 — one bad CVE must not abort the batch
@@ -1290,6 +1305,7 @@ def _resolve_project_cves(
     if ready:
         existing = _bulk_find_existing_prs(
             owner, repo, [r['cve_id'] for r in ready], request_id,
+            base_branch=base_branch,
         )
         if existing:
             still_ready = []
