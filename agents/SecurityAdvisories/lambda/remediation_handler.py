@@ -133,6 +133,11 @@ SCANS_RELEASE_TYPES = ['bundle_opensearch', 'bundle_opensearch_dashboards']
 # 100 comfortably covers current bundle components.
 _PROJECT_VULN_INNER_SIZE = 100
 
+# Cap on the number of CVE IDs a single batch request can process. Each CVE
+# triggers a GitHub Advisory API call in _resolve_remediation; uncapped batches
+# risk hitting the authenticated rate limit (30 req/min).
+_MAX_BATCH_CVES = _int_env('MAX_BATCH_CVES', 50)
+
 
 def _resolve_remediation(
     cve_id: str,
@@ -143,6 +148,7 @@ def _resolve_remediation(
     repo_name: str,
     request_id: str,
     base_branch: Optional[str] = None,
+    skip_pr_check: bool = False,
 ) -> Dict[str, Any]:
     """Run the per-CVE remediation gates for one resolved (cve, repo, package).
 
@@ -211,30 +217,33 @@ def _resolve_remediation(
         }
 
     # pre-flight: is there already an OPEN PR fixing this CVE? (dedup)
-    try:
-        existing = _find_existing_pr(
-            repo_owner, repo_name, cve_id, gh_package or package, patched_version, request_id,
-            base_branch=base_branch,
-        )
-    except Exception as e:  # network / API errors — surface, don't crash
-        logger.error(f"[{request_id}] REMEDIATE_CVE_PR_CHECK_FAILED: {e}")
-        return {
-            'outcome': 'error', 'code': 'github_error',
-            'message': 'Failed to check for existing pull requests on GitHub.',
-        }
+    # Skipped when the caller will do a bulk search afterward (batch path) to
+    # reduce the number of GitHub API calls.
+    if not skip_pr_check:
+        try:
+            existing = _find_existing_pr(
+                repo_owner, repo_name, cve_id, gh_package or package, patched_version, request_id,
+                base_branch=base_branch,
+            )
+        except Exception as e:  # network / API errors — surface, don't crash
+            logger.error(f"[{request_id}] REMEDIATE_CVE_PR_CHECK_FAILED: {e}")
+            return {
+                'outcome': 'error', 'code': 'github_error',
+                'message': 'Failed to check for existing pull requests on GitHub.',
+            }
 
-    if existing:
-        logger.info(
-            f"[{request_id}] REMEDIATE_CVE_SKIPPED: open PR already exists for "
-            f"{cve_id} on {repo_owner}/{repo_name} -> {existing['url']} "
-            f"(matched by {existing['matched_by']})"
-        )
-        return {
-            'outcome': 'pr_exists',
-            'gh_package': gh_package,
-            'patched_version': patched_version,
-            'pr': existing,
-        }
+        if existing:
+            logger.info(
+                f"[{request_id}] REMEDIATE_CVE_SKIPPED: open PR already exists for "
+                f"{cve_id} on {repo_owner}/{repo_name} -> {existing['url']} "
+                f"(matched by {existing['matched_by']})"
+            )
+            return {
+                'outcome': 'pr_exists',
+                'gh_package': gh_package,
+                'patched_version': patched_version,
+                'pr': existing,
+            }
 
     return {
         'outcome': 'ready',
@@ -570,6 +579,12 @@ def handle_remediate_project(
     cve_filter = None
     if cve_ids_raw:
         cve_filter = {c.strip().upper() for c in cve_ids_raw.split(',') if c.strip()}
+        if len(cve_filter) > _MAX_BATCH_CVES:
+            return error_response(
+                'invalid_request',
+                f'Too many CVE IDs ({len(cve_filter)}); maximum is '
+                f'{_MAX_BATCH_CVES} per request.',
+            )
 
     logger.info(
         f"[{request_id}] REMEDIATE_PROJECT: project={project_name!r} mode={mode!r} "
@@ -1220,6 +1235,10 @@ def _resolve_project_cves(
         (``reason`` is the non-ready outcome: unsupported_ecosystem /
         no_patched_version / already_patched / pr_exists / error). Requested CVEs
         not present in the project's affected set are reported as ``not_affected``.
+
+    Per-CVE PR dedup is replaced by a single batched GitHub search after all
+    entries are resolved (``_bulk_find_existing_prs``), which also catches open
+    ``oscar/batch-*`` PRs from previous runs.
     """
     owner = project_ctx['repo_owner']
     repo = project_ctx['repo_name']
@@ -1236,6 +1255,7 @@ def _resolve_project_cves(
             outcome = _resolve_remediation(
                 cve_id, e['ecosystem'], e['package'], e['installed_version'],
                 owner, repo, request_id,
+                skip_pr_check=True,
             )
         except Exception as ex:  # noqa: BLE001 — one bad CVE must not abort the batch
             logger.error(
@@ -1261,10 +1281,34 @@ def _resolve_project_cves(
                 'package': e['package'],
                 'reason': outcome['outcome'],
             }
-            # surface the existing PR link so the report can point at it
             if outcome['outcome'] == 'pr_exists':
                 entry['pr_url'] = (outcome.get('pr') or {}).get('url', '')
             skipped.append(entry)
+
+    # Bulk PR dedup: one batched search covers all ready CVEs (and catches
+    # existing oscar/batch-* PRs) instead of 1-2 API calls per CVE.
+    if ready:
+        existing = _bulk_find_existing_prs(
+            owner, repo, [r['cve_id'] for r in ready], request_id,
+        )
+        if existing:
+            still_ready = []
+            for r in ready:
+                pr = existing.get(r['cve_id'])
+                if pr:
+                    logger.info(
+                        f"[{request_id}] BULK_PR_DEDUP: {r['cve_id']} already has "
+                        f"open PR {pr['url']}"
+                    )
+                    skipped.append({
+                        'cve_id': r['cve_id'],
+                        'package': r['package'],
+                        'reason': 'pr_exists',
+                        'pr_url': pr.get('url', ''),
+                    })
+                else:
+                    still_ready.append(r)
+            ready = still_ready
 
     # CVEs the user asked for that the project isn't actually affected by
     if cve_filter is not None:
@@ -1873,3 +1917,94 @@ def _search_open_prs(
         'title': top.get('title', ''),
         'number': str(top.get('number', '')),
     }
+
+
+# Character budget for the CVE-ID terms in a bulk search query. The full query
+# includes repo/PR/branch qualifiers (~60-80 chars), so this leaves room for
+# roughly 10-15 CVE IDs per query before chunking.
+_BULK_SEARCH_TERM_BUDGET = 200
+
+
+def _bulk_find_existing_prs(
+    owner: str,
+    repo: str,
+    cve_ids: List[str],
+    request_id: str,
+    base_branch: Optional[str] = None,
+) -> Dict[str, Dict[str, str]]:
+    """Search for open PRs mentioning any of the given CVE IDs in batched queries.
+
+    Returns a mapping of ``cve_id -> {url, title, matched_by}`` for CVEs that
+    already have an open PR. Uses fewer GitHub API calls than one search per CVE
+    by OR-ing multiple CVE IDs into each query, chunked to stay within the
+    search query length limit. Also catches existing ``oscar/batch-*`` PRs from
+    previous runs since they list CVE IDs in the body.
+    """
+    if not cve_ids:
+        return {}
+
+    headers = _github_headers()
+    qualifiers = f'repo:{owner}/{repo} is:pr is:open'
+    if base_branch:
+        qualifiers += f' base:{base_branch}'
+
+    chunks = _chunk_search_terms(cve_ids, _BULK_SEARCH_TERM_BUDGET)
+
+    found: Dict[str, Dict[str, str]] = {}
+    for chunk in chunks:
+        query = qualifiers + ' ' + ' OR '.join(chunk)
+        logger.info(
+            f"[{request_id}] BULK_PR_SEARCH: q={query!r} ({len(chunk)} CVE(s))"
+        )
+        try:
+            response = requests.get(
+                f'{GITHUB_API}/search/issues',
+                params={'q': query, 'per_page': 30},
+                headers=headers,
+                timeout=GITHUB_TIMEOUT,
+            )
+            response.raise_for_status()
+        except Exception as e:  # noqa: BLE001
+            logger.warning(f"[{request_id}] BULK_PR_SEARCH_FAILED: {e}")
+            continue
+
+        items = response.json().get('items', [])
+        logger.info(
+            f"[{request_id}] BULK_PR_SEARCH_RESULT: {len(items)} PR(s)"
+        )
+        for item in items:
+            text = (
+                f"{item.get('title', '')} {item.get('body', '')}"
+            ).upper()
+            for cve_id in chunk:
+                if cve_id.upper() in text and cve_id not in found:
+                    found[cve_id] = {
+                        'url': item.get('html_url', ''),
+                        'title': item.get('title', ''),
+                        'matched_by': f'bulk CVE search ({cve_id})',
+                    }
+
+    return found
+
+
+def _chunk_search_terms(terms: List[str], budget: int) -> List[List[str]]:
+    """Split search terms into chunks that fit within the character budget.
+
+    Each chunk's terms will be joined with ' OR ' in the query; the budget
+    applies to the resulting string length.
+    """
+    chunks: List[List[str]] = []
+    current: List[str] = []
+    current_len = 0
+    for term in terms:
+        addition = len(term) + (4 if current else 0)  # ' OR ' separator
+        if current and current_len + addition > budget:
+            chunks.append(current)
+            current = [term]
+            current_len = len(term)
+        else:
+            current.append(term)
+            current_len += addition
+    if current:
+        chunks.append(current)
+    return chunks

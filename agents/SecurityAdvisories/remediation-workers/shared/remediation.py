@@ -418,12 +418,12 @@ def _batch_pr_meta(applied_ctxs, repo_name, base_branch):
     KNOWN LIMITATION: the guard only collides on an IDENTICAL CVE set. Two batches
     for the same project with *overlapping but different* CVE sets (e.g. one "all",
     one filtered) hash to different branches and can both open PRs touching the
-    same package. The per-CVE `_find_existing_pr` pre-flight (in the Lambda) covers
-    this once the first PR is open — it matches the CVE id in the batch PR body —
-    but there's still a race window between dispatch and PR creation (minutes) where
-    two concurrent same-project batches won't see each other. Acceptable for now
-    (requires concurrent same-project invocations); harden later by checking for
-    open `oscar/batch-*` PRs covering any target CVE at dispatch time.
+    same package. The bulk PR dedup in the Lambda (_bulk_find_existing_prs) covers
+    this before dispatch — it searches for open PRs (including oscar/batch-* PRs)
+    mentioning any target CVE id, and skips those CVEs. A narrow race window still
+    exists between dispatch and PR creation (minutes) where two concurrent
+    same-project batches won't see each other, but it requires concurrent
+    same-project invocations.
     """
     all_cves = sorted({c for ctx in applied_ctxs for c in ctx.get("cve_ids", [])})
     digest = hashlib.sha1(",".join(all_cves).encode()).hexdigest()[:12]

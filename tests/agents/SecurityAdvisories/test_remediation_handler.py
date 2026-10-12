@@ -1631,6 +1631,7 @@ class TestResolveProjectCves:
                       'patched_version': '2.0.0'},
         }
         mod._resolve_remediation = MagicMock(side_effect=lambda cve, *a, **k: outcomes[cve])
+        mod._bulk_find_existing_prs = MagicMock(return_value={})
         ready, skipped = mod._resolve_project_cves(
             self._ctx([self._entry('CVE-1'), self._entry('CVE-2', package='g/b')]),
             None, 'req',
@@ -1643,6 +1644,7 @@ class TestResolveProjectCves:
         mod, _ = _load_remediation_handler()
         mod._resolve_remediation = MagicMock(
             return_value={'outcome': 'ready', 'gh_package': 'g:a', 'patched_version': '1.0.1'})
+        mod._bulk_find_existing_prs = MagicMock(return_value={})
         ready, skipped = mod._resolve_project_cves(
             self._ctx([self._entry('CVE-1'), self._entry('CVE-2'), self._entry('CVE-3')]),
             {'CVE-2'}, 'req',
@@ -1655,6 +1657,7 @@ class TestResolveProjectCves:
         mod, _ = _load_remediation_handler()
         mod._resolve_remediation = MagicMock(
             return_value={'outcome': 'ready', 'gh_package': 'g:a', 'patched_version': '1.0.1'})
+        mod._bulk_find_existing_prs = MagicMock(return_value={})
         ready, skipped = mod._resolve_project_cves(
             self._ctx([self._entry('CVE-1')]),
             {'CVE-1', 'CVE-9'}, 'req',
@@ -1666,6 +1669,7 @@ class TestResolveProjectCves:
         mod, _ = _load_remediation_handler()
         mod._resolve_remediation = MagicMock(
             return_value={'outcome': 'ready', 'gh_package': 'g:a', 'patched_version': '1.0.1'})
+        mod._bulk_find_existing_prs = MagicMock(return_value={})
         ready, _skipped = mod._resolve_project_cves(
             self._ctx([self._entry('CVE-2026-1')]),
             {'cve-2026-1'.upper()}, 'req',
@@ -1693,6 +1697,7 @@ class TestResolveProjectCves:
             return {'outcome': 'ready', 'gh_package': 'g:a', 'patched_version': '1.0.1'}
 
         mod._resolve_remediation = MagicMock(side_effect=flaky)
+        mod._bulk_find_existing_prs = MagicMock(return_value={})
         ready, skipped = mod._resolve_project_cves(
             self._ctx([self._entry('CVE-BOOM'), self._entry('CVE-OK', package='g/b')]),
             None, 'req',
@@ -1731,6 +1736,7 @@ class TestRemediateProject:
         mod.opensearch_request = MagicMock(
             return_value=_scans_response([_project_hit(vulns=vulns or self._VULNS)]))
         mod._resolve_remediation = MagicMock(side_effect=resolver or self._ready)
+        mod._bulk_find_existing_prs = MagicMock(return_value={})
         return mod
 
     def _run(self, mod, params, accepted=True, session=None):
