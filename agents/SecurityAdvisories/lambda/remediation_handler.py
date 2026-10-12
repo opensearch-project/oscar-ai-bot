@@ -1994,7 +1994,7 @@ def _bulk_find_existing_prs(
             ).upper()
             for cve_id in chunk:
                 if cve_id not in found and re.search(
-                    r'\b' + re.escape(cve_id.upper()) + r'\b', text):
+                        r'\b' + re.escape(cve_id.upper()) + r'\b', text):
                     found[cve_id] = {
                         'url': item.get('html_url', ''),
                         'title': item.get('title', ''),
