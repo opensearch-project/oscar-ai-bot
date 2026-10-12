@@ -74,11 +74,11 @@ _CATALOG_REL = os.path.join("gradle", "libs.versions.toml")
 _GRADLE_TASK = "updateShas"
 _GRADLE_TIMEOUT = 900
 
-# OpenSearch core's version catalog on main — source of truth for versions plugins
+# OpenSearch core's version catalog — source of truth for versions plugins
 # inherit via ``${versions.X}``. Read-only lookup; see _core_managed_version.
-_CORE_CATALOG_URL = (
+_CORE_CATALOG_URL_FMT = (
     "https://raw.githubusercontent.com/opensearch-project/OpenSearch/"
-    "main/gradle/libs.versions.toml"
+    "{branch}/gradle/libs.versions.toml"
 )
 _CORE_CATALOG_TIMEOUT = 15
 
@@ -355,32 +355,33 @@ def _http_get(url, timeout=_CORE_CATALOG_TIMEOUT):
 _CORE_CATALOG_CACHE: dict = {}
 
 
-def _core_catalog_text():
-    """Core's version catalog, or ``None`` on failure.
+def _core_catalog_text(branch="main"):
+    """Core's version catalog for ``branch``, or ``None`` on failure.
 
-    Memoized so a batched run resolving many coordinates fetches it once rather
-    than per coordinate — but ONLY a successful fetch is cached. A failure returns
-    ``None`` without caching, so a transient network error on the first lookup
-    doesn't poison every subsequent coordinate in the same batch run.
+    Memoized per branch so a batched run resolving many coordinates fetches it
+    once rather than per coordinate — but ONLY a successful fetch is cached. A
+    failure returns ``None`` without caching, so a transient network error on
+    the first lookup doesn't poison every subsequent coordinate in the same
+    batch run.
     """
-    if "text" in _CORE_CATALOG_CACHE:
-        return _CORE_CATALOG_CACHE["text"]
+    if branch in _CORE_CATALOG_CACHE:
+        return _CORE_CATALOG_CACHE[branch]
     try:
-        text = _http_get(_CORE_CATALOG_URL)
+        text = _http_get(_CORE_CATALOG_URL_FMT.format(branch=branch))
     except Exception as e:  # noqa: BLE001 - any fetch/network error -> unknown (None)
-        logger.warning("core catalog fetch failed: %s", e)
+        logger.warning("core catalog fetch failed (%s): %s", branch, e)
         return None
-    _CORE_CATALOG_CACHE["text"] = text
+    _CORE_CATALOG_CACHE[branch] = text
     return text
 
 
-def _core_managed_version(coord):
-    """The version OpenSearch core manages for ``coord`` (via its catalog's
-    ``[libraries]`` group+name -> ``version.ref`` -> ``[versions]``), or ``None`` when
-    core doesn't manage it or the lookup fails. On None the caller falls back to a
-    literal pin, never a wrong decline.
+def _core_managed_version(coord, branch="main"):
+    """The version OpenSearch core manages for ``coord`` on ``branch`` (via its
+    catalog's ``[libraries]`` group+name -> ``version.ref`` -> ``[versions]``), or
+    ``None`` when core doesn't manage it or the lookup fails. On None the caller
+    falls back to a literal pin, never a wrong decline.
     """
-    text = _core_catalog_text()
+    text = _core_catalog_text(branch)
     if not text:
         return None
     ref = _version_ref_for_coordinate(text, coord)
@@ -395,7 +396,8 @@ def _core_inherited_unsupported(ctx, coord, fallback_msg):
     managed version when core is confirmed below patched ("fix must come from core");
     else ``fallback_msg`` (lookup unavailable, core doesn't manage it, or core patched).
     """
-    core_version = _core_managed_version(coord)
+    branch = ctx.get("base_branch", "main")
+    core_version = _core_managed_version(coord, branch)
     if core_version is not None and not at_or_above(core_version, ctx["patched_version"]):
         return RemediationUnsupported(
             f"`{coord}` is inherited from OpenSearch core, which uses the vulnerable "
@@ -641,7 +643,8 @@ def _resolve_force_token(ctx):
     """
     coord = ctx["coordinate"]
     patched = ctx["patched_version"]
-    core_version = _core_managed_version(coord)
+    branch = ctx.get("base_branch", "main")
+    core_version = _core_managed_version(coord, branch)
     if core_version is not None and not at_or_above(core_version, patched):
         raise RemediationUnsupported(
             f"`{coord}` is managed by OpenSearch core, which uses the vulnerable "

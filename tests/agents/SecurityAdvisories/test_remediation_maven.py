@@ -469,7 +469,7 @@ class TestApplyFix:
         # core's actual version and points the fix at core (the safeguard message).
         maven, rem = _load_maven()
         _gradle(tmp_path, "dependencies {\n  implementation 'org.jsoup:jsoup:1.20.1'\n}\n")
-        maven._core_managed_version = lambda coord: '5.6.0'   # core below patched
+        maven._core_managed_version = lambda coord, branch="main": '5.6.0'   # core below patched
         ctx = _ctx(maven, package='org.apache.httpcomponents.client5/httpclient5',
                    patched='5.6.4', declaration_class='core_inherited')
         with pytest.raises(rem.RemediationUnsupported) as exc:
@@ -567,7 +567,7 @@ class TestApplyFix:
         # ${versions.jackson_databind} in libs/opensaml (double-quoted GString).
         maven, _ = _load_maven()
         origin_files = self._security_opensaml_tree(tmp_path)
-        maven._core_managed_version = lambda coord: '2.22.2'   # core is patched
+        maven._core_managed_version = lambda coord, branch="main": '2.22.2'   # core is patched
         ctx = _ctx(maven, package='com.fasterxml.jackson.core/jackson-databind',
                    patched='2.22.0', declaration_class='transitive', origin_files=origin_files)
         maven.apply_fix(str(tmp_path), ctx)
@@ -582,7 +582,7 @@ class TestApplyFix:
         # configurations.all (maintainer style), not a fresh appended block.
         maven, _ = _load_maven()
         origin_files = self._security_opensaml_tree(tmp_path)
-        maven._core_managed_version = lambda coord: '2.22.2'   # core patched -> var
+        maven._core_managed_version = lambda coord, branch="main": '2.22.2'   # core patched -> var
         fold = {
             "old_string": '    force "org.apache.commons:commons-lang3:3.18.0"',
             "new_string": '    force "org.apache.commons:commons-lang3:3.18.0"\n'
@@ -605,7 +605,7 @@ class TestApplyFix:
         # -> deterministic append with correct double quotes.
         maven, _ = _load_maven()
         origin_files = self._security_opensaml_tree(tmp_path)
-        maven._core_managed_version = lambda coord: '2.22.2'
+        maven._core_managed_version = lambda coord, branch="main": '2.22.2'
         bad = {
             "old_string": '    force "org.apache.commons:commons-lang3:3.18.0"',
             "new_string": '    force "org.apache.commons:commons-lang3:3.18.0"\n'
@@ -627,7 +627,7 @@ class TestApplyFix:
         # concrete message naming core's vulnerable version.
         maven, rem = _load_maven()
         origin_files = self._security_opensaml_tree(tmp_path)
-        maven._core_managed_version = lambda coord: '2.21.4'   # core still vulnerable
+        maven._core_managed_version = lambda coord, branch="main": '2.21.4'   # core still vulnerable
         ctx = _ctx(maven, package='com.fasterxml.jackson.core/jackson-databind',
                    patched='2.22.0', declaration_class='transitive', origin_files=origin_files)
         with pytest.raises(rem.RemediationUnsupported) as exc:
