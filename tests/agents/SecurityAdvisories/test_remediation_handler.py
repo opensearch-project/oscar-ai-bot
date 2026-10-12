@@ -1961,3 +1961,169 @@ class TestResolveRemediation:
         result = mod._resolve_remediation(
             'CVE-1', 'npm', 'axios', '2.0.0', 'org', 'repo', 'req')
         assert result['outcome'] == 'already_patched'
+
+
+class TestChunkSearchTerms:
+    """Unit tests for _chunk_search_terms (CVE ID chunking for bulk search)."""
+
+    def test_single_chunk_when_within_budget(self):
+        mod, _ = _load_remediation_handler()
+        result = mod._chunk_search_terms(['CVE-1', 'CVE-2', 'CVE-3'], 200)
+        assert result == [['CVE-1', 'CVE-2', 'CVE-3']]
+
+    def test_splits_into_multiple_chunks(self):
+        mod, _ = _load_remediation_handler()
+        # budget of 20: 'CVE-1' (5) + ' OR CVE-2' (9) = 14, then 'CVE-3' would
+        # push to 14 + 9 = 23 > 20, so it starts a new chunk
+        result = mod._chunk_search_terms(['CVE-1', 'CVE-2', 'CVE-3'], 20)
+        assert len(result) == 2
+        assert result[0] == ['CVE-1', 'CVE-2']
+        assert result[1] == ['CVE-3']
+
+    def test_empty_input(self):
+        mod, _ = _load_remediation_handler()
+        assert mod._chunk_search_terms([], 200) == []
+
+    def test_single_oversized_term_gets_its_own_chunk(self):
+        mod, _ = _load_remediation_handler()
+        result = mod._chunk_search_terms(['CVE-2026-12345', 'CVE-2'], 10)
+        assert len(result) == 2
+
+
+class TestBulkFindExistingPrs:
+    """Tests for _bulk_find_existing_prs (batched GitHub PR dedup search)."""
+
+    def test_empty_cve_list_returns_empty(self):
+        mod, _ = _load_remediation_handler()
+        assert mod._bulk_find_existing_prs('org', 'repo', [], 'req') == {}
+
+    def test_matches_cves_from_pr_title_and_body(self):
+        mod, _ = _load_remediation_handler()
+        _install_fake_github(mod, cve_pr_items=[
+            {'html_url': 'https://github.com/o/r/pull/1',
+             'title': 'Bump dep for CVE-2026-111',
+             'body': 'Also addresses CVE-2026-222.'},
+        ])
+        result = mod._bulk_find_existing_prs(
+            'org', 'repo', ['CVE-2026-111', 'CVE-2026-222', 'CVE-2026-333'], 'req')
+        assert 'CVE-2026-111' in result
+        assert 'CVE-2026-222' in result
+        assert 'CVE-2026-333' not in result
+
+    def test_word_boundary_prevents_prefix_match(self):
+        mod, _ = _load_remediation_handler()
+        _install_fake_github(mod, cve_pr_items=[
+            {'html_url': 'https://github.com/o/r/pull/1',
+             'title': 'Fix CVE-2026-12345',
+             'body': ''},
+        ])
+        result = mod._bulk_find_existing_prs(
+            'org', 'repo', ['CVE-2026-1', 'CVE-2026-12345'], 'req')
+        assert 'CVE-2026-12345' in result
+        assert 'CVE-2026-1' not in result
+
+    def test_base_branch_added_to_query(self):
+        mod, _ = _load_remediation_handler()
+        fake = _install_fake_github(mod, cve_pr_items=[])
+        mod._bulk_find_existing_prs(
+            'org', 'repo', ['CVE-1'], 'req', base_branch='2.19')
+        query = fake.get.call_args_list[-1].kwargs.get(
+            'params', fake.get.call_args_list[-1][1].get('params', {}))
+        assert 'base:2.19' in query.get('q', '')
+
+    def test_search_failure_continues_silently(self):
+        mod, _ = _load_remediation_handler()
+        _install_fake_github(mod, search_error=RuntimeError('timeout'))
+        result = mod._bulk_find_existing_prs(
+            'org', 'repo', ['CVE-1', 'CVE-2'], 'req')
+        assert result == {}
+
+
+class TestBulkDedupIntegration:
+    """Test that _resolve_project_cves bulk dedup actually moves CVEs to skipped."""
+
+    @staticmethod
+    def _ctx(entries):
+        return {'repo_owner': 'opensearch-project', 'repo_name': 'OpenSearch',
+                'project_name': 'OpenSearch', 'entries': entries}
+
+    @staticmethod
+    def _entry(cve_id, package='g/a', ecosystem='maven', installed='1.0.0'):
+        return {'cve_id': cve_id, 'ecosystem': ecosystem, 'package': package,
+                'installed_version': installed, 'declaration_class': 'direct',
+                'origin': None}
+
+    def test_bulk_dedup_moves_matched_cves_to_skipped(self):
+        mod, _ = _load_remediation_handler()
+        mod._resolve_remediation = MagicMock(
+            return_value={'outcome': 'ready', 'gh_package': 'g:a',
+                          'patched_version': '1.0.1'})
+        mod._bulk_find_existing_prs = MagicMock(return_value={
+            'CVE-2': {'url': 'https://github.com/o/r/pull/5',
+                      'title': 'Fix CVE-2',
+                      'matched_by': 'bulk CVE search (CVE-2)'},
+        })
+        ready, skipped = mod._resolve_project_cves(
+            self._ctx([self._entry('CVE-1'), self._entry('CVE-2', package='g/b')]),
+            None, 'req',
+        )
+        assert [r['cve_id'] for r in ready] == ['CVE-1']
+        assert any(s['cve_id'] == 'CVE-2' and s['reason'] == 'pr_exists'
+                   for s in skipped)
+        assert any(s.get('pr_url') == 'https://github.com/o/r/pull/5'
+                   for s in skipped)
+
+    def test_bulk_dedup_no_matches_keeps_all_ready(self):
+        mod, _ = _load_remediation_handler()
+        mod._resolve_remediation = MagicMock(
+            return_value={'outcome': 'ready', 'gh_package': 'g:a',
+                          'patched_version': '1.0.1'})
+        mod._bulk_find_existing_prs = MagicMock(return_value={})
+        ready, skipped = mod._resolve_project_cves(
+            self._ctx([self._entry('CVE-1'), self._entry('CVE-2', package='g/b')]),
+            None, 'req',
+        )
+        assert [r['cve_id'] for r in ready] == ['CVE-1', 'CVE-2']
+        assert skipped == []
+
+
+class TestOriginBuildFiles:
+    """Test _origin_build_files (distill origin paths to build.gradle files)."""
+
+    def test_extracts_build_gradle_from_rich_paths(self):
+        mod, _ = _load_remediation_handler()
+        origin = [
+            ['plugin/build.gradle', 'compileClasspath', 'dep@1.0'],
+            ['core/build.gradle', 'runtimeClasspath', 'dep@1.0'],
+            ['plugin/build.gradle', 'testClasspath', 'dep@1.0'],
+        ]
+        assert mod._origin_build_files(origin) == [
+            'core/build.gradle', 'plugin/build.gradle']
+
+    def test_flat_origin_returns_empty(self):
+        mod, _ = _load_remediation_handler()
+        assert mod._origin_build_files('some flat string') == []
+        assert mod._origin_build_files(None) == []
+
+    def test_empty_list_returns_empty(self):
+        mod, _ = _load_remediation_handler()
+        assert mod._origin_build_files([]) == []
+
+
+class TestSummarizeSkipped:
+    """Test _summarize_skipped (human summary of skipped CVEs)."""
+
+    def test_groups_by_reason(self):
+        mod, _ = _load_remediation_handler()
+        skipped = [
+            {'cve_id': 'CVE-1', 'reason': 'already_patched'},
+            {'cve_id': 'CVE-2', 'reason': 'pr_exists'},
+            {'cve_id': 'CVE-3', 'reason': 'already_patched'},
+        ]
+        result = mod._summarize_skipped(skipped)
+        assert 'already patched: CVE-1, CVE-3' in result
+        assert 'pr exists: CVE-2' in result
+
+    def test_empty_returns_no_skipped(self):
+        mod, _ = _load_remediation_handler()
+        assert 'No CVEs were skipped' in mod._summarize_skipped([])
