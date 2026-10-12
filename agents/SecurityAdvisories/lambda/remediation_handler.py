@@ -142,6 +142,7 @@ def _resolve_remediation(
     repo_owner: str,
     repo_name: str,
     request_id: str,
+    base_branch: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Run the per-CVE remediation gates for one resolved (cve, repo, package).
 
@@ -213,6 +214,7 @@ def _resolve_remediation(
     try:
         existing = _find_existing_pr(
             repo_owner, repo_name, cve_id, gh_package or package, patched_version, request_id,
+            base_branch=base_branch,
         )
     except Exception as e:  # network / API errors — surface, don't crash
         logger.error(f"[{request_id}] REMEDIATE_CVE_PR_CHECK_FAILED: {e}")
@@ -385,6 +387,7 @@ def handle_remediate_cve(
     # this handler's status envelopes (batch aggregates them differently).
     outcome = _resolve_remediation(
         cve_id, ecosystem, package, installed_version, repo_owner, repo_name, request_id,
+        base_branch=branch.removeprefix('origin/'),
     )
     kind = outcome['outcome']
 
@@ -466,8 +469,7 @@ def handle_remediate_cve(
         # origin, JSON-encoded) — all the worker needs for force-target selection,
         # and small enough to stay under the ECS container-override 8 KiB limit.
         'origin_files': json.dumps(_origin_build_files(resolved.get('origin'))),
-        # We remediate main only; the worker pushes to the fork's main.
-        'base_branch': SCANS_MAIN_TAG.split('/')[-1],
+        'base_branch': branch.removeprefix('origin/'),
         # Slack thread context so the worker replies in the originating thread
         # (empty when invoked outside Slack — the worker then just logs).
         'slack_channel': (session_attributes.get('slack_channel') or '').strip(),
