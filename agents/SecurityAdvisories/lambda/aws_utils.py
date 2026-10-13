@@ -9,12 +9,17 @@ cross-account role assumption, and OpenSearch request handling.
 
 Functions:
     get_opensearch_session: Get boto3 session with optional cross-account role
-    get_latest_scans_index: Resolve the scans alias to its concrete index
     opensearch_request: Make signed HTTP request to OpenSearch
+
+Constants:
+    SCANS_INDEX: The scans rollover **alias** to read from. Querying the alias spans
+        every ``scans-NNNNNN`` index so a ``collapse`` on ``project.name`` returns each
+        component's latest scan doc wherever it lives — vs pinning the newest concrete
+        index, which only sees the components whose latest scan landed there.
 """
 
-import json
 import logging
+import os
 
 import boto3
 import requests
@@ -65,52 +70,13 @@ def get_opensearch_session():
     return boto3.Session()
 
 
-def get_latest_scans_index() -> str:
-    """Get the most recently created scans index.
+# The scans rollover alias. Reads over the alias span every ``scans-NNNNNN`` index,
+# so a ``collapse`` on ``project.name`` yields each component's latest scan doc
+# regardless of which numbered index holds it.
+SCANS_INDEX = os.environ.get('SCANS_INDEX', 'scans')
 
-    Uses the ``_search`` API across all indices with a filter on the
-    ``timestamp.scan`` field (which only exists in scan indices) and
-    sorts by ``_index`` descending.  Since scan indices follow the
-    naming pattern ``scans-NNNNNN``, lexicographic sort returns the
-    highest-numbered (most recent) index first.
-
-    Returns:
-        The concrete index name (e.g. ``scans-000164``).
-
-    Raises:
-        RuntimeError: If no scans indices are found or the request fails.
-    """
-
-    body = json.dumps({
-        'size': 1,
-        'query': {
-            'exists': {'field': 'timestamp.scan'},
-        },
-        'sort': [{'_index': {'order': 'desc'}}],
-        '_source': False,
-    })
-
-    try:
-        path = '/_search'
-        response = opensearch_request('GET', path, body=body)
-
-        hits = response.get('hits', {}).get('hits', [])
-        if hits:
-            latest_index = hits[0]['_index']
-            logger.info(f'Latest scans index resolved via _search: {latest_index}')
-            return latest_index
-    except Exception as e:
-        logger.error(
-            f'SECURITY_ADVISORIES_INDEX_LOOKUP_FAILED: '
-            f'Could not resolve latest scans index: {e}',
-        )
-        raise RuntimeError(
-            f'Failed to resolve latest scans index: {e}',
-        ) from e
-
-    raise RuntimeError(
-        'No scans indices found',
-    )
+# Recency floor on ``timestamp.scan``.
+SCANS_RECENCY_WINDOW = os.environ.get('SCANS_RECENCY_WINDOW', 'now-7d')
 
 
 def opensearch_request(method, path, body=None):

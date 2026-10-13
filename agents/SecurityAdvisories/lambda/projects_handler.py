@@ -16,7 +16,7 @@ import logging
 from typing import Any, Dict, Tuple
 
 import semver
-from aws_utils import get_latest_scans_index, opensearch_request
+from aws_utils import SCANS_INDEX, SCANS_RECENCY_WINDOW, opensearch_request
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -62,6 +62,10 @@ def handle_list_projects(request_id: str) -> Dict[str, Any]:
 
     query_body = json.dumps({
         'size': 0,
+        # Bound by scan recency so can_match can skip older indices.
+        'query': {'bool': {'filter': [
+            {'range': {'timestamp.scan': {'gte': SCANS_RECENCY_WINDOW}}},
+        ]}},
         'aggs': {
             'projects': {
                 'terms': {
@@ -83,7 +87,7 @@ def handle_list_projects(request_id: str) -> Dict[str, Any]:
     try:
         response = opensearch_request(
             'POST',
-            f'/{get_latest_scans_index()}/_search',
+            f'/{SCANS_INDEX}/_search',
             query_body,
         )
     except Exception as e:

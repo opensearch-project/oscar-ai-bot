@@ -11,6 +11,7 @@ result entry structure, multiple hits, empty results, and error handling.
 """
 
 import importlib
+import logging
 import os
 import sys
 from unittest.mock import MagicMock, patch
@@ -293,6 +294,54 @@ class TestCollapseDeduplication:
 
         assert result['status'] == 'success'
         assert result['result_count'] == 2
+
+
+# ---------------------------------------------------------------------------
+# Truncation detection (post-collapse result count vs query size limit)
+# ---------------------------------------------------------------------------
+
+
+class TestTruncationDetection:
+    """Truncation is flagged only when the collapsed result count reaches the
+    query size limit — NOT when hits.total (pre-collapse) exceeds the returned
+    (post-collapse) count, which is normal for a collapsed query.
+    """
+
+    def test_truncated_when_collapsed_count_hits_size_limit(self, caplog):
+        """len(hits) >= _DEFAULT_QUERY_SIZE → results_truncated + message + log."""
+        mock_dsl = _make_mock_dsl_query_builder()
+        mock_dsl._DEFAULT_QUERY_SIZE = 2
+        # A pre-collapse total far larger than the returned count must NOT alone
+        # trigger truncation; only the collapsed count reaching the limit does.
+        mock_dsl.query_vulnerabilities.return_value = {
+            'hits': {'total': {'value': 9999}, 'hits': [SAMPLE_HIT, SAMPLE_HIT_2]},
+        }
+        mod, _ = _load_vulnerabilities_handler(mock_dsl=mock_dsl)
+
+        with caplog.at_level(logging.INFO):
+            result = mod.handle_query_vulnerabilities(
+                {'query': 'Show CVEs', 'version': '2.19', '_access_tier': 'privileged'}, 'test-trunc-01',
+            )
+
+        assert result['results_truncated'] is True
+        assert 'truncation_message' in result
+        assert any('Results truncated' in r.message for r in caplog.records)
+
+    def test_not_truncated_when_below_size_limit(self):
+        """len(hits) < _DEFAULT_QUERY_SIZE → no truncation, even if total is huge."""
+        mock_dsl = _make_mock_dsl_query_builder()
+        mock_dsl._DEFAULT_QUERY_SIZE = 1000
+        mock_dsl.query_vulnerabilities.return_value = {
+            'hits': {'total': {'value': 9999}, 'hits': [SAMPLE_HIT, SAMPLE_HIT_2]},
+        }
+        mod, _ = _load_vulnerabilities_handler(mock_dsl=mock_dsl)
+
+        result = mod.handle_query_vulnerabilities(
+            {'query': 'Show CVEs', 'version': '2.19', '_access_tier': 'privileged'}, 'test-trunc-02',
+        )
+
+        assert result['results_truncated'] is False
+        assert 'truncation_message' not in result
 
 
 # ---------------------------------------------------------------------------
