@@ -48,6 +48,25 @@ class TestResolveAuthorizedAgents:
         assert is_global is False
         assert agents == set()
 
+    def test_handle_match_is_case_insensitive(self):
+        """GitHub handles are case-insensitive: caller casing must not matter."""
+        is_global, agents = resolve_authorized_agents('ADMIN-GH', _GLOBAL, _AGENTS)
+        assert is_global is True
+        assert agents == {'jenkins'}
+
+    def test_config_casing_is_normalized(self):
+        """A differently-cased handle in config still matches the caller."""
+        is_global, agents = resolve_authorized_agents(
+            'jenkins-gh', ['Admin-GH'], {'jenkins': ['Jenkins-GH']}
+        )
+        assert is_global is False
+        assert agents == {'jenkins'}
+
+    def test_handle_with_surrounding_whitespace(self):
+        """Stray whitespace in a configured handle must not deny a valid user."""
+        is_global, agents = resolve_authorized_agents('admin-gh', [' admin-gh '], {})
+        assert is_global is True
+
     def test_handle_in_multiple_agents(self):
         agents_cfg = {'jenkins': ['multi-gh'], 'metrics': ['multi-gh']}
         is_global, agents = resolve_authorized_agents('multi-gh', [], agents_cfg)

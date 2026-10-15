@@ -62,8 +62,17 @@ class MessageProcessor:
         return query
 
     def _enrich_user_attrs(self, attrs: dict, user_id: str, prefix: str) -> None:
-        """Add admin, github_handle, is_maintainer, and tier for a user."""
-        is_admin = self.is_fully_authorized_user(user_id)
+        """Add admin, github_handle, is_maintainer, and tier for a user.
+
+        The approver's ``is_admin`` is intentionally stricter: a 2PR approver
+        for an admin/maintainer operation must be a GLOBAL admin, not merely an
+        agent-level authorized user. Requester enrichment keeps the broader
+        is_fully_authorized_user semantics used for routing/context isolation.
+        """
+        if prefix == 'approver':
+            is_admin = self.is_global_admin(user_id)
+        else:
+            is_admin = self.is_fully_authorized_user(user_id)
         attrs[f'{prefix}_is_admin'] = str(is_admin)
 
         record = self._get_identity_record(user_id)
@@ -404,31 +413,6 @@ class MessageProcessor:
             dynamodb_resource = boto3.resource("dynamodb", region_name=os.environ.get("AWS_REGION", "us-east-1"))
             self._identity_table = dynamodb_resource.Table(table_name)
         return self._identity_table
-
-    def _get_identity_record(self, user_id: str) -> dict:
-        """Look up the active identity record for a Slack user.
-
-        Returns the full DynamoDB item or an empty dict if not found.
-        Results are cached per user_id for the lifetime of this instance.
-        """
-        cache = getattr(self, '_identity_cache', None)
-        if cache is None:
-            self._identity_cache = cache = {}
-        if user_id in cache:
-            return cache[user_id]
-        table = self._get_identity_table()
-        resp = table.query(
-            IndexName="slack-user-index",
-            KeyConditionExpression="slack_user_id = :uid",
-            ExpressionAttributeValues={":uid": user_id},
-        )
-        record = {}
-        for item in resp.get("Items", []):
-            if item.get("status") == "active":
-                record = item
-                break
-        cache[user_id] = record
-        return record
 
     def _has_identity_mapping(self, user_id: str) -> bool:
         return bool(self._get_identity_record(user_id))

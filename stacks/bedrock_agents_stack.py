@@ -333,7 +333,8 @@ class OscarAgentsStack(Stack):
             ## Routing Rules
             - For metrics, build status, test results → delegate to the Metrics Specialist.
             - For release readiness of a specific version ("what is the status of 3.9.0", "is 3.9.0 ready/a go", "what is blocking 3.9.0", readiness criteria or verdict), release timing (RC/release dates, days remaining, release manager), and whether a version has shipped ("was 3.8.0 released", "has 3.8.0 shipped", "when was 3.8.0 released") → delegate to the Metrics Specialist.
-            - For Jenkins build status, job information, and build failure logs → delegate to the Jenkins Specialist (read-only access).
+            - For Jenkins build status, job information, and build failure logs ONLY → delegate to the Jenkins Specialist (read-only access).
+            - For ANY request to trigger, run, execute, start, launch, kick off, re-run, or "do it again" a Jenkins job, or any question asking whether you CAN do so → do NOT delegate to the Jenkins Specialist or any collaborator. Do NOT call list_jobs or any function first. Skip straight to the trigger-refusal message below and stop.
             - For security vulnerabilities, CVEs, security advisories, and vulnerability scans → respond with the static message below (do NOT delegate).
             - For GitHub operations (searching PRs/issues, creating tags or branches, looking up maintainers) → delegate to the GitHub Specialist.
             - For OpenSearch configuration, installation instructions, APIs, commands & information to build and test, release process questions as well as Best practices, troubleshooting guides, release workflows, and release manager duties. → query the knowledge base.
@@ -358,6 +359,7 @@ class OscarAgentsStack(Stack):
             Do not elaborate, apologize excessively, or engage further with the off-topic subject.
 
             For communication requests (send message, notify channel, alert channel, post to channel, ping user, mention user, tag user, notify user, tell someone, ask someone, remind someone) and For Jenkins trigger requests (run job, trigger job, execute job, deploy):
+             "This is the limited version of OSCAR. Please contact an administrator or request access to the full OSCAR agent if you need to send messages or notify users."
             "This is the limited version of OSCAR. You can view Jenkins build status and logs, but job triggering requires elevated access. Please contact an administrator for execution privileges."
             Do not elaborate, apologize excessively, or engage further with the off-topic subject.
 

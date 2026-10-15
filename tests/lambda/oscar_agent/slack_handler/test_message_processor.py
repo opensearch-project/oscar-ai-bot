@@ -255,6 +255,40 @@ class TestBuildIdentityAttributes:
         assert result['is_global_admin'] == 'false'
         assert result['authorized_agents'] == ''
 
+    def _pending_processor(self, approver_handle):
+        """Processor with a pending requester so the current user becomes approver."""
+        storage = Mock()
+        storage.get_context.return_value = {
+            'pending_approval_requester': 'U_ORIGINAL',
+            'pending_approval_expires_at': time.time() + 300,
+        }
+        mp = _make_processor(storage=storage)
+        # Requester lookup returns a handle; approver lookup returns approver_handle.
+
+        def _record(uid):
+            return {'github_handle': 'req-gh'} if uid == 'U_ORIGINAL' else {'github_handle': approver_handle}
+        mp._get_identity_record = Mock(side_effect=_record)
+        mp._resolve_display_name = Mock(return_value='')
+        return mp
+
+    def test_global_admin_approver_is_admin_true(self):
+        """A global-admin approver is accepted (approver_is_admin=True)."""
+        mp = self._pending_processor('admin-gh')
+        result = mp._build_identity_attributes('C123_ts1', 'U_APPROVER')
+        assert result['approver_user_id'] == 'U_APPROVER'
+        assert result['approver_is_admin'] == 'True'
+
+    def test_agent_only_approver_is_not_admin(self):
+        """A jenkins-only approver is NOT a global admin -> approver_is_admin=False.
+
+        Enforces the stricter 2PR rule: approver must be a global admin, not
+        merely an agent-level authorized user.
+        """
+        mp = self._pending_processor('jenkins-gh')
+        result = mp._build_identity_attributes('C123_ts1', 'U_APPROVER')
+        assert result['approver_user_id'] == 'U_APPROVER'
+        assert result['approver_is_admin'] == 'False'
+
 
 class TestIsFullyAuthorizedUser:
 

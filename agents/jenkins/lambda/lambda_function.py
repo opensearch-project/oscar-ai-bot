@@ -68,6 +68,8 @@ def lambda_handler(event: Dict[str, Any], context) -> Dict[str, Any]:
         else:
             access_tier = session_attrs.get('access_tier', 'limited')
 
+        access_tier = (access_tier or '').strip().lower()
+
         # Select Jenkins token based on access tier
         try:
             jenkins_token = config.get_token_for_access_tier(access_tier)
@@ -80,11 +82,11 @@ def lambda_handler(event: Dict[str, Any], context) -> Dict[str, Any]:
 
         logger.info(f"ACCESS: access_tier={access_tier} function={function_name}")
 
-        # Code-level enforcement: block disallowed functions per access tier
         RESTRICTED_FUNCTIONS = {
             'limited': ['trigger_job'],
+            'privileged': [],
         }
-        blocked = RESTRICTED_FUNCTIONS.get(access_tier, [])
+        blocked = RESTRICTED_FUNCTIONS.get(access_tier, RESTRICTED_FUNCTIONS['limited'])
         if function_name in blocked:
             logger.warning(f"ACCESS_DENIED: access_tier={access_tier} attempted {function_name}")
             return create_response(event, {

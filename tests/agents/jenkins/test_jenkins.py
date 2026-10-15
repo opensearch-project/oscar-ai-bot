@@ -801,6 +801,50 @@ class TestAccessControl(unittest.TestCase):
         response_body = result['response']['functionResponse']['responseBody']['TEXT']['body']
         self.assertIn('Access denied', response_body)
 
+    @patch('lambda_function.JenkinsClient')
+    @patch('lambda_function.get_job_registry')
+    @patch('lambda_function.config')
+    def test_unknown_tier_fails_closed_blocks_trigger(self, mock_config, mock_get_registry, mock_client_cls):
+        """An unrecognized access_tier must be treated as limited (fail closed)."""
+        from lambda_function import lambda_handler
+        mock_config.enable_2pr = False
+        mock_get_registry.return_value = _build_test_registry()
+
+        event = {
+            'function': 'trigger_job',
+            'parameters': [
+                {'name': 'job_name', 'value': 'docker-scan'},
+                {'name': 'confirmed', 'value': 'true'},
+            ],
+            'sessionAttributes': {'access_tier': 'bogus-tier'},
+        }
+        result = lambda_handler(event, None)
+        body = result['response']['functionResponse']['responseBody']['TEXT']['body']
+        self.assertIn('elevated access', body)
+        mock_client_cls.return_value.trigger_job.assert_not_called()
+
+    @patch('lambda_function.JenkinsClient')
+    @patch('lambda_function.get_job_registry')
+    @patch('lambda_function.config')
+    def test_mixed_case_limited_tier_still_blocks(self, mock_config, mock_get_registry, mock_client_cls):
+        """Casing/whitespace in the tier must not bypass the limited block."""
+        from lambda_function import lambda_handler
+        mock_config.enable_2pr = False
+        mock_get_registry.return_value = _build_test_registry()
+
+        event = {
+            'function': 'trigger_job',
+            'parameters': [
+                {'name': 'job_name', 'value': 'docker-scan'},
+                {'name': 'confirmed', 'value': 'true'},
+            ],
+            'sessionAttributes': {'access_tier': '  LIMITED '},
+        }
+        result = lambda_handler(event, None)
+        body = result['response']['functionResponse']['responseBody']['TEXT']['body']
+        self.assertIn('elevated access', body)
+        mock_client_cls.return_value.trigger_job.assert_not_called()
+
 
 @patch.dict(os.environ, _JENKINS_ENV)
 class TestAccessTierDerivation(unittest.TestCase):
