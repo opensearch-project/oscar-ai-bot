@@ -1045,6 +1045,7 @@ def _affected_candidates(cve_id: str, request_id: str, *, branch: str = SCANS_MA
                 f"{proj.get('repo')!r} for project {proj.get('name')!r}"
             )
             continue
+        name = _resolve_canonical_repo_name(owner, name, request_id)
         candidates[f'{owner}/{name}'] = {
             'repo_owner': owner,
             'repo_name': name,
@@ -1174,6 +1175,7 @@ def _project_vulnerabilities(project_name: str, request_id: str,
                 f"'{project_name}' from the scans cluster."
             ),
         }
+    name = _resolve_canonical_repo_name(owner, name, request_id)
 
     entries = _project_vuln_entries(hit)
     if not entries:
@@ -1408,6 +1410,38 @@ def _parse_repo_url(repo_url: str):
     if len(parts) >= 2:
         return parts[0], parts[1]
     return '', ''
+
+
+def _resolve_canonical_repo_name(owner: str, name: str, request_id: str) -> str:
+    """Resolve a repo's canonical name via the GitHub API, following renames.
+
+    The scans cluster stores the repo URL at scan time. If a repo has since been
+    renamed (e.g. ``opensearch-ai-flow-framework`` -> ``flow-framework``), GitHub
+    redirects web/API requests but git push to a fork under the OLD name fails
+    with "Repository not found". This resolves the current name so the worker
+    pushes to the correct fork. Returns the original name on any failure
+    (fail-open — the push may still work if no rename happened).
+    """
+    try:
+        headers = _github_headers()
+        resp = requests.get(
+            f'{GITHUB_API}/repos/{owner}/{name}',
+            headers=headers,
+            timeout=GITHUB_TIMEOUT,
+        )
+        if resp.status_code == 200:
+            canonical = (resp.json().get('name') or '').strip()
+            if canonical and canonical != name:
+                logger.info(
+                    f"[{request_id}] REPO_NAME_RESOLVED: {owner}/{name} -> "
+                    f"{owner}/{canonical} (renamed)"
+                )
+                return canonical
+    except Exception as e:
+        logger.warning(
+            f"[{request_id}] REPO_NAME_RESOLVE_FAILED: {owner}/{name}: {e}"
+        )
+    return name
 
 
 def _matched_packages(hit: Dict[str, Any]) -> List[Dict[str, str]]:

@@ -138,16 +138,22 @@ def _install_fake_github(
     advisory_error=None,
     search_error=None,
     registry_versions=None,
+    repo_renames=None,
 ):
     """Replace the module's ``requests`` with a fake routed by URL/query.
 
     ``registry_versions`` is a set of ``"package@version"`` strings that the
     fake treats as published (HEAD 200 for Maven Central, GET 200 for npm).
     ``None`` (the default) means all versions exist (no 404s).
+
+    ``repo_renames`` is a dict mapping ``"owner/old-name"`` to ``"new-name"``.
+    When the fake sees a ``GET /repos/owner/old-name`` call, it returns the
+    new name. ``None`` (the default) means no renames (returns the name as-is).
     """
     advisories = advisories if advisories is not None else []
     cve_pr_items = cve_pr_items or []
     pkg_pr_items = pkg_pr_items or []
+    repo_renames = repo_renames or {}
 
     def _get(url, params=None, headers=None, timeout=None):
         if url.endswith('/advisories'):
@@ -167,6 +173,12 @@ def _install_fake_github(
                 if pkg_version not in registry_versions:
                     return _FakeResp({}, status_code=404)
             return _FakeResp({})
+        if '/repos/' in url and '/advisories' not in url:
+            parts = url.rstrip('/').split('/')
+            if len(parts) >= 2:
+                owner_name = f"{parts[-2]}/{parts[-1]}"
+                canonical = repo_renames.get(owner_name, parts[-1])
+                return _FakeResp({'name': canonical})
         return _FakeResp({})
 
     def _head(url, timeout=None, allow_redirects=True):
@@ -337,11 +349,13 @@ class TestListAffectedRepositories:
         filters = json.loads(body)['query']['bool']['filter']
         assert {'range': {'timestamp.scan': {'gte': 'now-7d'}}} in filters
 
-    def test_does_no_github_calls(self):
+    def test_only_repo_name_resolution_github_call(self):
         mod, _ = _load_remediation_handler()
         fake = _install_fake_github(mod)
         mod.handle_list_affected_repositories({'cve_id': 'CVE-2023-45857'}, 'la5')
-        fake.get.assert_not_called()
+        calls = [c for c in fake.get.call_args_list
+                 if '/repos/' not in str(c)]
+        assert len(calls) == 0
 
     def test_unparseable_repo_url_is_skipped(self):
         mod, _ = _load_remediation_handler(
@@ -718,8 +732,11 @@ class TestGates:
         mod.handle_remediate_cve(
             {'cve_id': 'CVE-2023-45857', 'repo_name': 'OpenSearch-Dashboards'}, 't19',
         )
-        # the ecosystem gate (from the cluster) fires before any GitHub call
-        fake.get.assert_not_called()
+        # the ecosystem gate fires before advisory lookup or PR search;
+        # only the repo name resolution call (to /repos/) is made
+        calls = [c for c in fake.get.call_args_list
+                 if '/repos/' not in str(c)]
+        assert len(calls) == 0
 
 
 # ---------------------------------------------------------------------------
@@ -972,6 +989,35 @@ class TestParseRepoUrl:
         assert mod._parse_repo_url('not-a-url') == ('', '')
         assert mod._parse_repo_url('') == ('', '')
         assert mod._parse_repo_url('https://github.com/only-owner') == ('', '')
+
+
+class TestResolveCanonicalRepoName:
+    def test_renamed_repo_returns_canonical(self):
+        mod, _ = _load_remediation_handler()
+        _install_fake_github(
+            mod,
+            repo_renames={
+                'opensearch-project/opensearch-ai-flow-framework': 'flow-framework',
+            },
+        )
+        result = mod._resolve_canonical_repo_name(
+            'opensearch-project', 'opensearch-ai-flow-framework', 'req')
+        assert result == 'flow-framework'
+
+    def test_unchanged_repo_returns_same_name(self):
+        mod, _ = _load_remediation_handler()
+        _install_fake_github(mod)
+        result = mod._resolve_canonical_repo_name(
+            'opensearch-project', 'OpenSearch', 'req')
+        assert result == 'OpenSearch'
+
+    def test_api_failure_returns_original_name(self):
+        mod, _ = _load_remediation_handler()
+        mod.requests = MagicMock()
+        mod.requests.get = MagicMock(side_effect=ConnectionError('down'))
+        result = mod._resolve_canonical_repo_name(
+            'opensearch-project', 'opensearch-ai-flow-framework', 'req')
+        assert result == 'opensearch-ai-flow-framework'
 
 
 # ---------------------------------------------------------------------------
