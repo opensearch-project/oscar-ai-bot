@@ -68,7 +68,10 @@ class EventHandlers:
 
         # DM access is restricted to global admins (keyed by the user's linked
         # GitHub handle; agent-level users cannot DM) OR to Slack users on the
-        # explicit dm_authorized_users allowlist.
+        # explicit dm_authorized_users allowlist. Start a fresh identity cache so
+        # the check never reads a record cached by a previous message, then
+        # reuse it in process_message to avoid a second identity query.
+        self.message_processor.reset_identity_cache()
         if not self.message_processor.is_global_admin(user_id) and user_id not in config.dm_authorized_users:
             logger.warning(f"UNAUTHORIZED_DM_ATTEMPT: user={user_id}")
             return
@@ -76,4 +79,5 @@ class EventHandlers:
         logger.info(f"Processing DM message event: channel={channel}, ts={event_ts}, thread_ts={thread_ts}")
 
         # Process the message
-        self.message_processor.process_message(channel, thread_ts, user_id, text, say, message_ts=event_ts)
+        self.message_processor.process_message(channel, thread_ts, user_id, text, say, message_ts=event_ts,
+                                               reset_identity_cache=False)

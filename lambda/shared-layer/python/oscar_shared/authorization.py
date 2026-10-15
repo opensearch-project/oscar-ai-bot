@@ -44,10 +44,11 @@ def resolve_authorized_agents(
     if not github_handle:
         return (False, set())
 
-    is_global = github_handle in (global_admins or [])
+    handle = github_handle.strip().lower()
+    is_global = handle in {h.strip().lower() for h in (global_admins or [])}
     agents = {
         agent
         for agent, handles in (agent_tiers or {}).items()
-        if github_handle in (handles or [])
+        if handle in {h.strip().lower() for h in (handles or [])}
     }
     return (is_global, agents)

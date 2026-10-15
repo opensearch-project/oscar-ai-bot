@@ -134,6 +134,42 @@ class TestSessionAttributeInjection:
         assert req['sessionState']['sessionAttributes'] == {'access_tier': 'limited'}
 
 
+class TestGlobalAccessTier:
+    """access_tier follows is_global_admin when present, not the routing privilege."""
+
+    def test_session_attributes_are_passed_through(self, agent_core):
+        core, _ = agent_core
+        req = core.create_agent_request('hello', privilege=True, session_attributes={
+            'is_global_admin': 'true', 'authorized_agents': 'jenkins', 'requester_user_id': 'U1',
+        })
+        attrs = req['sessionState']['sessionAttributes']
+        assert attrs['authorized_agents'] == 'jenkins'
+        assert attrs['requester_user_id'] == 'U1'
+
+    def test_global_admin_is_privileged(self, agent_core):
+        core, _ = agent_core
+        req = core.create_agent_request('hello', privilege=True, session_attributes={'is_global_admin': 'true'})
+        assert req['sessionState']['sessionAttributes']['access_tier'] == 'privileged'
+
+    def test_agent_level_user_is_globally_limited(self, agent_core):
+        """A jenkins-only user is routed to the privileged supervisor but is not
+        globally privileged, so agents that read access_tier treat them as limited."""
+        core, _ = agent_core
+        req = core.create_agent_request('hello', privilege=True, session_attributes={
+            'is_global_admin': 'false', 'authorized_agents': 'jenkins',
+        })
+        assert req['agentId'] == 'priv-agent'
+        assert req['sessionState']['sessionAttributes']['access_tier'] == 'limited'
+
+    def test_falls_back_to_routing_privilege_without_global_flag(self, agent_core):
+        core, _ = agent_core
+        req = core.create_agent_request('hello', privilege=True, session_attributes={'requester_user_id': 'U1'})
+        assert req['sessionState']['sessionAttributes']['access_tier'] == 'privileged'
+
+        req = core.create_agent_request('hello', privilege=False, session_attributes={'requester_user_id': 'U1'})
+        assert req['sessionState']['sessionAttributes']['access_tier'] == 'limited'
+
+
 class TestInvokeAgent:
 
     def test_returns_assembled_text(self, agent_core):

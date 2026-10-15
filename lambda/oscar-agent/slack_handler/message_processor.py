@@ -62,8 +62,24 @@ class MessageProcessor:
         return query
 
     def _enrich_user_attrs(self, attrs: dict, user_id: str, prefix: str) -> None:
-        """Add admin, github_handle, is_maintainer, and tier for a user."""
-        is_admin = self.is_fully_authorized_user(user_id)
+        """Add admin, github_handle, is_maintainer, and tier for a user.
+
+        The approver's ``is_admin`` is intentionally stricter: a 2PR approver
+        for an admin/maintainer operation must be a GLOBAL admin, not merely an
+        agent-level authorized user. Requester enrichment keeps the broader
+        is_fully_authorized_user semantics used for routing/context isolation.
+        The approver's per-agent privilege is also recorded so agent Lambdas can
+        enforce their own approver tier.
+        """
+        _, is_global, agents = self._resolve_privilege(user_id)
+        if prefix == 'approver':
+            is_admin = is_global
+            # Per-agent privilege of the approver, so agents with their own tier
+            # (e.g. Jenkins) can require an approver privileged for that agent.
+            attrs['approver_is_global_admin'] = 'true' if is_global else 'false'
+            attrs['approver_authorized_agents'] = ','.join(sorted(agents))
+        else:
+            is_admin = is_global or bool(agents)
         attrs[f'{prefix}_is_admin'] = str(is_admin)
 
         record = self._get_identity_record(user_id)
@@ -325,6 +341,10 @@ class MessageProcessor:
             logger.warning("Failed to fetch thread parent: %s", e)
             return ""
 
+    def reset_identity_cache(self) -> None:
+        """Start a fresh per-message identity cache."""
+        self._identity_cache = {}
+
     def _get_identity_record(self, user_id: str) -> dict:
         """Look up the active identity record for a Slack user.
 
@@ -405,31 +425,6 @@ class MessageProcessor:
             self._identity_table = dynamodb_resource.Table(table_name)
         return self._identity_table
 
-    def _get_identity_record(self, user_id: str) -> dict:
-        """Look up the active identity record for a Slack user.
-
-        Returns the full DynamoDB item or an empty dict if not found.
-        Results are cached per user_id for the lifetime of this instance.
-        """
-        cache = getattr(self, '_identity_cache', None)
-        if cache is None:
-            self._identity_cache = cache = {}
-        if user_id in cache:
-            return cache[user_id]
-        table = self._get_identity_table()
-        resp = table.query(
-            IndexName="slack-user-index",
-            KeyConditionExpression="slack_user_id = :uid",
-            ExpressionAttributeValues={":uid": user_id},
-        )
-        record = {}
-        for item in resp.get("Items", []):
-            if item.get("status") == "active":
-                record = item
-                break
-        cache[user_id] = record
-        return record
-
     def _has_identity_mapping(self, user_id: str) -> bool:
         return bool(self._get_identity_record(user_id))
 
@@ -483,7 +478,8 @@ class MessageProcessor:
 
     def process_message(self, channel: str, thread_ts: str, user_id: str,
                         text: str, say: Callable, message_ts: str = None,
-                        slash_command: str = None, skip_context_storage: bool = False) -> None:
+                        slash_command: str = None, skip_context_storage: bool = False,
+                        reset_identity_cache: bool = True) -> None:
         """Process a message and generate a response using the OSCAR agent.
 
         Args:
@@ -495,6 +491,9 @@ class MessageProcessor:
             message_ts: Timestamp of the specific message to react to (may differ from thread_ts)
             slash_command: Type of slash command if this is a slash command invocation
             skip_context_storage: Whether to skip context storage (for slash commands)
+            reset_identity_cache: Whether to start a fresh identity cache. Callers
+                that already resolved this user's identity for the current message
+                (e.g. the DM auth check) pass False to reuse it.
         """
         # Use message_ts if provided, otherwise fall back to thread_ts
         # This ensures we react to the specific message, not just the thread parent
@@ -509,9 +508,10 @@ class MessageProcessor:
 
         start_time = time.time()
 
-        # Reset per-message identity cache (records are cached only for the
-        # lifetime of a single message to avoid duplicate DynamoDB queries).
-        self._identity_cache = {}
+        # Identity records are cached only for the lifetime of a single message
+        # to avoid duplicate DynamoDB queries.
+        if reset_identity_cache:
+            self.reset_identity_cache()
 
         try:
             # Extract or generate query based on source
@@ -533,7 +533,6 @@ class MessageProcessor:
                 say(text=e.user_message, thread_ts=thread_ts)
                 return
 
-            self._identity_cache = {}
             if not self._has_identity_mapping(user_id):
                 self._handle_link_github_via_dm(user_id, channel, thread_ts, reaction_ts, say)
                 return

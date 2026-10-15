@@ -62,11 +62,14 @@ def lambda_handler(event: Dict[str, Any], context) -> Dict[str, Any]:
         # global-tier agents). Fail closed: absent/unknown attributes -> limited.
         session_attrs = event.get('sessionAttributes', {}) or {}
         if 'is_global_admin' in session_attrs or 'authorized_agents' in session_attrs:
-            is_global = session_attrs.get('is_global_admin') == 'true'
-            authorized_agents = [a for a in session_attrs.get('authorized_agents', '').split(',') if a]
-            access_tier = 'privileged' if (is_global or 'jenkins' in authorized_agents) else 'limited'
+            is_privileged = _is_jenkins_privileged(
+                session_attrs.get('is_global_admin'), session_attrs.get('authorized_agents'),
+            )
+            access_tier = 'privileged' if is_privileged else 'limited'
         else:
             access_tier = session_attrs.get('access_tier', 'limited')
+
+        access_tier = (access_tier or '').strip().lower()
 
         # Select Jenkins token based on access tier
         try:
@@ -80,11 +83,11 @@ def lambda_handler(event: Dict[str, Any], context) -> Dict[str, Any]:
 
         logger.info(f"ACCESS: access_tier={access_tier} function={function_name}")
 
-        # Code-level enforcement: block disallowed functions per access tier
         RESTRICTED_FUNCTIONS = {
             'limited': ['trigger_job'],
+            'privileged': [],
         }
-        blocked = RESTRICTED_FUNCTIONS.get(access_tier, [])
+        blocked = RESTRICTED_FUNCTIONS.get(access_tier, RESTRICTED_FUNCTIONS['limited'])
         if function_name in blocked:
             logger.warning(f"ACCESS_DENIED: access_tier={access_tier} attempted {function_name}")
             return create_response(event, {
@@ -120,6 +123,20 @@ def lambda_handler(event: Dict[str, Any], context) -> Dict[str, Any]:
                         'get_build_status', 'get_build_failure_details'
                     ]
                 }
+
+        # For limited users, tag read responses so the model knows this job
+        # cannot be triggered and should not offer to. This is an advisory
+        # signal (the hard block on trigger_job stays in RESTRICTED_FUNCTIONS);
+        # it discourages the agent from walking the user toward a trigger it
+        # cannot perform.
+        if access_tier == 'limited' and function_name in ('get_job_info', 'list_jobs') \
+                and isinstance(result, dict) and result.get('status') != 'error':
+            result['triggerable'] = False
+            result['access_note'] = (
+                'Read-only access: you can view this job, but triggering requires '
+                'elevated access. Do not offer to trigger it; direct the user to an '
+                'admin for execution privileges.'
+            )
 
         return create_response(event, result)
 
@@ -221,6 +238,42 @@ def _inject_authenticated_requester(
     return injected
 
 
+def _is_jenkins_privileged(is_global_admin: Optional[str], authorized_agents: Optional[str]) -> bool:
+    """A user is privileged for Jenkins if they are a global admin OR listed under agents.jenkins."""
+    if (is_global_admin or '').strip().lower() == 'true':
+        return True
+    return 'jenkins' in {a.strip() for a in (authorized_agents or '').split(',') if a.strip()}
+
+
+def _validate_jenkins_approver(session_attributes: Dict[str, Any], job_name: str) -> Optional[Dict[str, Any]]:
+    """Require a 2PR approver to be privileged for Jenkins (global admin or agents.jenkins).
+
+    The access tier is derived from the requester, so without this check any
+    linked user could approve a privileged requester's trigger. Fails closed:
+    an approver without privilege attributes is rejected.
+    """
+    approver_user_id = (session_attributes.get('approver_user_id') or '').strip()
+    if not approver_user_id:
+        return None
+
+    if _is_jenkins_privileged(
+        session_attributes.get('approver_is_global_admin'),
+        session_attributes.get('approver_authorized_agents'),
+    ):
+        return None
+
+    logger.warning(f"ACCESS_DENIED: approver={approver_user_id} lacks Jenkins privilege for job={job_name}")
+    return {
+        'status': 'error',
+        'message': (
+            'SECURITY ERROR: Triggering a Jenkins job requires approval from a global admin or a user '
+            'with Jenkins execution access. Please have an authorized user reply to confirm. '
+            '[2PR_PENDING]'
+        ),
+        'job_name': job_name,
+    }
+
+
 def handle_trigger_job(jenkins_client: JenkinsClient, params: Dict[str, Any], session_attributes: Dict[str, str] = None) -> Dict[str, Any]:
     """
     Handle generic job triggering with mandatory confirmation check.
@@ -279,6 +332,10 @@ def handle_trigger_job(jenkins_client: JenkinsClient, params: Dict[str, Any], se
     if approval_error:
         approval_error['job_name'] = job_name
         return approval_error
+
+    approver_error = _validate_jenkins_approver(session_attributes or {}, job_name)
+    if approver_error:
+        return approver_error
 
     if not job_name:
         return {

@@ -64,6 +64,73 @@ class TestJenkinsCredentials(unittest.TestCase):
             creds.get_auth()
 
 
+@patch.dict(os.environ, _JENKINS_ENV)
+class TestJenkinsConfigTokens(unittest.TestCase):
+    """Test tier-based token selection and secret loading in JenkinsConfig."""
+
+    def _make_config(self, secret):
+        from config import JenkinsConfig
+        with patch('config.JenkinsConfig._load_jenkins_secret', return_value=secret):
+            return JenkinsConfig()
+
+    def test_loads_readonly_token_from_secret(self):
+        cfg = self._make_config({'jenkins_api_token': 'admin:a', 'jenkins_readonly_token': 'ro:r'})
+        self.assertEqual(cfg.jenkins_readonly_token, 'ro:r')
+
+    def test_privileged_tier_returns_admin_token(self):
+        cfg = self._make_config({'jenkins_api_token': 'admin:a', 'jenkins_readonly_token': 'ro:r'})
+        self.assertEqual(cfg.get_token_for_access_tier('privileged'), 'admin:a')
+
+    def test_limited_tier_returns_readonly_token(self):
+        cfg = self._make_config({'jenkins_api_token': 'admin:a', 'jenkins_readonly_token': 'ro:r'})
+        self.assertEqual(cfg.get_token_for_access_tier('limited'), 'ro:r')
+
+    def test_unknown_tier_returns_readonly_token(self):
+        """Fail closed: an unrecognized tier never receives the admin token."""
+        cfg = self._make_config({'jenkins_api_token': 'admin:a', 'jenkins_readonly_token': 'ro:r'})
+        self.assertEqual(cfg.get_token_for_access_tier('superuser'), 'ro:r')
+        self.assertEqual(cfg.get_token_for_access_tier(''), 'ro:r')
+
+    def test_privileged_tier_without_admin_token_raises(self):
+        cfg = self._make_config({'jenkins_readonly_token': 'ro:r'})
+        with self.assertRaises(PermissionError):
+            cfg.get_token_for_access_tier('privileged')
+
+    def test_limited_tier_without_readonly_token_raises(self):
+        """Limited users are denied rather than falling back to the admin token."""
+        cfg = self._make_config({'jenkins_api_token': 'admin:a'})
+        with self.assertRaises(PermissionError):
+            cfg.get_token_for_access_tier('limited')
+
+    def test_missing_readonly_token_logs_warning(self):
+        with self.assertLogs('config', level='WARNING') as logs:
+            self._make_config({'jenkins_api_token': 'admin:a'})
+        self.assertTrue(any('JENKINS_READONLY_TOKEN' in line for line in logs.output))
+
+    def test_load_secret_without_secret_name_returns_empty(self):
+        from config import JenkinsConfig
+        with patch.dict(os.environ, {'JENKINS_SECRET_NAME': ''}):
+            self.assertEqual(JenkinsConfig._load_jenkins_secret(MagicMock()), {})
+
+    @patch('config.boto3')
+    def test_load_secret_parses_json(self, mock_boto3):
+        from config import JenkinsConfig
+        client = mock_boto3.session.Session.return_value.client.return_value
+        client.get_secret_value.return_value = {
+            'SecretString': '{"jenkins_api_token": "admin:a", "jenkins_readonly_token": "ro:r"}',
+        }
+        secret = JenkinsConfig._load_jenkins_secret(MagicMock())
+        self.assertEqual(secret, {'jenkins_api_token': 'admin:a', 'jenkins_readonly_token': 'ro:r'})
+        client.get_secret_value.assert_called_once_with(SecretId='test-secret')
+
+    @patch('config.boto3')
+    def test_load_secret_failure_returns_empty(self, mock_boto3):
+        from config import JenkinsConfig
+        client = mock_boto3.session.Session.return_value.client.return_value
+        client.get_secret_value.side_effect = Exception('boom')
+        self.assertEqual(JenkinsConfig._load_jenkins_secret(MagicMock()), {})
+
+
 def _build_test_registry():
     """Build a JobRegistry with sample jobs for testing."""
     registry = JobRegistry()
@@ -381,6 +448,7 @@ class TestTwoPersonApproval(unittest.TestCase):
         event = self._trigger_event(session_attrs={
             'access_tier': 'privileged',
             'requester_user_id': 'U_REQ', 'approver_user_id': 'U_APP',
+            'approver_is_global_admin': 'true', 'approver_authorized_agents': '',
         })
         result = lambda_handler(event, None)
         body = result['response']['functionResponse']['responseBody']['TEXT']['body']
@@ -408,6 +476,100 @@ class TestTwoPersonApproval(unittest.TestCase):
         body = result['response']['functionResponse']['responseBody']['TEXT']['body']
         self.assertIn('Success', body)
         mock_client.trigger_job.assert_called_once()
+
+    def _run_with_approver(self, mock_config, mock_get_registry, mock_client_cls, approver_attrs, enable_2pr=True):
+        from lambda_function import lambda_handler
+        mock_config.enable_2pr = enable_2pr
+        mock_get_registry.return_value = _build_test_registry()
+        mock_client_cls.return_value.trigger_job.return_value = {
+            'status': 'success', 'workflow_url': 'https://j/job/docker-scan/1/',
+        }
+        attrs = {
+            'is_global_admin': 'false', 'authorized_agents': 'jenkins',
+            'requester_user_id': 'U_REQ', 'approver_user_id': 'U_APP',
+        }
+        attrs.update(approver_attrs)
+        result = lambda_handler(self._trigger_event(session_attrs=attrs), None)
+        return result['response']['functionResponse']['responseBody']['TEXT']['body']
+
+    @patch('lambda_function.JenkinsClient')
+    @patch('lambda_function.get_job_registry')
+    @patch('lambda_function.config')
+    def test_global_admin_approver_proceeds(self, mock_config, mock_get_registry, mock_client_cls):
+        body = self._run_with_approver(mock_config, mock_get_registry, mock_client_cls, {
+            'approver_is_global_admin': 'true', 'approver_authorized_agents': '',
+        })
+        self.assertIn('Success', body)
+        mock_client_cls.return_value.trigger_job.assert_called_once()
+
+    @patch('lambda_function.JenkinsClient')
+    @patch('lambda_function.get_job_registry')
+    @patch('lambda_function.config')
+    def test_jenkins_listed_approver_proceeds(self, mock_config, mock_get_registry, mock_client_cls):
+        body = self._run_with_approver(mock_config, mock_get_registry, mock_client_cls, {
+            'approver_is_global_admin': 'false', 'approver_authorized_agents': 'github,jenkins',
+        })
+        self.assertIn('Success', body)
+        mock_client_cls.return_value.trigger_job.assert_called_once()
+
+    @patch('lambda_function.JenkinsClient')
+    @patch('lambda_function.get_job_registry')
+    @patch('lambda_function.config')
+    def test_other_agent_only_approver_rejected(self, mock_config, mock_get_registry, mock_client_cls):
+        """Privilege on a different agent does not let a user approve Jenkins triggers."""
+        body = self._run_with_approver(mock_config, mock_get_registry, mock_client_cls, {
+            'approver_is_global_admin': 'false', 'approver_authorized_agents': 'github',
+        })
+        self.assertIn('Jenkins execution access', body)
+        self.assertIn('[2PR_PENDING]', body)
+        mock_client_cls.return_value.trigger_job.assert_not_called()
+
+    @patch('lambda_function.JenkinsClient')
+    @patch('lambda_function.get_job_registry')
+    @patch('lambda_function.config')
+    def test_unprivileged_approver_rejected(self, mock_config, mock_get_registry, mock_client_cls):
+        body = self._run_with_approver(mock_config, mock_get_registry, mock_client_cls, {
+            'approver_is_global_admin': 'false', 'approver_authorized_agents': '',
+        })
+        self.assertIn('Jenkins execution access', body)
+        mock_client_cls.return_value.trigger_job.assert_not_called()
+
+    @patch('lambda_function.JenkinsClient')
+    @patch('lambda_function.get_job_registry')
+    @patch('lambda_function.config')
+    def test_approver_without_privilege_attributes_fails_closed(self, mock_config, mock_get_registry, mock_client_cls):
+        body = self._run_with_approver(mock_config, mock_get_registry, mock_client_cls, {})
+        self.assertIn('Jenkins execution access', body)
+        mock_client_cls.return_value.trigger_job.assert_not_called()
+
+    @patch('lambda_function.JenkinsClient')
+    @patch('lambda_function.get_job_registry')
+    @patch('lambda_function.config')
+    def test_unprivileged_approver_rejected_when_2pr_disabled(self, mock_config, mock_get_registry, mock_client_cls):
+        """An approver is still checked when present, even with ENABLE_2PR off."""
+        body = self._run_with_approver(mock_config, mock_get_registry, mock_client_cls, {
+            'approver_is_global_admin': 'false', 'approver_authorized_agents': '',
+        }, enable_2pr=False)
+        self.assertIn('Jenkins execution access', body)
+        mock_client_cls.return_value.trigger_job.assert_not_called()
+
+
+class TestIsJenkinsPrivileged(unittest.TestCase):
+
+    def test_global_admin(self):
+        from lambda_function import _is_jenkins_privileged
+        self.assertTrue(_is_jenkins_privileged('true', ''))
+        self.assertTrue(_is_jenkins_privileged(' TRUE ', None))
+
+    def test_jenkins_listed(self):
+        from lambda_function import _is_jenkins_privileged
+        self.assertTrue(_is_jenkins_privileged('false', 'github, jenkins'))
+
+    def test_not_privileged(self):
+        from lambda_function import _is_jenkins_privileged
+        self.assertFalse(_is_jenkins_privileged('false', 'github'))
+        self.assertFalse(_is_jenkins_privileged(None, None))
+        self.assertFalse(_is_jenkins_privileged('false', 'jenkins-readonly'))
 
 
 class TestValidateBuildParams(unittest.TestCase):
@@ -800,6 +962,95 @@ class TestAccessControl(unittest.TestCase):
         result = lambda_handler(event, None)
         response_body = result['response']['functionResponse']['responseBody']['TEXT']['body']
         self.assertIn('Access denied', response_body)
+
+    @patch('lambda_function.JenkinsClient')
+    @patch('lambda_function.get_job_registry')
+    @patch('lambda_function.config')
+    def test_unknown_tier_fails_closed_blocks_trigger(self, mock_config, mock_get_registry, mock_client_cls):
+        """An unrecognized access_tier must be treated as limited (fail closed)."""
+        from lambda_function import lambda_handler
+        mock_config.enable_2pr = False
+        mock_get_registry.return_value = _build_test_registry()
+
+        event = {
+            'function': 'trigger_job',
+            'parameters': [
+                {'name': 'job_name', 'value': 'docker-scan'},
+                {'name': 'confirmed', 'value': 'true'},
+            ],
+            'sessionAttributes': {'access_tier': 'bogus-tier'},
+        }
+        result = lambda_handler(event, None)
+        body = result['response']['functionResponse']['responseBody']['TEXT']['body']
+        self.assertIn('elevated access', body)
+        mock_client_cls.return_value.trigger_job.assert_not_called()
+
+    @patch('lambda_function.JenkinsClient')
+    @patch('lambda_function.get_job_registry')
+    @patch('lambda_function.config')
+    def test_mixed_case_limited_tier_still_blocks(self, mock_config, mock_get_registry, mock_client_cls):
+        """Casing/whitespace in the tier must not bypass the limited block."""
+        from lambda_function import lambda_handler
+        mock_config.enable_2pr = False
+        mock_get_registry.return_value = _build_test_registry()
+
+        event = {
+            'function': 'trigger_job',
+            'parameters': [
+                {'name': 'job_name', 'value': 'docker-scan'},
+                {'name': 'confirmed', 'value': 'true'},
+            ],
+            'sessionAttributes': {'access_tier': '  LIMITED '},
+        }
+        result = lambda_handler(event, None)
+        body = result['response']['functionResponse']['responseBody']['TEXT']['body']
+        self.assertIn('elevated access', body)
+        mock_client_cls.return_value.trigger_job.assert_not_called()
+
+    @patch('lambda_function.JenkinsClient')
+    @patch('lambda_function.get_job_registry')
+    @patch('lambda_function.config')
+    def test_limited_read_response_tagged_not_triggerable(self, mock_config, mock_get_registry, mock_client_cls):
+        """A limited user's list_jobs response is tagged triggerable=False with a note."""
+        from lambda_function import lambda_handler
+        mock_config.get_token_for_access_tier.return_value = 'readonly-user:readonly-token'
+        mock_get_registry.return_value = _build_test_registry()
+        mock_client_cls.return_value.list_available_jobs.return_value = {
+            'status': 'success',
+            'jobs': {'docker-scan': {'description': 'scan', 'parameters': {}}},
+        }
+
+        event = {
+            'function': 'list_jobs',
+            'parameters': [],
+            'sessionAttributes': {'access_tier': 'limited'},
+        }
+        result = lambda_handler(event, None)
+        body = result['response']['functionResponse']['responseBody']['TEXT']['body']
+        self.assertIn('triggerable', body)
+        self.assertIn('Read-only access', body)
+
+    @patch('lambda_function.JenkinsClient')
+    @patch('lambda_function.get_job_registry')
+    @patch('lambda_function.config')
+    def test_privileged_read_response_not_tagged(self, mock_config, mock_get_registry, mock_client_cls):
+        """A privileged user's list_jobs response is NOT tagged."""
+        from lambda_function import lambda_handler
+        mock_config.get_token_for_access_tier.return_value = 'admin-user:admin-token'
+        mock_get_registry.return_value = _build_test_registry()
+        mock_client_cls.return_value.list_available_jobs.return_value = {
+            'status': 'success',
+            'jobs': {'docker-scan': {'description': 'scan', 'parameters': {}}},
+        }
+
+        event = {
+            'function': 'list_jobs',
+            'parameters': [],
+            'sessionAttributes': {'access_tier': 'privileged'},
+        }
+        result = lambda_handler(event, None)
+        body = result['response']['functionResponse']['responseBody']['TEXT']['body']
+        self.assertNotIn('triggerable', body)
 
 
 @patch.dict(os.environ, _JENKINS_ENV)

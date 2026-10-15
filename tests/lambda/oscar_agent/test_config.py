@@ -95,6 +95,24 @@ class TestConfig:
             assert cfg.agent_tiers == {}
 
     @mock_aws
+    def test_non_object_authorization_json_fails_closed(self):
+        _setup_aws(users=json.dumps(['admin-gh']))  # valid JSON, but not an object
+        with patch.dict(os.environ, BASE_ENV, clear=False):
+            mod = _load_real_config_module()
+            cfg = mod.Config(validate_required=False)
+            assert cfg.global_admins == []
+            assert cfg.agent_tiers == {}
+
+    @mock_aws
+    def test_null_authorization_sections_default_to_empty(self):
+        _setup_aws(users=json.dumps({'global': None, 'agents': None}))
+        with patch.dict(os.environ, BASE_ENV, clear=False):
+            mod = _load_real_config_module()
+            cfg = mod.Config(validate_required=False)
+            assert cfg.global_admins == []
+            assert cfg.agent_tiers == {}
+
+    @mock_aws
     def test_parses_channel_allow_list(self):
         _setup_aws()
         with patch.dict(os.environ, BASE_ENV, clear=False):

@@ -255,6 +255,71 @@ class TestBuildIdentityAttributes:
         assert result['is_global_admin'] == 'false'
         assert result['authorized_agents'] == ''
 
+    def _pending_processor(self, approver_handle):
+        """Processor with a pending requester so the current user becomes approver."""
+        storage = Mock()
+        storage.get_context.return_value = {
+            'pending_approval_requester': 'U_ORIGINAL',
+            'pending_approval_expires_at': time.time() + 300,
+        }
+        mp = _make_processor(storage=storage)
+        # Requester lookup returns a handle; approver lookup returns approver_handle.
+
+        def _record(uid):
+            return {'github_handle': 'req-gh'} if uid == 'U_ORIGINAL' else {'github_handle': approver_handle}
+        mp._get_identity_record = Mock(side_effect=_record)
+        mp._resolve_display_name = Mock(return_value='')
+        return mp
+
+    def test_global_admin_approver_is_admin_true(self):
+        """A global-admin approver is accepted (approver_is_admin=True)."""
+        mp = self._pending_processor('admin-gh')
+        result = mp._build_identity_attributes('C123_ts1', 'U_APPROVER')
+        assert result['approver_user_id'] == 'U_APPROVER'
+        assert result['approver_is_admin'] == 'True'
+
+    def test_agent_only_approver_is_not_admin(self):
+        """A jenkins-only approver is NOT a global admin -> approver_is_admin=False.
+
+        Enforces the stricter 2PR rule: approver must be a global admin, not
+        merely an agent-level authorized user.
+        """
+        mp = self._pending_processor('jenkins-gh')
+        result = mp._build_identity_attributes('C123_ts1', 'U_APPROVER')
+        assert result['approver_user_id'] == 'U_APPROVER'
+        assert result['approver_is_admin'] == 'False'
+
+    def test_global_admin_approver_privilege_recorded(self):
+        mp = self._pending_processor('admin-gh')
+        result = mp._build_identity_attributes('C123_ts1', 'U_APPROVER')
+        assert result['approver_is_global_admin'] == 'true'
+        assert result['approver_authorized_agents'] == ''
+
+    def test_agent_level_approver_privilege_recorded(self):
+        """A jenkins-only approver's per-agent privilege is passed so the Jenkins
+        Lambda can accept them as an approver."""
+        mp = self._pending_processor('jenkins-gh')
+        result = mp._build_identity_attributes('C123_ts1', 'U_APPROVER')
+        assert result['approver_is_global_admin'] == 'false'
+        assert result['approver_authorized_agents'] == 'jenkins'
+
+    def test_unlinked_approver_has_no_privilege(self):
+        mp = self._pending_processor('')
+        result = mp._build_identity_attributes('C123_ts1', 'U_APPROVER')
+        assert result['approver_is_global_admin'] == 'false'
+        assert result['approver_authorized_agents'] == ''
+
+    def test_requester_only_has_no_approver_privilege_attrs(self):
+        """Without an approver, no approver privilege attributes are set."""
+        storage = Mock()
+        storage.get_context.return_value = None
+        mp = _make_processor(storage=storage)
+        mp._get_identity_record = Mock(return_value={'github_handle': 'admin-gh'})
+        mp._resolve_display_name = Mock(return_value='')
+        result = mp._build_identity_attributes('C123_ts1', 'U_ADMIN')
+        assert 'approver_is_global_admin' not in result
+        assert 'approver_authorized_agents' not in result
+
 
 class TestIsFullyAuthorizedUser:
 
@@ -893,6 +958,67 @@ class TestIdentityRecordCache:
         second = mp._get_identity_record("U123")
         assert second["github_handle"] == "user1"
         assert table.query.call_count == 1  # still 1 — cache hit
+
+    @patch.dict(os.environ, {"IDENTITY_TABLE_NAME": "oscar-identity-W1-dev"})
+    @patch("slack_handler.message_processor.boto3")
+    def test_reset_identity_cache_forces_fresh_lookup(self, mock_boto3):
+        table = Mock()
+        table.query.return_value = {"Items": [{"status": "active", "github_handle": "user1"}]}
+        mock_boto3.resource.return_value.Table.return_value = table
+
+        mp = _make_processor()
+        mp._get_identity_record = MessageProcessor._get_identity_record.__get__(mp, MessageProcessor)
+        mp._get_identity_record("U123")
+        mp.reset_identity_cache()
+        mp._get_identity_record("U123")
+        assert table.query.call_count == 2
+
+
+class TestProcessMessageIdentityCacheReuse:
+    """process_message queries the identity table once per message."""
+
+    def _setup(self, mock_boto3):
+        table = Mock()
+        table.query.return_value = {"Items": [{"status": "active", "github_handle": "gh-user"}]}
+        mock_boto3.resource.return_value.Table.return_value = table
+
+        storage = Mock()
+        storage.get_context.return_value = {'session_id': 'sess1'}
+        storage.get_context_for_query.return_value = ''
+        timeout_handler = Mock()
+        timeout_handler.query_agent_with_timeout.return_value = ('response', 'sess2')
+
+        mp = _make_processor(storage=storage, timeout_handler=timeout_handler)
+        mp._get_identity_record = MessageProcessor._get_identity_record.__get__(mp, MessageProcessor)
+        return mp, table
+
+    @patch.dict(os.environ, {"IDENTITY_TABLE_NAME": "oscar-identity-W1-dev"})
+    @patch("slack_handler.message_processor.boto3")
+    def test_reuses_primed_cache_when_reset_disabled(self, mock_boto3):
+        """The DM path primes the cache in its auth check; process_message must not query again."""
+        mp, table = self._setup(mock_boto3)
+        mp.reset_identity_cache()
+        mp.is_global_admin('U_ADMIN')
+        assert table.query.call_count == 1
+
+        mp.process_message('D123', 'tts', 'U_ADMIN', 'hello', Mock(), message_ts='mts',
+                           reset_identity_cache=False)
+
+        assert table.query.call_count == 1
+        mp.timeout_handler.query_agent_with_timeout.assert_called_once()
+
+    @patch.dict(os.environ, {"IDENTITY_TABLE_NAME": "oscar-identity-W1-dev"})
+    @patch("slack_handler.message_processor.boto3")
+    def test_default_reset_discards_previous_message_cache(self, mock_boto3):
+        """A record cached by an earlier message is not reused, and the fresh
+        record is queried only once for the whole message."""
+        mp, table = self._setup(mock_boto3)
+        mp._get_identity_record('U_ADMIN')  # left over from a previous message
+        assert table.query.call_count == 1
+
+        mp.process_message('C_ALLOWED', 'tts', 'U_ADMIN', '<@BOT> hello', Mock(), message_ts='mts')
+
+        assert table.query.call_count == 2
 
 
 class TestConfirmationRequiredExistingRequester:
