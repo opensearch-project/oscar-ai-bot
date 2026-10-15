@@ -137,11 +137,23 @@ def _install_fake_github(
     pkg_pr_items=None,
     advisory_error=None,
     search_error=None,
+    registry_versions=None,
+    repo_renames=None,
 ):
-    """Replace the module's ``requests`` with a fake routed by URL/query."""
+    """Replace the module's ``requests`` with a fake routed by URL/query.
+
+    ``registry_versions`` is a set of ``"package@version"`` strings that the
+    fake treats as published (HEAD 200 for Maven Central, GET 200 for npm).
+    ``None`` (the default) means all versions exist (no 404s).
+
+    ``repo_renames`` is a dict mapping ``"owner/old-name"`` to ``"new-name"``.
+    When the fake sees a ``GET /repos/owner/old-name`` call, it returns the
+    new name. ``None`` (the default) means no renames (returns the name as-is).
+    """
     advisories = advisories if advisories is not None else []
     cve_pr_items = cve_pr_items or []
     pkg_pr_items = pkg_pr_items or []
+    repo_renames = repo_renames or {}
 
     def _get(url, params=None, headers=None, timeout=None):
         if url.endswith('/advisories'):
@@ -154,10 +166,39 @@ def _install_fake_github(
             q = (params or {}).get('q', '')
             items = cve_pr_items if 'CVE-' in q else pkg_pr_items
             return _FakeResp({'items': items})
+        if 'registry.npmjs.org' in url:
+            if registry_versions is not None:
+                parts = url.rstrip('/').rsplit('/', 2)
+                pkg_version = f"{parts[-2]}@{parts[-1]}" if len(parts) >= 3 else ''
+                if pkg_version not in registry_versions:
+                    return _FakeResp({}, status_code=404)
+            return _FakeResp({})
+        if '/repos/' in url and '/advisories' not in url:
+            parts = url.rstrip('/').split('/')
+            if len(parts) >= 2:
+                owner_name = f"{parts[-2]}/{parts[-1]}"
+                canonical = repo_renames.get(owner_name, parts[-1])
+                return _FakeResp({'name': canonical})
+        return _FakeResp({})
+
+    def _head(url, timeout=None, allow_redirects=True):
+        if 'ci.opensearch.org/maven2' in url:
+            if registry_versions is not None:
+                # URL: .../group/artifact/version/artifact-version.pom
+                # Extract artifact@version from the URL path.
+                segments = url.rstrip('/').split('/')
+                if len(segments) >= 3 and segments[-1].endswith('.pom'):
+                    version = segments[-2]
+                    artifact = segments[-3]
+                    pkg_version = f"{artifact}@{version}"
+                    if pkg_version not in registry_versions:
+                        return _FakeResp({}, status_code=404)
+            return _FakeResp({})
         return _FakeResp({})
 
     fake_requests = MagicMock()
     fake_requests.get = MagicMock(side_effect=_get)
+    fake_requests.head = MagicMock(side_effect=_head)
     mod.requests = fake_requests
     return fake_requests
 
@@ -308,11 +349,13 @@ class TestListAffectedRepositories:
         filters = json.loads(body)['query']['bool']['filter']
         assert {'range': {'timestamp.scan': {'gte': 'now-7d'}}} in filters
 
-    def test_does_no_github_calls(self):
+    def test_only_repo_name_resolution_github_call(self):
         mod, _ = _load_remediation_handler()
         fake = _install_fake_github(mod)
         mod.handle_list_affected_repositories({'cve_id': 'CVE-2023-45857'}, 'la5')
-        fake.get.assert_not_called()
+        calls = [c for c in fake.get.call_args_list
+                 if '/repos/' not in str(c)]
+        assert len(calls) == 0
 
     def test_unparseable_repo_url_is_skipped(self):
         mod, _ = _load_remediation_handler(
@@ -689,8 +732,11 @@ class TestGates:
         mod.handle_remediate_cve(
             {'cve_id': 'CVE-2023-45857', 'repo_name': 'OpenSearch-Dashboards'}, 't19',
         )
-        # the ecosystem gate (from the cluster) fires before any GitHub call
-        fake.get.assert_not_called()
+        # the ecosystem gate fires before advisory lookup or PR search;
+        # only the repo name resolution call (to /repos/) is made
+        calls = [c for c in fake.get.call_args_list
+                 if '/repos/' not in str(c)]
+        assert len(calls) == 0
 
 
 # ---------------------------------------------------------------------------
@@ -943,6 +989,35 @@ class TestParseRepoUrl:
         assert mod._parse_repo_url('not-a-url') == ('', '')
         assert mod._parse_repo_url('') == ('', '')
         assert mod._parse_repo_url('https://github.com/only-owner') == ('', '')
+
+
+class TestResolveCanonicalRepoName:
+    def test_renamed_repo_returns_canonical(self):
+        mod, _ = _load_remediation_handler()
+        _install_fake_github(
+            mod,
+            repo_renames={
+                'opensearch-project/opensearch-ai-flow-framework': 'flow-framework',
+            },
+        )
+        result = mod._resolve_canonical_repo_name(
+            'opensearch-project', 'opensearch-ai-flow-framework', 'req')
+        assert result == 'flow-framework'
+
+    def test_unchanged_repo_returns_same_name(self):
+        mod, _ = _load_remediation_handler()
+        _install_fake_github(mod)
+        result = mod._resolve_canonical_repo_name(
+            'opensearch-project', 'OpenSearch', 'req')
+        assert result == 'OpenSearch'
+
+    def test_api_failure_returns_original_name(self):
+        mod, _ = _load_remediation_handler()
+        mod.requests = MagicMock()
+        mod.requests.get = MagicMock(side_effect=ConnectionError('down'))
+        result = mod._resolve_canonical_repo_name(
+            'opensearch-project', 'opensearch-ai-flow-framework', 'req')
+        assert result == 'opensearch-ai-flow-framework'
 
 
 # ---------------------------------------------------------------------------
@@ -1961,6 +2036,84 @@ class TestResolveRemediation:
         result = mod._resolve_remediation(
             'CVE-1', 'npm', 'axios', '2.0.0', 'org', 'repo', 'req')
         assert result['outcome'] == 'already_patched'
+
+    def test_version_not_found_on_maven_central(self):
+        mod, _ = _load_remediation_handler()
+        _install_fake_github(
+            mod,
+            advisories=_advisory(ecosystem='maven',
+                                 name='org.eclipse.jetty:jetty-security',
+                                 patched='9.4.63'),
+            registry_versions=set(),
+        )
+        result = mod._resolve_remediation(
+            'CVE-1', 'maven', 'org.eclipse.jetty:jetty-security', '9.4.58',
+            'org', 'repo', 'req')
+        assert result['outcome'] == 'version_not_found'
+        assert result['patched_version'] == '9.4.63'
+
+    def test_version_not_found_on_npm_registry(self):
+        mod, _ = _load_remediation_handler()
+        _install_fake_github(
+            mod,
+            advisories=_advisory(patched='2.0.0'),
+            registry_versions=set(),
+        )
+        result = mod._resolve_remediation(
+            'CVE-1', 'npm', 'axios', '1.0.0', 'org', 'repo', 'req')
+        assert result['outcome'] == 'version_not_found'
+
+    def test_version_exists_proceeds_to_ready(self):
+        mod, _ = _load_remediation_handler()
+        _install_fake_github(
+            mod,
+            advisories=_advisory(ecosystem='maven',
+                                 name='org.eclipse.jetty:jetty-security',
+                                 patched='9.4.57'),
+            registry_versions={'jetty-security@9.4.57'},
+        )
+        result = mod._resolve_remediation(
+            'CVE-1', 'maven', 'org.eclipse.jetty:jetty-security', '9.4.50',
+            'org', 'repo', 'req', skip_pr_check=True)
+        assert result['outcome'] == 'ready'
+
+    def test_registry_failure_fails_open(self):
+        mod, _ = _load_remediation_handler()
+        fake = _install_fake_github(mod, advisories=_advisory(patched='1.6.0'))
+        original_get = fake.get.side_effect
+
+        def _get_that_breaks_registry(url, **kwargs):
+            if 'registry.npmjs.org' in url or 'ci.opensearch.org/maven2' in url:
+                raise ConnectionError('down')
+            return original_get(url, **kwargs)
+
+        fake.get = MagicMock(side_effect=_get_that_breaks_registry)
+        fake.head = MagicMock(side_effect=ConnectionError('down'))
+        result = mod._resolve_remediation(
+            'CVE-1', 'npm', 'axios', '1.0.0', 'org', 'repo', 'req',
+            skip_pr_check=True)
+        assert result['outcome'] == 'ready'
+
+    def test_verify_version_exists_colon_separated_maven(self):
+        """_verify_version_exists must not fail-open on group:artifact input."""
+        mod, _ = _load_remediation_handler()
+        fake_resp = MagicMock()
+        fake_resp.status_code = 404
+        fake_requests = MagicMock()
+        fake_requests.head = MagicMock(return_value=fake_resp)
+        mod.requests = fake_requests
+
+        result = mod._verify_version_exists(
+            'maven', 'org.eclipse.jetty:jetty-security', '9.4.63', 'test-req')
+
+        assert result is False
+        fake_requests.head.assert_called_once()
+        called_url = fake_requests.head.call_args[0][0]
+        assert called_url == (
+            'https://ci.opensearch.org/maven2/'
+            'org/eclipse/jetty/jetty-security/9.4.63/'
+            'jetty-security-9.4.63.pom'
+        )
 
 
 class TestChunkSearchTerms:
