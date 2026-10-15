@@ -182,7 +182,7 @@ def _install_fake_github(
         return _FakeResp({})
 
     def _head(url, timeout=None, allow_redirects=True):
-        if 'repo1.maven.org' in url:
+        if 'ci.opensearch.org/maven2' in url:
             if registry_versions is not None:
                 # URL: .../group/artifact/version/artifact-version.pom
                 # Extract artifact@version from the URL path.
@@ -2083,7 +2083,7 @@ class TestResolveRemediation:
         original_get = fake.get.side_effect
 
         def _get_that_breaks_registry(url, **kwargs):
-            if 'registry.npmjs.org' in url or 'repo1.maven.org' in url:
+            if 'registry.npmjs.org' in url or 'ci.opensearch.org/maven2' in url:
                 raise ConnectionError('down')
             return original_get(url, **kwargs)
 

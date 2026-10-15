@@ -1797,7 +1797,7 @@ def _verify_version_exists(
             if not group_path or not artifact:
                 return True
             url = (
-                f'https://repo1.maven.org/maven2/'
+                f'https://ci.opensearch.org/maven2/'
                 f'{group_path}/{artifact}/{version}/'
                 f'{artifact}-{version}.pom'
             )
