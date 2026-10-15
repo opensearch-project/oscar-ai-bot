@@ -2094,6 +2094,27 @@ class TestResolveRemediation:
             skip_pr_check=True)
         assert result['outcome'] == 'ready'
 
+    def test_verify_version_exists_colon_separated_maven(self):
+        """_verify_version_exists must not fail-open on group:artifact input."""
+        mod, _ = _load_remediation_handler()
+        fake_resp = MagicMock()
+        fake_resp.status_code = 404
+        fake_requests = MagicMock()
+        fake_requests.head = MagicMock(return_value=fake_resp)
+        mod.requests = fake_requests
+
+        result = mod._verify_version_exists(
+            'maven', 'org.eclipse.jetty:jetty-security', '9.4.63', 'test-req')
+
+        assert result is False
+        fake_requests.head.assert_called_once()
+        called_url = fake_requests.head.call_args[0][0]
+        assert called_url == (
+            'https://ci.opensearch.org/maven2/'
+            'org/eclipse/jetty/jetty-security/9.4.63/'
+            'jetty-security-9.4.63.pom'
+        )
+
 
 class TestChunkSearchTerms:
     """Unit tests for _chunk_search_terms (CVE ID chunking for bulk search)."""
