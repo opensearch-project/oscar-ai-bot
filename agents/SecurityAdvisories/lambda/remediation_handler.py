@@ -163,6 +163,7 @@ def _resolve_remediation(
       'unsupported_ecosystem'
       'no_patched_version'   -> gh_package
       'already_patched'      -> gh_package, patched_version
+      'version_not_found'    -> gh_package, patched_version (registry 404)
       'pr_exists'            -> gh_package, patched_version, pr {url,title,matched_by}
       'error'                -> code='github_error', message (derive/PR-check stage)
 
@@ -212,6 +213,22 @@ def _resolve_remediation(
         )
         return {
             'outcome': 'already_patched',
+            'gh_package': gh_package,
+            'patched_version': patched_version,
+        }
+
+    # gate 4: verify the patched version actually exists on the package registry.
+    # The GitHub Advisory API can list a first_patched_version that was never
+    # published (e.g. jetty 9.4.63); dispatching a worker for a phantom version
+    # wastes a Fargate task and opens a PR that breaks the build.
+    if not _verify_version_exists(ecosystem, gh_package or package, patched_version, request_id):
+        logger.warning(
+            f"[{request_id}] REMEDIATE_CVE_VERSION_NOT_FOUND: "
+            f"{gh_package or package}@{patched_version} does not exist on the "
+            f"{ecosystem} registry"
+        )
+        return {
+            'outcome': 'version_not_found',
             'gh_package': gh_package,
             'patched_version': patched_version,
         }
@@ -422,6 +439,19 @@ def handle_remediate_cve(
             'message': (
                 f"No patched version is available for {cve_id}, so it cannot be "
                 f"remediated by a version bump."
+            ),
+        }
+
+    if kind == 'version_not_found':
+        return {
+            'status': 'version_not_found',
+            'cve_id': cve_id,
+            'package': package,
+            'patched_version': outcome['patched_version'],
+            'message': (
+                f"The patched version {outcome['patched_version']} for {cve_id} "
+                f"({package}) does not exist on the {ecosystem} package registry. "
+                f"The GitHub Advisory may reference an unpublished version."
             ),
         }
 
@@ -1713,6 +1743,55 @@ def _at_or_above_version(installed: str, patched: str) -> bool:
         return semver.Version.parse(installed) >= semver.Version.parse(patched)
     except (ValueError, TypeError):
         return False
+
+
+def _verify_version_exists(
+    ecosystem: str, package: str, version: str, request_id: str,
+) -> bool:
+    """True if ``version`` of ``package`` exists on the ecosystem's registry.
+
+    A lightweight HEAD/GET check against Maven Central or the npm registry,
+    catching advisory-listed versions that were never published. Returns True
+    on network errors (fail-open) so a transient registry outage doesn't block
+    all remediations.
+    """
+    try:
+        if ecosystem == 'maven':
+            coord = _normalize_pkg_name(package)
+            group_path = coord.rsplit('/', 1)[0].replace('.', '/') if '/' in coord else ''
+            artifact = coord.rsplit('/', 1)[-1] if '/' in coord else coord
+            if not group_path or not artifact:
+                return True
+            url = (
+                f'https://repo1.maven.org/maven2/'
+                f'{group_path}/{artifact}/{version}/'
+                f'{artifact}-{version}.pom'
+            )
+            resp = requests.head(url, timeout=10, allow_redirects=True)
+            if resp.status_code == 404:
+                logger.warning(
+                    f"[{request_id}] VERSION_CHECK_404: {url}"
+                )
+                return False
+            return True
+        elif ecosystem == 'npm':
+            name = package.strip()
+            if not name:
+                return True
+            url = f'https://registry.npmjs.org/{name}/{version}'
+            resp = requests.get(url, timeout=10)
+            if resp.status_code == 404:
+                logger.warning(
+                    f"[{request_id}] VERSION_CHECK_404: {url}"
+                )
+                return False
+            return True
+    except Exception as e:
+        logger.warning(
+            f"[{request_id}] VERSION_CHECK_FAILED: {ecosystem} "
+            f"{package}@{version}: {e}"
+        )
+    return True
 
 
 def _normalize_pkg_name(name: str) -> str:
