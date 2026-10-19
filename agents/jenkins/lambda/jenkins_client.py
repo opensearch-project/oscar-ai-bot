@@ -28,32 +28,32 @@ logger.setLevel(logging.INFO)
 
 
 class JenkinsCredentials:
-    """Manages Jenkins credentials from configuration."""
+    """Manages Jenkins credentials."""
 
-    def __init__(self):
+    def __init__(self, jenkins_token: str):
+        """
+        Args:
+            jenkins_token: Credential string in 'username:token' format,
+                           selected by config.get_token_for_access_tier().
+        """
+        self._jenkins_token = jenkins_token
         self._username: Optional[str] = None
         self._token: Optional[str] = None
         self._credentials_loaded = False
 
     def _load_credentials(self) -> None:
-        """Load credentials from configuration (already loaded from secrets manager)."""
+        """Parse the 'username:token' string on first use."""
         if self._credentials_loaded:
-            logger.info("JENKINS CREDENTIALS: Already loaded, skipping")
             return
 
         try:
-            jenkins_api_token = config.jenkins_api_token
+            if not self._jenkins_token or ':' not in self._jenkins_token:
+                raise ValueError("Jenkins token format should be 'username:token'")
 
-            if not jenkins_api_token:
-                raise ValueError("JENKINS_API_TOKEN not found in configuration")
-
-            if ':' in jenkins_api_token:
-                self._username, self._token = jenkins_api_token.split(':', 1)
-                self._username = self._username.strip()
-                self._token = self._token.strip()
-                self._credentials_loaded = True
-            else:
-                raise ValueError("Jenkins API token format should be 'username:token'")
+            self._username, self._token = self._jenkins_token.split(':', 1)
+            self._username = self._username.strip()
+            self._token = self._token.strip()
+            self._credentials_loaded = True
 
         except Exception as e:
             raise Exception(f"Failed to load Jenkins credentials: {str(e)}")
@@ -77,8 +77,8 @@ class JenkinsCredentials:
 class JenkinsClient:
     """Main Jenkins client for job operations."""
 
-    def __init__(self, job_registry: JobRegistry):
-        self.credentials = JenkinsCredentials()
+    def __init__(self, job_registry: JobRegistry, jenkins_token: str):
+        self.credentials = JenkinsCredentials(jenkins_token)
         self.session = requests.Session()
         self.session.timeout = config.request_timeout
         self.session.verify = config.verify_ssl

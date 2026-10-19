@@ -16,6 +16,7 @@ import boto3
 from config import config
 from input_validator import InputValidationError, validate_and_sanitize
 from oscar_shared.auth_policy import derive_tier
+from oscar_shared.authorization import resolve_authorized_agents
 from oscar_shared.oauth_state import generate_state
 from slack_sdk import WebClient
 
@@ -61,8 +62,17 @@ class MessageProcessor:
         return query
 
     def _enrich_user_attrs(self, attrs: dict, user_id: str, prefix: str) -> None:
-        """Add admin, github_handle, is_maintainer, and tier for a user."""
-        is_admin = self.is_fully_authorized_user(user_id)
+        """Add admin, github_handle, is_maintainer, and tier for a user.
+
+        The approver's ``is_admin`` is intentionally stricter: a 2PR approver
+        for an admin/maintainer operation must be a GLOBAL admin, not merely an
+        agent-level authorized user. Requester enrichment keeps the broader
+        is_fully_authorized_user semantics used for routing/context isolation.
+        """
+        if prefix == 'approver':
+            is_admin = self.is_global_admin(user_id)
+        else:
+            is_admin = self.is_fully_authorized_user(user_id)
         attrs[f'{prefix}_is_admin'] = str(is_admin)
 
         record = self._get_identity_record(user_id)
@@ -130,6 +140,14 @@ class MessageProcessor:
         display_name = self._resolve_display_name(attrs['requester_user_id'])
         if display_name:
             attrs['requester_display_name'] = display_name
+
+        # Enrich the requester with GitHub identity + per-agent privilege so
+        # each agent Lambda can enforce its own tier without reading the secret.
+        requester_id = attrs['requester_user_id']
+        github_handle, is_global, agents = self._resolve_privilege(requester_id)
+        attrs['requester_github_handle'] = github_handle
+        attrs['is_global_admin'] = 'true' if is_global else 'false'
+        attrs['authorized_agents'] = ','.join(sorted(agents))
 
         return attrs
 
@@ -316,19 +334,75 @@ class MessageProcessor:
             logger.warning("Failed to fetch thread parent: %s", e)
             return ""
 
+    def _get_identity_record(self, user_id: str) -> dict:
+        """Look up the active identity record for a Slack user.
+
+        Returns the full DynamoDB item, or an empty dict if the user has no
+        active GitHub link. Cached per-message in ``self._identity_cache``.
+        """
+        cache = getattr(self, '_identity_cache', None)
+        if cache is None:
+            self._identity_cache = cache = {}
+        if user_id in cache:
+            return cache[user_id]
+
+        table = self._get_identity_table()
+        resp = table.query(
+            IndexName="slack-user-index",
+            KeyConditionExpression="slack_user_id = :uid",
+            ExpressionAttributeValues={":uid": user_id},
+        )
+        record = next((i for i in resp.get("Items", []) if i.get("status") == "active"), {})
+        cache[user_id] = record
+        return record
+
+    def _resolve_privilege(self, user_id: str):
+        """Resolve (github_handle, is_global, agents) for a Slack user.
+
+        Maps the Slack user to their linked GitHub handle via the identity
+        table, then resolves privilege from the central authorization config.
+        Fails closed: an unlinked user (no handle) has no privilege.
+        """
+        github_handle = self._get_identity_record(user_id).get("github_handle", "")
+        is_global, agents = resolve_authorized_agents(
+            github_handle, config.global_admins, config.agent_tiers
+        )
+        return github_handle, is_global, agents
+
     def is_fully_authorized_user(self, user_id: str) -> bool:
         """
-        Check if a user is fully authorized to use privileged features.
+        Check if a user is privileged for any agent (global or agent-level).
+
+        Authorization is keyed by the user's linked GitHub handle (resolved via
+        the identity table), checked against the central authorization config.
+        Used for supervisor routing and context isolation; per-agent enforcement
+        additionally happens in each agent Lambda via session attributes.
 
         Args:
-            user_id: The user ID to check
+            user_id: The Slack user ID to check
 
         Returns:
-            True if the user is fully authorized, False otherwise
+            True if the user is a global admin or privileged for any agent.
         """
-        is_authorized = user_id in config.fully_authorized_users
+        _, is_global, agents = self._resolve_privilege(user_id)
+        is_authorized = is_global or bool(agents)
         logger.debug(f"User {user_id} authorization check: {is_authorized}")
         return is_authorized
+
+    def is_global_admin(self, user_id: str) -> bool:
+        """Check if a user is a GLOBAL admin (privileged for every agent).
+
+        Stricter than :meth:`is_fully_authorized_user`: agent-level users
+        (e.g. jenkins-only) return False. Keyed by linked GitHub handle.
+
+        Args:
+            user_id: The Slack user ID to check
+
+        Returns:
+            True only if the user's linked GitHub handle is in the global list.
+        """
+        _, is_global, _ = self._resolve_privilege(user_id)
+        return is_global
 
     def _get_identity_table(self):
         """Get the identity DynamoDB table (cached)."""
@@ -339,31 +413,6 @@ class MessageProcessor:
             dynamodb_resource = boto3.resource("dynamodb", region_name=os.environ.get("AWS_REGION", "us-east-1"))
             self._identity_table = dynamodb_resource.Table(table_name)
         return self._identity_table
-
-    def _get_identity_record(self, user_id: str) -> dict:
-        """Look up the active identity record for a Slack user.
-
-        Returns the full DynamoDB item or an empty dict if not found.
-        Results are cached per user_id for the lifetime of this instance.
-        """
-        cache = getattr(self, '_identity_cache', None)
-        if cache is None:
-            self._identity_cache = cache = {}
-        if user_id in cache:
-            return cache[user_id]
-        table = self._get_identity_table()
-        resp = table.query(
-            IndexName="slack-user-index",
-            KeyConditionExpression="slack_user_id = :uid",
-            ExpressionAttributeValues={":uid": user_id},
-        )
-        record = {}
-        for item in resp.get("Items", []):
-            if item.get("status") == "active":
-                record = item
-                break
-        cache[user_id] = record
-        return record
 
     def _has_identity_mapping(self, user_id: str) -> bool:
         return bool(self._get_identity_record(user_id))
@@ -443,6 +492,10 @@ class MessageProcessor:
         self.reaction_manager.manage_reactions(channel, reaction_ts, add_reaction="thinking_face")
 
         start_time = time.time()
+
+        # Reset per-message identity cache (records are cached only for the
+        # lifetime of a single message to avoid duplicate DynamoDB queries).
+        self._identity_cache = {}
 
         try:
             # Extract or generate query based on source

@@ -30,8 +30,10 @@ def _load_real_config_module():
 
 
 def _setup_aws(slack_token='xoxb-test', signing_secret='secret123',
-               users='U1,U2', channels='C1,C2'):
+               users=None, channels='C1,C2'):
     """Create central secret and SSM params in moto."""
+    if users is None:
+        users = json.dumps({'global': ['admin-gh'], 'agents': {'jenkins': ['jenkins-gh']}})
     sm = boto3.client('secretsmanager', region_name='us-east-1')
     sm.create_secret(
         Name='oscar-central-env-test',
@@ -75,12 +77,22 @@ class TestConfig:
             assert cfg.slack_signing_secret == 'secret123'
 
     @mock_aws
-    def test_parses_comma_separated_user_lists(self):
+    def test_parses_authorization_json(self):
         _setup_aws()
         with patch.dict(os.environ, BASE_ENV, clear=False):
             mod = _load_real_config_module()
             cfg = mod.Config(validate_required=False)
-            assert cfg.fully_authorized_users == ['U1', 'U2']
+            assert cfg.global_admins == ['admin-gh']
+            assert cfg.agent_tiers == {'jenkins': ['jenkins-gh']}
+
+    @mock_aws
+    def test_malformed_authorization_json_fails_closed(self):
+        _setup_aws(users='U1,U2')  # legacy CSV string -> invalid JSON
+        with patch.dict(os.environ, BASE_ENV, clear=False):
+            mod = _load_real_config_module()
+            cfg = mod.Config(validate_required=False)
+            assert cfg.global_admins == []
+            assert cfg.agent_tiers == {}
 
     @mock_aws
     def test_parses_channel_allow_list(self):
