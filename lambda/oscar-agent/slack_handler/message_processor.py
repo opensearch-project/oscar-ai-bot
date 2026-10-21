@@ -149,8 +149,8 @@ class MessageProcessor:
         if response_lower.startswith('security error:') and any(
             phrase in response_lower for phrase in (
                 'self-approval', 'two-person', 'two person', '2pr',
-                'approval required', 'approval window', 'second user',
-                'second authorized', 'distinct approver', 'second-person',
+                'second user', 'second authorized',
+                'distinct approver', 'second-person',
             )
         ):
             return True
