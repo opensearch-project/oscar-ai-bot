@@ -912,6 +912,11 @@ class TestIsApprovalRejection:
             'Two-person approval is a great security practice!'
         ) is False
 
+    def test_security_error_mid_sentence_not_detected(self):
+        assert MessageProcessor._is_approval_rejection(
+            'There was a security error: self-approval is not allowed.'
+        ) is False
+
 
 class TestTwoPRPriorityOverConfirmationRequired:
     """When LLM generates both [2PR_PENDING] and [CONFIRMATION_REQUIRED],

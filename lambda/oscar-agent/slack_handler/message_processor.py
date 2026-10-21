@@ -110,6 +110,7 @@ class MessageProcessor:
 
             if pending_requester:
                 self._had_pending = True
+                self._pending_requester = pending_requester
                 attrs['requester_user_id'] = pending_requester
                 self._enrich_user_attrs(attrs, pending_requester, 'requester')
                 if current_user_id != pending_requester:
@@ -145,7 +146,7 @@ class MessageProcessor:
         if '[2PR_PENDING]' in response:
             return True
         response_lower = response.lower()
-        if 'security error' in response_lower and any(
+        if response_lower.startswith('security error:') and any(
             phrase in response_lower for phrase in (
                 'self-approval', 'two-person', 'two person', '2pr',
                 'approval required', 'approval window', 'second user',
@@ -559,12 +560,13 @@ class MessageProcessor:
                 existing_requester = stored_ctx.get('pending_approval_requester') if stored_ctx else None
                 if not existing_requester or self.is_fully_authorized_user(user_id):
                     self.storage.set_pending_approval_requester(thread_key, user_id)
-            elif getattr(self, '_had_pending', False) and not getattr(self, '_consumed_pending', None):
-                # A pending 2PR state exists and the current user is the
-                # requester (same-user, no approval consumed).  The response
-                # may be a reformulated 2PR error that lost its marker — do
-                # NOT clear the pending state.  The TTL will clean it up if
-                # the conversation moves on.
+            elif (getattr(self, '_had_pending', False)
+                  and not getattr(self, '_consumed_pending', None)
+                  and user_id == getattr(self, '_pending_requester', None)):
+                # Same user who created the pending request, no approval
+                # consumed — the response may be a reformulated 2PR error
+                # that lost its marker.  Preserve the pending state; TTL
+                # will clean it up if the conversation moves on.
                 pass
             else:
                 self.storage.clear_pending_approval_requester(thread_key)
