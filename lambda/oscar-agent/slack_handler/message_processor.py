@@ -91,8 +91,12 @@ class MessageProcessor:
 
         # Track pending-state disposition so the rejection path in
         # process_message can decide whether to restore, skip, or create.
+        # These three attrs are read later in process_message (the 2PR
+        # rejection / preserve-pending branches).  Always set together here
+        # so _had_pending == True guarantees _pending_requester is populated.
         self._consumed_pending = None
         self._had_pending = False
+        self._pending_requester = None
 
         stored_context = self.storage.get_context(thread_key)
         if stored_context:
