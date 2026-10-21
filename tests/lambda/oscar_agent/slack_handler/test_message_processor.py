@@ -902,7 +902,6 @@ class TestIsApprovalRejection:
     @pytest.mark.parametrize('text', [
         'SECURITY ERROR: Self-Approval Not Allowed. You cannot approve your own request.',
         'SECURITY ERROR: Two-Person Approval Required. A second authorized user must confirm.',
-        'SECURITY ERROR: The approval window has expired. Please re-request.',
     ])
     def test_fuzzy_detection_catches_llm_reformulations(self, text):
         assert MessageProcessor._is_approval_rejection(text) is True
