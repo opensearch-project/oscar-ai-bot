@@ -233,9 +233,10 @@ class OscarAgentsStack(Stack):
             5. **GitHub operations** – Querying and managing GitHub repositories, pull requests, issues, labels, CI/CD workflows, code scanning alerts, commits, branches, and code search (delegated to GitHub Specialist agent).
 
             ## Routing Rules
-            - For Jenkins job requests → delegate to the Jenkins Specialist.
+            - For Jenkins job requests → delegate to the Jenkins Specialist. Any action performed by a Jenkins job belongs here — even if the job's output lands on GitHub (e.g., automated comments on release issues via release chores).
             - For metrics, build status, test results → delegate to the Metrics Specialist.
             - For release readiness of a specific version ("what is the status of 3.9.0", "is 3.9.0 ready/a go", "what is blocking 3.9.0", readiness criteria or verdict), release timing (RC/release dates, days remaining, release manager), and whether a version has shipped ("was 3.8.0 released", "has 3.8.0 shipped", "when was 3.8.0 released") → delegate to the Metrics Specialist.
+            - For any live release data — build numbers, distribution build details, artifact information, RC state — delegate to the Metrics Specialist. NEVER guess, fabricate, or construct artifact URLs or build numbers yourself; the Metrics Specialist has the actual indexed data.
             - For security vulnerabilities, CVEs, security advisories, and vulnerability scans → delegate to the Security Advisories Specialist.
             - For GitHub operations (repos, PRs, issues, labels, commits, branches, code search, Actions, code scanning) → delegate to the GitHub Specialist.
             - To record a release manager's Go/No-Go decision ("go for 3.9.0", "we are a no-go on 3.9.0", "put 3.9.0 on hold"), use BOTH specialists in this order:
@@ -333,8 +334,9 @@ class OscarAgentsStack(Stack):
             ## Routing Rules
             - For metrics, build status, test results → delegate to the Metrics Specialist.
             - For release readiness of a specific version ("what is the status of 3.9.0", "is 3.9.0 ready/a go", "what is blocking 3.9.0", readiness criteria or verdict), release timing (RC/release dates, days remaining, release manager), and whether a version has shipped ("was 3.8.0 released", "has 3.8.0 shipped", "when was 3.8.0 released") → delegate to the Metrics Specialist.
+            - For any live release data — build numbers, distribution build details, artifact information, RC state — delegate to the Metrics Specialist. NEVER guess, fabricate, or construct artifact URLs or build numbers yourself; the Metrics Specialist has the actual indexed data.
             - For security vulnerabilities, CVEs, security advisories, and vulnerability scans → respond with the static message below (do NOT delegate).
-            - For GitHub operations (searching PRs/issues, creating tags or branches, looking up maintainers) → delegate to the GitHub Specialist.
+            - For direct GitHub API operations (searching PRs/issues, creating tags or branches, looking up maintainers) → delegate to the GitHub Specialist.
             - For OpenSearch configuration, installation instructions, APIs, commands & information to build and test, release process questions as well as Best practices, troubleshooting guides, release workflows, and release manager duties. → query the knowledge base.
             - The knowledge base describes how releases work, not the live state of any release. It is NOT authoritative on whether a specific version was released, when it shipped, or its dates — those always go to the Metrics Specialist. Never conclude that a version does not exist or was not released because the knowledge base lacks documentation for it.
             - For anything outside the above → respond with a polite redirect (see below).

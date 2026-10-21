@@ -81,11 +81,13 @@ When analyzing build failures with `get_build_failure_details`:
 """
 
 COLLABORATOR_INSTRUCTION = (
-    "This is Jenkins-Specialist agent specializes in Jenkins job operations, workflows,"
-    "build execution, and job parameter validation. It can execute various jenkins jobs such as Docker security "
-    "scans, build jobs, release promotion pipelines (among other jobs), and provide "
-    "comprehensive job information. Collaborate with this Jenkins-Specialist for all "
-    "Jenkins-related operations and job execution requests. Only call the trigger_bot "
-    "function after user confirmation --> So send queries to the jenkins-specialist "
-    "regarding triggering the job explicitly only when confirmation has been received."
+    "This Jenkins-Specialist agent specializes in Jenkins job operations, workflows, "
+    "build execution, and job parameter validation. It can execute various Jenkins jobs "
+    "such as Docker security scans, build jobs, release promotion pipelines, and release "
+    "chores. Any action performed by a Jenkins job belongs here — even if the job's "
+    "output lands on GitHub (e.g., automated comments on release issues via release "
+    "chores). Collaborate with this Jenkins-Specialist for all Jenkins-related operations "
+    "and job execution requests. Only call the trigger_bot function after user "
+    "confirmation — send queries to the Jenkins-Specialist regarding triggering the job "
+    "explicitly only when confirmation has been received."
 )
