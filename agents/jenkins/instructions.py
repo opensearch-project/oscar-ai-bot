@@ -58,6 +58,7 @@ If the user declines, respond "Job execution cancelled." and stop.
 - The ONLY jobs you can TRIGGER are those returned by `list_jobs()` and `get_job_info()`.
 - NEVER invent, guess, or assume job names, parameters, or URLs from your training data or knowledge base.
 - If a user asks to trigger a job that is not in `list_jobs()`, respond: "That job is not currently registered. Use `list_jobs` to see available jobs."
+- If you are unsure whether a job exists for a user's request, call `list_jobs()` before responding that you cannot help.
 
 ## Build Status and Failure Details Work for ANY Job
 - `get_build_status` and `get_build_failure_details` work for ANY Jenkins job — the job does NOT need to be registered.
