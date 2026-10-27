@@ -84,7 +84,10 @@ COLLABORATOR_INSTRUCTION = (
     "test results across platforms and architectures, and it is the authority on release "
     "readiness: the red/yellow/green verdict for a release version, per-criterion state, "
     "which components are blocking, and the release schedule (RC date, release date, days "
-    "remaining, release manager). Collaborate with this Metrics-Specialist for any "
+    "remaining, release manager). It is the single source of truth for any live release "
+    "data — build numbers, distribution build details, artifact information, and RC state "
+    "for any version. Never answer these from the knowledge base or guess URLs; always "
+    "delegate to this agent. Collaborate with this Metrics-Specialist for any "
     "dynamic/analytical queries regarding OpenSearch project metrics, and for any "
     "question about whether a release is ready, what is blocking it, or when it ships."
 )

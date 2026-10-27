@@ -151,6 +151,11 @@ COLLABORATOR_INSTRUCTION = """Route to this agent when the user asks about:
 - Searching or listing PRs and issues
 - Looking up who maintains a specific repository
 - Approving or confirming a GitHub operation from a notification thread
+This agent handles GitHub operations requested by the user. If the user's request \
+is fulfilled by a Jenkins job that happens to write to GitHub (e.g., posting \
+automated comments on release issues via release chores), route to the Jenkins \
+Specialist instead. If the user needs live build data, artifact details, or build \
+numbers, route to the Metrics Specialist instead.
 All operations are scoped to the {org} organization. \
 Bulk merge operations validate PRs against safety guardrails before merging. \
 Only call bulk_merge_prs or bulk_comment after user confirmation. \

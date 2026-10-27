@@ -58,6 +58,7 @@ If the user declines, respond "Job execution cancelled." and stop.
 - The ONLY jobs you can TRIGGER are those returned by `list_jobs()` and `get_job_info()`.
 - NEVER invent, guess, or assume job names, parameters, or URLs from your training data or knowledge base.
 - If a user asks to trigger a job that is not in `list_jobs()`, respond: "That job is not currently registered. Use `list_jobs` to see available jobs."
+- If you are unsure whether a job exists for a user's request, call `list_jobs()` before responding that you cannot help.
 
 ## Build Status and Failure Details Work for ANY Job
 - `get_build_status` and `get_build_failure_details` work for ANY Jenkins job — the job does NOT need to be registered.
@@ -81,11 +82,13 @@ When analyzing build failures with `get_build_failure_details`:
 """
 
 COLLABORATOR_INSTRUCTION = (
-    "This is Jenkins-Specialist agent specializes in Jenkins job operations, workflows,"
-    "build execution, and job parameter validation. It can execute various jenkins jobs such as Docker security "
-    "scans, build jobs, release promotion pipelines (among other jobs), and provide "
-    "comprehensive job information. Collaborate with this Jenkins-Specialist for all "
-    "Jenkins-related operations and job execution requests. Only call the trigger_bot "
-    "function after user confirmation --> So send queries to the jenkins-specialist "
-    "regarding triggering the job explicitly only when confirmation has been received."
+    "This Jenkins-Specialist agent specializes in Jenkins job operations, workflows, "
+    "build execution, and job parameter validation. It can execute various Jenkins jobs "
+    "such as Docker security scans, build jobs, release promotion pipelines, and release "
+    "chores. Any action performed by a Jenkins job belongs here — even if the job's "
+    "output lands on GitHub (e.g., automated comments on release issues via release "
+    "chores). Collaborate with this Jenkins-Specialist for all Jenkins-related operations "
+    "and job execution requests. Only call the trigger_bot function after user "
+    "confirmation — send queries to the Jenkins-Specialist regarding triggering the job "
+    "explicitly only when confirmation has been received."
 )

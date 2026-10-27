@@ -91,8 +91,12 @@ class MessageProcessor:
 
         # Track pending-state disposition so the rejection path in
         # process_message can decide whether to restore, skip, or create.
+        # These three attrs are read later in process_message (the 2PR
+        # rejection / preserve-pending branches).  Always set together here
+        # so _had_pending == True guarantees _pending_requester is populated.
         self._consumed_pending = None
         self._had_pending = False
+        self._pending_requester = None
 
         stored_context = self.storage.get_context(thread_key)
         if stored_context:
@@ -110,6 +114,7 @@ class MessageProcessor:
 
             if pending_requester:
                 self._had_pending = True
+                self._pending_requester = pending_requester
                 attrs['requester_user_id'] = pending_requester
                 self._enrich_user_attrs(attrs, pending_requester, 'requester')
                 if current_user_id != pending_requester:
@@ -138,10 +143,22 @@ class MessageProcessor:
         """Check if the response indicates a 2PR rejection (approval still pending).
 
         The Lambda appends [2PR_PENDING] to approval errors. The LLM is
-        instructed to preserve bracketed markers, so we match on the exact
-        tag rather than fuzzy keyword heuristics.
+        instructed to preserve bracketed markers, but may reformulate the
+        error without them. A fuzzy fallback catches common reformulations
+        so the pending state is not accidentally cleared.
         """
-        return '[2PR_PENDING]' in response
+        if '[2PR_PENDING]' in response:
+            return True
+        response_lower = response.lower()
+        if response_lower.startswith('security error:') and any(
+            phrase in response_lower for phrase in (
+                'self-approval', 'two-person', 'two person', '2pr',
+                'second user', 'second authorized',
+                'distinct approver', 'second-person',
+            )
+        ):
+            return True
+        return False
 
     def _resolve_display_name(self, user_id: str) -> str:
         """Resolve a Slack user id to a display name, asking Slack rather than the model.
@@ -515,15 +532,14 @@ class MessageProcessor:
             # turn (the approval or any non-confirmation response) — UNLESS
             # the response is a 2PR rejection (e.g. self-approval, non-admin
             # approver, expired window), which means the prompt is still pending.
-            # Only overwrite an existing requester if the current user is authorized
-            # (matches main's behavior where only admins could interact). This prevents
-            # a non-authorized user providing follow-up from becoming the requester.
-            if confirmation_required:
-                stored_ctx = self.storage.get_context(thread_key)
-                existing_requester = stored_ctx.get('pending_approval_requester') if stored_ctx else None
-                if not existing_requester or self.is_fully_authorized_user(user_id):
-                    self.storage.set_pending_approval_requester(thread_key, user_id)
-            elif response and self._is_approval_rejection(response):
+            #
+            # _is_approval_rejection is checked FIRST because when the LLM
+            # relays a 2PR error it may also include [CONFIRMATION_REQUIRED]
+            # (asking the user to try again). The 2PR restore/preserve logic
+            # must run in that case, not the "new confirmation prompt" path
+            # which would overwrite the pending requester.
+            is_2pr_rejection = response and self._is_approval_rejection(response)
+            if is_2pr_rejection:
                 consumed = getattr(self, '_consumed_pending', None)
                 if consumed:
                     # Rejected approval consumed the pending state (different
@@ -540,6 +556,22 @@ class MessageProcessor:
                 # Otherwise: same-user self-approval — pending is still in
                 # storage with its original TTL; nothing to do.
                 response = response.replace('[2PR_PENDING]', '').strip()
+            elif confirmation_required:
+                # Only overwrite an existing requester if the current user is
+                # authorized. This prevents a non-authorized user providing
+                # follow-up from becoming the requester.
+                stored_ctx = self.storage.get_context(thread_key)
+                existing_requester = stored_ctx.get('pending_approval_requester') if stored_ctx else None
+                if not existing_requester or self.is_fully_authorized_user(user_id):
+                    self.storage.set_pending_approval_requester(thread_key, user_id)
+            elif (getattr(self, '_had_pending', False)
+                  and not getattr(self, '_consumed_pending', None)
+                  and user_id == getattr(self, '_pending_requester', None)):
+                # Same user who created the pending request, no approval
+                # consumed — the response may be a reformulated 2PR error
+                # that lost its marker.  Preserve the pending state; TTL
+                # will clean it up if the conversation moves on.
+                pass
             else:
                 self.storage.clear_pending_approval_requester(thread_key)
 
