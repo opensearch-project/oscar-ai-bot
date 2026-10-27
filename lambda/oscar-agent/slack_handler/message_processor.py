@@ -91,12 +91,8 @@ class MessageProcessor:
 
         # Track pending-state disposition so the rejection path in
         # process_message can decide whether to restore, skip, or create.
-        # These three attrs are read later in process_message (the 2PR
-        # rejection / preserve-pending branches).  Always set together here
-        # so _had_pending == True guarantees _pending_requester is populated.
         self._consumed_pending = None
         self._had_pending = False
-        self._pending_requester = None
 
         stored_context = self.storage.get_context(thread_key)
         if stored_context:
@@ -114,7 +110,6 @@ class MessageProcessor:
 
             if pending_requester:
                 self._had_pending = True
-                self._pending_requester = pending_requester
                 attrs['requester_user_id'] = pending_requester
                 self._enrich_user_attrs(attrs, pending_requester, 'requester')
                 if current_user_id != pending_requester:
@@ -137,28 +132,6 @@ class MessageProcessor:
             attrs['requester_display_name'] = display_name
 
         return attrs
-
-    @staticmethod
-    def _is_approval_rejection(response: str) -> bool:
-        """Check if the response indicates a 2PR rejection (approval still pending).
-
-        The Lambda appends [2PR_PENDING] to approval errors. The LLM is
-        instructed to preserve bracketed markers, but may reformulate the
-        error without them. A fuzzy fallback catches common reformulations
-        so the pending state is not accidentally cleared.
-        """
-        if '[2PR_PENDING]' in response:
-            return True
-        response_lower = response.lower()
-        if response_lower.startswith('security error:') and any(
-            phrase in response_lower for phrase in (
-                'self-approval', 'two-person', 'two person', '2pr',
-                'second user', 'second authorized',
-                'distinct approver', 'second-person',
-            )
-        ):
-            return True
-        return False
 
     def _resolve_display_name(self, user_id: str) -> str:
         """Resolve a Slack user id to a display name, asking Slack rather than the model.
@@ -514,7 +487,7 @@ class MessageProcessor:
                     formatted_context = parent_context + "\n" + formatted_context if formatted_context else parent_context
 
             # Query OSCAR agent with timeout monitoring (using formatted context)
-            response, new_session_id = self.timeout_handler.query_agent_with_timeout(
+            response, new_session_id, saw_2pr_rejection = self.timeout_handler.query_agent_with_timeout(
                 self.oscar_agent, query, privilege, session_id, formatted_context, channel, reaction_ts,
                 start_time, say, thread_ts, user_id, session_attributes=identity_attrs
             )
@@ -527,19 +500,9 @@ class MessageProcessor:
             confirmation_required = response and '[CONFIRMATION_REQUIRED]' in response
             response = self._handle_confirmation_detection(response, channel, thread_ts)
 
-            # Track who triggered the confirmation for 2PR identity provenance.
-            # Set when a confirmation prompt is emitted; clear after the next
-            # turn (the approval or any non-confirmation response) — UNLESS
-            # the response is a 2PR rejection (e.g. self-approval, non-admin
-            # approver, expired window), which means the prompt is still pending.
-            #
-            # _is_approval_rejection is checked FIRST because when the LLM
-            # relays a 2PR error it may also include [CONFIRMATION_REQUIRED]
-            # (asking the user to try again). The 2PR restore/preserve logic
-            # must run in that case, not the "new confirmation prompt" path
-            # which would overwrite the pending requester.
-            is_2pr_rejection = response and self._is_approval_rejection(response)
-            if is_2pr_rejection:
+            # 2PR rejection is detected from Bedrock Agent trace events
+            # (deterministic, pre-LLM), not from parsing the LLM output.
+            if saw_2pr_rejection:
                 consumed = getattr(self, '_consumed_pending', None)
                 if consumed:
                     # Rejected approval consumed the pending state (different
@@ -564,14 +527,6 @@ class MessageProcessor:
                 existing_requester = stored_ctx.get('pending_approval_requester') if stored_ctx else None
                 if not existing_requester or self.is_fully_authorized_user(user_id):
                     self.storage.set_pending_approval_requester(thread_key, user_id)
-            elif (getattr(self, '_had_pending', False)
-                  and not getattr(self, '_consumed_pending', None)
-                  and user_id == getattr(self, '_pending_requester', None)):
-                # Same user who created the pending request, no approval
-                # consumed — the response may be a reformulated 2PR error
-                # that lost its marker.  Preserve the pending state; TTL
-                # will clean it up if the conversation moves on.
-                pass
             else:
                 self.storage.clear_pending_approval_requester(thread_key)
 

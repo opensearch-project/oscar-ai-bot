@@ -406,7 +406,7 @@ class TestProcessMessageContextIntegration:
         }]}
 
         timeout_handler = Mock()
-        timeout_handler.query_agent_with_timeout.return_value = ('Response', 'sess2')
+        timeout_handler.query_agent_with_timeout.return_value = ('Response', 'sess2', False)
 
         mp = _make_processor(
             storage=storage,
@@ -435,7 +435,7 @@ class TestProcessMessage:
         storage.get_context_for_query.return_value = ''
 
         timeout_handler = Mock()
-        timeout_handler.query_agent_with_timeout.return_value = ('Agent response', 'sess2')
+        timeout_handler.query_agent_with_timeout.return_value = ('Agent response', 'sess2', False)
 
         mp = _make_processor(
             storage=storage,
@@ -460,7 +460,7 @@ class TestProcessMessage:
 
     def test_empty_agent_response_sends_fallback(self):
         mp, _, say = self._setup()
-        mp.timeout_handler.query_agent_with_timeout.return_value = ('', 'sess2')
+        mp.timeout_handler.query_agent_with_timeout.return_value = ('', 'sess2', False)
 
         mp.process_message('C_ALLOWED', 'tts', 'U_ADMIN', '<@BOT> hello', say, message_ts='mts')
 
@@ -470,7 +470,7 @@ class TestProcessMessage:
     def test_none_response_returns_early(self):
         """When agent returns None response (timeout or otherwise), method returns early."""
         mp, _, say = self._setup()
-        mp.timeout_handler.query_agent_with_timeout.return_value = (None, 'sess2')
+        mp.timeout_handler.query_agent_with_timeout.return_value = (None, 'sess2', False)
 
         mp.process_message('C_ALLOWED', 'tts', 'U_ADMIN', '<@BOT> hello', say, message_ts='mts')
 
@@ -478,7 +478,7 @@ class TestProcessMessage:
 
     def test_timeout_returns_early(self):
         mp, _, say = self._setup()
-        mp.timeout_handler.query_agent_with_timeout.return_value = (None, None)
+        mp.timeout_handler.query_agent_with_timeout.return_value = (None, None, False)
 
         mp.process_message('C_ALLOWED', 'tts', 'U_ADMIN', '<@BOT> hello', say, message_ts='mts')
 
@@ -636,7 +636,7 @@ class TestProcessMessageIdentityGate:
         storage.get_context_for_query.return_value = ''
 
         timeout_handler = Mock()
-        timeout_handler.query_agent_with_timeout.return_value = ('response', 'sess2')
+        timeout_handler.query_agent_with_timeout.return_value = ('response', 'sess2', False)
 
         mp = _make_processor(storage=storage, reaction_manager=Mock(), timeout_handler=timeout_handler)
         mp._has_identity_mapping = Mock(return_value=has_mapping)
@@ -663,7 +663,7 @@ class TestProcessMessageIdentityGate:
         advisory_response = (
             'Here is a detailed CVE breakdown from advisories.opensearch.org with specifics.'
         )
-        mp.timeout_handler.query_agent_with_timeout.return_value = (advisory_response, 'sess2')
+        mp.timeout_handler.query_agent_with_timeout.return_value = (advisory_response, 'sess2', False)
 
         say = Mock()
         mp.process_message('C_ALLOWED', 'tts', 'U_ADMIN', '<@BOT> show vulns', say, message_ts='mts')
@@ -694,7 +694,7 @@ class TestTwoPRPendingStripping:
         """[2PR_PENDING] tag is removed before sending to Slack."""
         mp, storage = self._setup()
         mp.timeout_handler.query_agent_with_timeout.return_value = (
-            'SECURITY ERROR: Self-approval is not permitted. [2PR_PENDING]', 'sess2'
+            'SECURITY ERROR: Self-approval is not permitted. [2PR_PENDING]', 'sess2', True
         )
         say = Mock()
         mp.process_message('C_ALLOWED', 'tts', 'U_ADMIN', '<@BOT> yes', say, message_ts='mts')
@@ -707,7 +707,7 @@ class TestTwoPRPendingStripping:
         """First-time 2PR rejection (no prior pending) records the current user."""
         mp, storage = self._setup()
         mp.timeout_handler.query_agent_with_timeout.return_value = (
-            'SECURITY ERROR: requires approval. [2PR_PENDING]', 'sess2'
+            'SECURITY ERROR: requires approval. [2PR_PENDING]', 'sess2', True
         )
         say = Mock()
         mp.process_message('C_ALLOWED', 'tts', 'U_ADMIN', '<@BOT> yes', say, message_ts='mts')
@@ -729,7 +729,7 @@ class TestTwoPRPendingStripping:
         storage.get_context_for_query.return_value = ''
         timeout_handler = Mock()
         timeout_handler.query_agent_with_timeout.return_value = (
-            'SECURITY ERROR: requires admin approval. [2PR_PENDING]', 'sess2'
+            'SECURITY ERROR: requires admin approval. [2PR_PENDING]', 'sess2', True
         )
         mp = _make_processor(
             storage=storage, reaction_manager=Mock(), timeout_handler=timeout_handler,
@@ -760,7 +760,7 @@ class TestTwoPRPendingStripping:
         storage.get_context_for_query.return_value = ''
         timeout_handler = Mock()
         timeout_handler.query_agent_with_timeout.return_value = (
-            'SECURITY ERROR: Self-approval is not permitted. [2PR_PENDING]', 'sess2'
+            'SECURITY ERROR: Self-approval is not permitted. [2PR_PENDING]', 'sess2', True
         )
         mp = _make_processor(
             storage=storage, reaction_manager=Mock(), timeout_handler=timeout_handler,
@@ -840,7 +840,7 @@ class TestConfirmationRequiredExistingRequester:
         mp, storage = self._setup()
         # Agent returns a confirmation prompt
         mp.timeout_handler.query_agent_with_timeout.return_value = (
-            'Shall I proceed? [CONFIRMATION_REQUIRED]', 'sess2'
+            'Shall I proceed? [CONFIRMATION_REQUIRED]', 'sess2', False
         )
         # Existing requester already set in context
         storage.get_context.return_value = {
@@ -858,7 +858,7 @@ class TestConfirmationRequiredExistingRequester:
         """When existing_requester exists and current user IS admin, requester is overwritten."""
         mp, storage = self._setup()
         mp.timeout_handler.query_agent_with_timeout.return_value = (
-            'Shall I proceed? [CONFIRMATION_REQUIRED]', 'sess2'
+            'Shall I proceed? [CONFIRMATION_REQUIRED]', 'sess2', False
         )
         storage.get_context.return_value = {
             'session_id': 'sess1', 'history': [],
@@ -874,7 +874,7 @@ class TestConfirmationRequiredExistingRequester:
         """When no existing_requester, any user triggering [CONFIRMATION_REQUIRED] becomes requester."""
         mp, storage = self._setup()
         mp.timeout_handler.query_agent_with_timeout.return_value = (
-            'Shall I proceed? [CONFIRMATION_REQUIRED]', 'sess2'
+            'Shall I proceed? [CONFIRMATION_REQUIRED]', 'sess2', False
         )
         # No pending_approval_requester in stored context
         storage.get_context.return_value = {'session_id': 'sess1', 'history': []}
@@ -884,42 +884,10 @@ class TestConfirmationRequiredExistingRequester:
         storage.set_pending_approval_requester.assert_called()
 
 
-class TestIsApprovalRejection:
-    """Cover _is_approval_rejection static method."""
-
-    def test_2pr_pending_detected(self):
-        assert MessageProcessor._is_approval_rejection('error [2PR_PENDING]') is True
-
-    def test_no_tag_not_detected(self):
-        assert MessageProcessor._is_approval_rejection('some generic error') is False
-
-    def test_security_error_without_2pr_keywords_not_detected(self):
-        assert MessageProcessor._is_approval_rejection('SECURITY ERROR: something unrelated') is False
-
-    def test_empty_string(self):
-        assert MessageProcessor._is_approval_rejection('') is False
-
-    @pytest.mark.parametrize('text', [
-        'SECURITY ERROR: Self-Approval Not Allowed. You cannot approve your own request.',
-        'SECURITY ERROR: Two-Person Approval Required. A second authorized user must confirm.',
-    ])
-    def test_fuzzy_detection_catches_llm_reformulations(self, text):
-        assert MessageProcessor._is_approval_rejection(text) is True
-
-    def test_non_security_error_with_keywords_not_detected(self):
-        assert MessageProcessor._is_approval_rejection(
-            'Two-person approval is a great security practice!'
-        ) is False
-
-    def test_security_error_mid_sentence_not_detected(self):
-        assert MessageProcessor._is_approval_rejection(
-            'There was a security error: self-approval is not allowed.'
-        ) is False
-
-
-class TestTwoPRPriorityOverConfirmationRequired:
-    """When LLM generates both [2PR_PENDING] and [CONFIRMATION_REQUIRED],
-    the 2PR restore/preserve logic must run, not the confirmation path."""
+class TestTwoPRTraceDetection:
+    """2PR rejection is detected from Bedrock Agent trace events (deterministic),
+    not from parsing the LLM output. The saw_2pr_rejection flag from the trace
+    drives the state machine regardless of what the LLM text says."""
 
     def _setup(self):
         storage = Mock()
@@ -942,12 +910,13 @@ class TestTwoPRPriorityOverConfirmationRequired:
         })
         return mp, storage, original_expires
 
-    def test_2pr_rejection_takes_priority_over_confirmation(self):
-        """Response with both markers should run the 2PR path, not confirmation."""
+    def test_trace_signal_takes_priority_over_confirmation_marker(self):
+        """When trace says 2PR rejection, the 2PR path runs even if
+        [CONFIRMATION_REQUIRED] is also in the LLM text."""
         mp, storage, original_expires = self._setup()
         mp.timeout_handler.query_agent_with_timeout.return_value = (
-            'SECURITY ERROR: requires admin approval. [2PR_PENDING] [CONFIRMATION_REQUIRED]',
-            'sess2',
+            'SECURITY ERROR: requires admin approval. [CONFIRMATION_REQUIRED]',
+            'sess2', True,
         )
         say = Mock()
         mp.process_message('C_ALLOWED', 'tts', 'U_NON_ADMIN', '<@BOT> yes', say, message_ts='mts')
@@ -957,12 +926,9 @@ class TestTwoPRPriorityOverConfirmationRequired:
             'C_ALLOWED_tts', 'U_ORIGINAL_REQ', expires_at=original_expires,
         )
 
-
-class TestPendingPreservedOnUntaggedSelfApproval:
-    """When the same user attempts self-approval and the LLM drops [2PR_PENDING],
-    the pending state must not be cleared."""
-
-    def test_same_user_response_without_markers_preserves_pending(self):
+    def test_trace_signal_handles_dropped_marker(self):
+        """When the LLM drops [2PR_PENDING] entirely but the trace caught it,
+        pending state is still preserved."""
         storage = Mock()
         storage.get_context.return_value = {
             'session_id': 'sess1', 'history': [],
@@ -971,9 +937,9 @@ class TestPendingPreservedOnUntaggedSelfApproval:
         }
         storage.get_context_for_query.return_value = ''
         timeout_handler = Mock()
-        # LLM lost the [2PR_PENDING] marker — response looks like a normal message
+        # LLM dropped the marker — but trace detected it
         timeout_handler.query_agent_with_timeout.return_value = (
-            'You need a different user to approve this action.', 'sess2'
+            'You need a different user to approve this action.', 'sess2', True
         )
         mp = _make_processor(
             storage=storage, reaction_manager=Mock(), timeout_handler=timeout_handler,
@@ -983,9 +949,9 @@ class TestPendingPreservedOnUntaggedSelfApproval:
             "github_handle": "gh-user", "is_org_maintainer": False,
         })
         say = Mock()
-        # Same user as pending requester
+        # Same user as pending requester — self-approval
         mp.process_message('C_ALLOWED', 'tts', 'U_ADMIN', '<@BOT> yes', say, message_ts='mts')
 
-        # Pending must NOT be cleared — still waiting for a different approver
+        # Pending must NOT be cleared — trace says it's a 2PR rejection
         storage.clear_pending_approval_requester.assert_not_called()
         storage.set_pending_approval_requester.assert_not_called()

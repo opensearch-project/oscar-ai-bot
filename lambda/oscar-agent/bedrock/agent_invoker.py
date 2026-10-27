@@ -131,6 +131,7 @@ class BedrockAgentCore:
             # Process the streaming response
             response_text = ""
             returned_session_id = None
+            saw_2pr_rejection = False
 
             if 'completion' in response:
                 for event in response['completion']:
@@ -142,6 +143,16 @@ class BedrockAgentCore:
                     if guardrail_trace and guardrail_trace.get('action') == 'INTERVENED':
                         assessments = guardrail_trace.get('inputAssessments', [])
                         logger.warning(f"GUARDRAIL_INTERVENED: assessments={assessments}")
+
+                    # Detect 2PR rejections from raw tool results in
+                    # orchestration traces — before the LLM reformulates them.
+                    orch_trace = trace_data.get('orchestrationTrace', {})
+                    observation = orch_trace.get('observation', {})
+                    action_output = observation.get('actionGroupInvocationOutput', {})
+                    action_text = action_output.get('text', '')
+                    if '[2PR_PENDING]' in action_text:
+                        saw_2pr_rejection = True
+                        logger.info("2PR_TRACE: detected [2PR_PENDING] in tool result trace")
 
                     if 'chunk' in event:
                         chunk = event['chunk']
@@ -171,8 +182,10 @@ class BedrockAgentCore:
 
             logger.info(f"Agent response received, length: {len(response_text)} characters")
             logger.info(f"Final session ID: {returned_session_id}")
+            if saw_2pr_rejection:
+                logger.info("2PR_TRACE: returning saw_2pr_rejection=True")
 
-            return response_text.strip(), returned_session_id
+            return response_text.strip(), returned_session_id, saw_2pr_rejection
 
         except ClientError as e:
             error_code = e.response['Error']['Code']
