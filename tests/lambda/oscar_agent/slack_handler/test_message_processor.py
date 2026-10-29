@@ -327,13 +327,17 @@ class TestFetchThreadParentContext:
 
     def test_no_slack_client_returns_empty(self):
         mp = _make_processor(slack_client=None)
-        assert mp._fetch_thread_parent_context('C123', 'ts1') == ""
+        context, author = mp._fetch_thread_parent_context('C123', 'ts1')
+        assert context == ""
+        assert author == ""
 
     def test_empty_messages_returns_empty(self):
         slack = Mock()
         slack.conversations_replies.return_value = {"messages": []}
         mp = _make_processor(slack_client=slack)
-        assert mp._fetch_thread_parent_context('C123', 'ts1') == ""
+        context, author = mp._fetch_thread_parent_context('C123', 'ts1')
+        assert context == ""
+        assert author == ""
 
     def test_block_kit_parsed_into_structured_context(self):
         slack = Mock()
@@ -349,7 +353,7 @@ class TestFetchThreadParentContext:
             ],
         }]}
         mp = _make_processor(slack_client=slack)
-        result = mp._fetch_thread_parent_context('C123', 'ts1')
+        result, author = mp._fetch_thread_parent_context('C123', 'ts1')
         assert "GitHub notification" in result
         assert "opensearch-project/OpenSearch" in result
         assert "#42" not in result  # number extracted separately
@@ -357,6 +361,7 @@ class TestFetchThreadParentContext:
         assert "user123" in result
         assert "<external_data>" in result
         assert "</external_data>" in result
+        assert author == ""  # no bot_id on parent, so author not trusted
 
     def test_plain_text_fallback(self):
         slack = Mock()
@@ -365,15 +370,18 @@ class TestFetchThreadParentContext:
             "blocks": [],
         }]}
         mp = _make_processor(slack_client=slack)
-        result = mp._fetch_thread_parent_context('C123', 'ts1')
+        result, author = mp._fetch_thread_parent_context('C123', 'ts1')
         assert "DATA ONLY" in result
         assert "plain notification" in result
+        assert author == ""
 
     def test_exception_returns_empty(self):
         slack = Mock()
         slack.conversations_replies.side_effect = Exception("API error")
         mp = _make_processor(slack_client=slack)
-        assert mp._fetch_thread_parent_context('C123', 'ts1') == ""
+        context, author = mp._fetch_thread_parent_context('C123', 'ts1')
+        assert context == ""
+        assert author == ""
 
     def test_sanitizes_body_content(self):
         slack = Mock()
@@ -388,7 +396,7 @@ class TestFetchThreadParentContext:
             ],
         }]}
         mp = _make_processor(slack_client=slack)
-        result = mp._fetch_thread_parent_context('C123', 'ts1')
+        result, _ = mp._fetch_thread_parent_context('C123', 'ts1')
         assert "[FILTERED]" in result
 
 
@@ -404,6 +412,7 @@ class TestProcessMessageContextIntegration:
             "text": "notification text",
             "blocks": [],
         }]}
+        slack.auth_test.return_value = {"bot_id": "B_TEST"}
 
         timeout_handler = Mock()
         timeout_handler.query_agent_with_timeout.return_value = ('Response', 'sess2')
@@ -424,6 +433,102 @@ class TestProcessMessageContextIntegration:
         # Verify context was passed to agent
         call_args = timeout_handler.query_agent_with_timeout.call_args[0]
         assert "notification text" in call_args[4]
+
+    def test_webhook_notification_sets_external_requester(self):
+        storage = Mock()
+        storage.get_context.return_value = None
+        storage.get_context_for_query.return_value = ''
+        slack = Mock()
+        slack.auth_test.return_value = {"bot_id": "B_OSCAR"}
+        slack.conversations_replies.return_value = {"messages": [{"bot_id": "B_OSCAR", "blocks": [
+            {"type": "section", "fields": [
+                {"type": "mrkdwn", "text": "*Repo:*\norg/repo"},
+                {"type": "mrkdwn", "text": "*From:*\ngh-author"},
+            ]},
+        ]}]}
+        timeout_handler = Mock()
+        timeout_handler.query_agent_with_timeout.return_value = ('Response', 'sess2')
+        mp = _make_processor(storage=storage, reaction_manager=Mock(),
+                             timeout_handler=timeout_handler, slack_client=slack)
+        mp._has_identity_mapping = Mock(return_value=True)
+        mp._get_identity_record = Mock(return_value={"github_handle": "x", "is_org_maintainer": False})
+        mp.process_message('C_ALLOWED', 'thread_ts', 'U_ADMIN', '<@BOT> hi', Mock(), message_ts='msg_ts')
+        attrs = timeout_handler.query_agent_with_timeout.call_args[1].get('session_attributes', {})
+        assert attrs.get("external_requester") == "true"
+        assert attrs.get("requester_user_id") == "github:gh-author"
+
+
+class TestFetchThreadParentContextAuthor:
+
+    def test_author_extraction_and_bot_verification(self):
+        def _make(bot_id_on_msg=None, fields=None, text=None):
+            slack = Mock()
+            slack.auth_test.return_value = {"bot_id": "B_OSCAR"}
+            msg = {}
+            if bot_id_on_msg:
+                msg["bot_id"] = bot_id_on_msg
+            if fields is not None:
+                msg["blocks"] = [{"type": "section", "fields": fields}]
+            if text:
+                msg["text"] = text
+            slack.conversations_replies.return_value = {"messages": [msg]}
+            return _make_processor(slack_client=slack)
+
+        # Own bot with From field → author extracted
+        fields = [{"type": "mrkdwn", "text": "*From:*\nuser1"},
+                  {"type": "mrkdwn", "text": "*Repo:*\norg/repo"}]
+        mp = _make("B_OSCAR", fields)
+        ctx, author = mp._fetch_thread_parent_context("C1", "ts1")
+        assert author == "user1" and "user1" in ctx
+
+        # Different bot → author empty
+        mp = _make("B_OTHER", fields)
+        _, author = mp._fetch_thread_parent_context("C1", "ts1")
+        assert author == ""
+
+        # No bot_id (user message) → author empty
+        mp = _make(None, [], "fake")
+        _, author = mp._fetch_thread_parent_context("C1", "ts1")
+        assert author == ""
+
+        # Own bot, no blocks, no text → both empty
+        mp = _make("B_OSCAR")
+        ctx, author = mp._fetch_thread_parent_context("C1", "ts1")
+        assert ctx == "" and author == ""
+
+
+class TestExternalRequesterIdentity:
+
+    def test_build_identity_with_external_requester(self):
+        storage = Mock()
+        storage.get_context.return_value = {"session_id": "s1"}
+        mp = _make_processor(storage=storage)
+        mp._get_identity_record = Mock(return_value={"github_handle": "x", "is_org_maintainer": False})
+        attrs = mp._build_identity_attributes("key", "U_SLACK", "github:gh-user")
+        assert attrs["requester_user_id"] == "github:gh-user"
+        assert attrs["approver_user_id"] == "U_SLACK"
+        assert attrs["external_requester"] == "true"
+
+    def test_build_identity_without_external_requester(self):
+        storage = Mock()
+        storage.get_context.return_value = {}
+        mp = _make_processor(storage=storage)
+        mp._get_identity_record = Mock(return_value={"github_handle": "x", "is_org_maintainer": False})
+        attrs = mp._build_identity_attributes("key", "U_SLACK", "")
+        assert attrs["requester_user_id"] == "U_SLACK"
+        assert "approver_user_id" not in attrs
+        assert "external_requester" not in attrs
+
+    def test_get_own_bot_id(self):
+        slack = Mock()
+        slack.auth_test.return_value = {"bot_id": "B_TEST"}
+        mp = _make_processor(slack_client=slack)
+        assert mp._get_own_bot_id() == "B_TEST"
+        mp._get_own_bot_id()
+        slack.auth_test.assert_called_once()
+        slack2 = Mock()
+        slack2.auth_test.side_effect = Exception("fail")
+        assert _make_processor(slack_client=slack2)._get_own_bot_id() == ""
 
 
 class TestProcessMessage:

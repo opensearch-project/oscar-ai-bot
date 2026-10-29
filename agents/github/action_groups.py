@@ -128,7 +128,10 @@ def get_action_groups(lambda_arn: str) -> List[bedrock.CfnAgent.AgentActionGroup
                             "Create a lightweight Git tag on a specific commit in a repository. "
                             "Requires explicit user confirmation before execution. "
                             "The commit can be a full or abbreviated SHA. "
-                            "Tag names typically follow semver (e.g., '3.12.0')."
+                            "Tag names typically follow semver (e.g., '3.12.0'). "
+                            "When the request originated from a GitHub @mention, pass "
+                            "github_requester, source_repo, and source_issue_number so the "
+                            "bot can verify the requester and respond on the issue."
                         ),
                         parameters={
                             "repo": _param("string", "Repository name", True),
@@ -139,6 +142,24 @@ def get_action_groups(lambda_arn: str) -> List[bedrock.CfnAgent.AgentActionGroup
                                 "If omitted, the HEAD of the default branch is used.",
                                 False,
                             ),
+                            "github_requester": _param(
+                                "string",
+                                "GitHub username of the person who @mentioned the bot on the issue. "
+                                "Required when the request comes from a GitHub webhook notification.",
+                                False,
+                            ),
+                            "source_repo": _param(
+                                "string",
+                                "Repository where the bot was @mentioned (may differ from repo). "
+                                "Required when the request comes from a GitHub webhook notification.",
+                                False,
+                            ),
+                            "source_issue_number": _param(
+                                "string",
+                                "Issue number where the bot was @mentioned. "
+                                "Required when the request comes from a GitHub webhook notification.",
+                                False,
+                            ),
                         },
                     ),
                     bedrock.CfnAgent.FunctionProperty(
@@ -147,7 +168,10 @@ def get_action_groups(lambda_arn: str) -> List[bedrock.CfnAgent.AgentActionGroup
                             "Create a new branch from a specific commit in a repository. "
                             "Requires explicit user confirmation before execution. "
                             "The commit can be a full or abbreviated SHA; abbreviated SHAs "
-                            "are resolved to the full SHA automatically."
+                            "are resolved to the full SHA automatically. "
+                            "When the request originated from a GitHub @mention, pass "
+                            "github_requester, source_repo, and source_issue_number so the "
+                            "bot can verify the requester and respond on the issue."
                         ),
                         parameters={
                             "repo": _param("string", "Repository name", True),
@@ -156,6 +180,24 @@ def get_action_groups(lambda_arn: str) -> List[bedrock.CfnAgent.AgentActionGroup
                                 "string",
                                 "Commit SHA (full or abbreviated) or branch name to branch from. "
                                 "If omitted, the HEAD of the default branch is used.",
+                                False,
+                            ),
+                            "github_requester": _param(
+                                "string",
+                                "GitHub username of the person who @mentioned the bot on the issue. "
+                                "Required when the request comes from a GitHub webhook notification.",
+                                False,
+                            ),
+                            "source_repo": _param(
+                                "string",
+                                "Repository where the bot was @mentioned (may differ from repo). "
+                                "Required when the request comes from a GitHub webhook notification.",
+                                False,
+                            ),
+                            "source_issue_number": _param(
+                                "string",
+                                "Issue number where the bot was @mentioned. "
+                                "Required when the request comes from a GitHub webhook notification.",
                                 False,
                             ),
                         },
