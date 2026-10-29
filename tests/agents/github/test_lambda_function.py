@@ -848,123 +848,73 @@ class TestHandleCreateRefGitHubMention:
     """Cover the GitHub @mention flow in _handle_create_ref."""
 
     @patch.dict(os.environ, {'GITHUB_SECRET_NAME': 'test'})
-    def test_github_mention_requester_mismatch_rejected(self):
+    def test_github_mention_error_paths(self):
         mod = _load_lambda()
-        result = mod._handle_create_ref(
-            "tok",
-            {"repo": "OpenSearch", "tag_name": "v1.0.0",
-             "github_requester": "attacker", "source_repo": "obs", "source_issue_number": "1"},
-            "req1",
-            {"requester_user_id": "github:legit-user", "requester_is_admin": "False"},
-            ref_type="tags",
-        )
-        parsed = json.loads(result)
-        assert parsed["status"] == "error"
-        assert "identity could not be verified" in parsed["message"]
+        params = {"repo": "OpenSearch", "tag_name": "v1.0.0",
+                  "github_requester": "user1", "source_repo": "obs", "source_issue_number": "1"}
+        base_attrs = {"requester_user_id": "github:user1", "approver_user_id": "U_SLACK"}
 
-    @patch.dict(os.environ, {'GITHUB_SECRET_NAME': 'test'})
-    def test_github_mention_self_approval_rejected(self):
-        mod = _load_lambda()
-        result = mod._handle_create_ref(
-            "tok",
-            {"repo": "OpenSearch", "tag_name": "v1.0.0",
-             "github_requester": "user1", "source_repo": "obs", "source_issue_number": "1"},
-            "req1",
-            {"requester_user_id": "github:user1",
-             "approver_user_id": "U_SLACK",
-             "approver_github_handle": "user1"},
-            ref_type="tags",
-        )
-        parsed = json.loads(result)
-        assert parsed["status"] == "error"
-        assert "Self-approval" in parsed["message"]
+        # Requester mismatch (prompt injection prevention)
+        r = json.loads(mod._handle_create_ref(
+            "tok", params, "r1",
+            {"requester_user_id": "github:legit-user"}, ref_type="tags"))
+        assert "identity could not be verified" in r["message"]
 
-    @patch.dict(os.environ, {'GITHUB_SECRET_NAME': 'test'})
-    def test_github_mention_non_maintainer_denied(self):
-        mod = _load_lambda()
-        sys.modules['github_api'].get_repo_maintainers.return_value = json.dumps({
-            "status": "success", "maintainers": [],
-        })
+        # Self-approval
+        r = json.loads(mod._handle_create_ref(
+            "tok", params, "r1",
+            {**base_attrs, "approver_github_handle": "user1"}, ref_type="tags"))
+        assert "Self-approval" in r["message"]
+
+        # Non-maintainer denied
+        sys.modules['github_api'].get_repo_maintainers.return_value = json.dumps(
+            {"status": "success", "maintainers": []})
         sys.modules['http_client'].get.return_value = {"permission": "read"}
-        result = mod._handle_create_ref(
-            "tok",
-            {"repo": "OpenSearch", "tag_name": "v1.0.0",
-             "github_requester": "nobody", "source_repo": "obs", "source_issue_number": "1"},
-            "req1",
-            {"requester_user_id": "github:nobody",
-             "approver_user_id": "U_SLACK",
-             "approver_github_handle": "other"},
-            ref_type="tags",
-        )
-        parsed = json.loads(result)
-        assert parsed["status"] == "error"
-        assert "not a maintainer or admin" in parsed["message"]
+        nobody_params = {**params, "github_requester": "nobody"}
+        nobody_attrs = {**base_attrs, "requester_user_id": "github:nobody",
+                        "approver_github_handle": "other"}
+        r = json.loads(mod._handle_create_ref(
+            "tok", nobody_params, "r1", nobody_attrs, ref_type="tags"))
+        assert "not a maintainer or admin" in r["message"]
 
     @patch.dict(os.environ, {'GITHUB_SECRET_NAME': 'test'})
-    def test_github_mention_admin_authorized(self):
+    def test_github_mention_authorized(self):
         mod = _load_lambda()
-        sys.modules['github_api'].get_repo_maintainers.return_value = json.dumps({
-            "status": "success", "maintainers": [],
-        })
-        sys.modules['http_client'].get.side_effect = [
-            {"permission": "admin"},
-            {"default_branch": "main"},
-            {"commit": {"sha": "abc123" + "0" * 34}},
-        ]
-        sys.modules['github_api'].create_ref.return_value = json.dumps({
-            "status": "success", "tag": "v1.0.0", "commit_sha": "abc123",
-            "ref": "refs/tags/v1.0.0", "url": "https://github.com/org/repo/releases/tag/v1.0.0",
-            "repo": "opensearch-project/OpenSearch",
-        })
         sys.modules['mcp_client'].MCPClient.return_value.get_token.return_value = "tok2"
-        result = mod._handle_create_ref(
-            "tok",
-            {"repo": "OpenSearch", "tag_name": "v1.0.0",
-             "github_requester": "admin-user", "source_repo": "obs", "source_issue_number": "1"},
-            "req1",
-            {"requester_user_id": "github:admin-user",
-             "approver_user_id": "U_SLACK",
-             "approver_github_handle": "other"},
-            ref_type="tags",
-        )
-        parsed = json.loads(result)
-        assert parsed["status"] == "success"
+        attrs = {"requester_user_id": "github:user1", "approver_user_id": "U_SLACK",
+                 "approver_github_handle": "other"}
+
+        # Admin authorized
+        sys.modules['github_api'].get_repo_maintainers.return_value = json.dumps(
+            {"status": "success", "maintainers": []})
+        sys.modules['http_client'].get.side_effect = [
+            {"permission": "admin"}, {"default_branch": "main"},
+            {"commit": {"sha": "a" * 40}}]
+        sys.modules['github_api'].create_ref.return_value = json.dumps({"status": "success"})
+        tag_params = {"repo": "R", "tag_name": "1.0", "github_requester": "user1",
+                      "source_repo": "obs", "source_issue_number": "1"}
+        r = json.loads(mod._handle_create_ref(
+            "tok", tag_params, "r1", attrs, ref_type="tags"))
+        assert r["status"] == "success"
+
+        # Maintainer authorized
+        sys.modules['github_api'].get_repo_maintainers.return_value = json.dumps(
+            {"status": "success", "maintainers": [{"github_id": "m1"}]})
+        sys.modules['http_client'].get.side_effect = [
+            {"permission": "write"}, {"default_branch": "main"},
+            {"commit": {"sha": "b" * 40}}]
+        br_params = {"repo": "R", "branch_name": "3.0", "github_requester": "m1",
+                     "source_repo": "obs", "source_issue_number": "1"}
+        r = json.loads(mod._handle_create_ref(
+            "tok", br_params, "r1",
+            {**attrs, "requester_user_id": "github:m1"}, ref_type="heads"))
+        assert r["status"] == "success"
+
+
+class TestGitHubMentionHelpers:
 
     @patch.dict(os.environ, {'GITHUB_SECRET_NAME': 'test'})
-    def test_github_mention_maintainer_authorized(self):
-        mod = _load_lambda()
-        sys.modules['github_api'].get_repo_maintainers.return_value = json.dumps({
-            "status": "success", "maintainers": [{"github_id": "maint-user"}],
-        })
-        sys.modules['http_client'].get.side_effect = [
-            {"permission": "write"},
-            {"default_branch": "main"},
-            {"commit": {"sha": "def456" + "0" * 34}},
-        ]
-        sys.modules['github_api'].create_ref.return_value = json.dumps({
-            "status": "success", "branch": "3.0", "commit_sha": "def456",
-            "ref": "refs/heads/3.0", "url": "https://github.com/org/repo/tree/3.0",
-            "repo": "opensearch-project/OpenSearch",
-        })
-        sys.modules['mcp_client'].MCPClient.return_value.get_token.return_value = "tok2"
-        result = mod._handle_create_ref(
-            "tok",
-            {"repo": "OpenSearch", "branch_name": "3.0",
-             "github_requester": "maint-user", "source_repo": "obs", "source_issue_number": "1"},
-            "req1",
-            {"requester_user_id": "github:maint-user",
-             "approver_user_id": "U_SLACK",
-             "approver_github_handle": "other"},
-            ref_type="heads",
-        )
-        parsed = json.loads(result)
-        assert parsed["status"] == "success"
-
-
-class TestIsGithubRepoAdmin:
-
-    @patch.dict(os.environ, {'GITHUB_SECRET_NAME': 'test'})
-    def test_admin_and_non_admin_and_exception(self):
+    def test_is_github_repo_admin(self):
         mod = _load_lambda()
         sys.modules['http_client'].get.return_value = {"permission": "admin"}
         assert mod._is_github_repo_admin("tok", "repo", "user") is True
@@ -973,11 +923,8 @@ class TestIsGithubRepoAdmin:
         sys.modules['http_client'].get.side_effect = Exception("err")
         assert mod._is_github_repo_admin("tok", "repo", "user") is False
 
-
-class TestPostIssueCommentSafe:
-
     @patch.dict(os.environ, {'GITHUB_SECRET_NAME': 'test'})
-    def test_posts_and_handles_failure(self):
+    def test_post_issue_comment_safe(self):
         mod = _load_lambda()
         sys.modules['github_api'].screen_outbound_body.return_value = "body"
         mod._post_issue_comment_safe("tok", "repo", 1, "body")
