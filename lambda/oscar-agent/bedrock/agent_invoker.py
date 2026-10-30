@@ -131,7 +131,7 @@ class BedrockAgentCore:
             # Process the streaming response
             response_text = ""
             returned_session_id = None
-            saw_approval_rejection = False
+            saw_confirmation_in_trace = False
 
             if 'completion' in response:
                 for event in response['completion']:
@@ -151,7 +151,7 @@ class BedrockAgentCore:
                     action_output = observation.get('actionGroupInvocationOutput', {})
                     action_text = action_output.get('text', '')
                     if '[CONFIRMATION_REQUIRED]' in action_text:
-                        saw_approval_rejection = True
+                        saw_confirmation_in_trace = True
                         logger.info("APPROVAL_TRACE: detected [CONFIRMATION_REQUIRED] in tool result trace")
 
                     if 'chunk' in event:
@@ -182,10 +182,10 @@ class BedrockAgentCore:
 
             logger.info(f"Agent response received, length: {len(response_text)} characters")
             logger.info(f"Final session ID: {returned_session_id}")
-            if saw_approval_rejection:
-                logger.info("APPROVAL_TRACE: returning saw_approval_rejection=True")
+            if saw_confirmation_in_trace:
+                logger.info("APPROVAL_TRACE: returning saw_confirmation_in_trace=True")
 
-            return response_text.strip(), returned_session_id, saw_approval_rejection
+            return response_text.strip(), returned_session_id, saw_confirmation_in_trace
 
         except ClientError as e:
             error_code = e.response['Error']['Code']

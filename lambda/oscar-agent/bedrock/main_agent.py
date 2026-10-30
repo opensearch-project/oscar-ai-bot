@@ -46,7 +46,7 @@ class OSCARAgentInterface(ABC):
             context_summary: Optional summary of previous conversation context
 
         Returns:
-            Tuple containing (response_text, session_id, saw_approval_rejection)
+            Tuple containing (response_text, session_id, saw_confirmation_in_trace)
         """
 
 
@@ -96,7 +96,7 @@ class EnhancedBedrockOSCARAgent(OSCARAgentInterface):
             session_attributes: Out-of-band session attributes (identity provenance)
 
         Returns:
-            A tuple containing (response_text, session_id, saw_approval_rejection)
+            A tuple containing (response_text, session_id, saw_confirmation_in_trace)
         """
         return self.query_processor.process_query(query, privilege, session_id, context_summary, session_attributes)
 

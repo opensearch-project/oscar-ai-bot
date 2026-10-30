@@ -145,10 +145,10 @@ class TestInvokeAgent:
             ],
             'sessionId': 'sess-1',
         }
-        text, session_id, saw_rejection = core.invoke_agent('hi', privilege=True)
+        text, session_id, saw_trace_confirmation = core.invoke_agent('hi', privilege=True)
         assert text == 'Hello world'
         assert session_id == 'sess-1'
-        assert saw_rejection is False
+        assert saw_trace_confirmation is False
 
     def test_session_id_from_top_level(self, agent_core):
         """Top-level sessionId takes precedence."""
@@ -194,7 +194,7 @@ class TestInvokeAgent:
         assert text == ''
 
     def test_approval_rejection_detected_from_action_group_trace(self, agent_core):
-        """[CONFIRMATION_REQUIRED] in actionGroupInvocationOutput trace sets saw_approval_rejection."""
+        """[CONFIRMATION_REQUIRED] in actionGroupInvocationOutput trace sets saw_confirmation_in_trace."""
         core, mock_client = agent_core
         mock_client.invoke_agent.return_value = {
             'completion': [
@@ -207,8 +207,8 @@ class TestInvokeAgent:
             ],
             'sessionId': 'sess-1',
         }
-        text, session_id, saw_rejection = core.invoke_agent('yes', privilege=True)
-        assert saw_rejection is True
+        text, session_id, saw_trace_confirmation = core.invoke_agent('yes', privilege=True)
+        assert saw_trace_confirmation is True
         assert text == 'You cannot approve your own request.'
 
     def test_approval_rejection_not_detected_without_marker_in_trace(self, agent_core):
@@ -225,5 +225,5 @@ class TestInvokeAgent:
             ],
             'sessionId': 'sess-1',
         }
-        _, _, saw_rejection = core.invoke_agent('send it', privilege=True)
-        assert saw_rejection is False
+        _, _, saw_trace_confirmation = core.invoke_agent('send it', privilege=True)
+        assert saw_trace_confirmation is False

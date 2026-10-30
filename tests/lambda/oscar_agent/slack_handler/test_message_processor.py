@@ -881,7 +881,7 @@ class TestConfirmationRequiredExistingRequester:
 
 class TestApprovalRejectionTraceDetection:
     """Approval rejection is detected from Bedrock Agent trace events (deterministic),
-    not from parsing the LLM output. The saw_approval_rejection flag from the trace
+    not from parsing the LLM output. The saw_confirmation_in_trace flag from the trace
     drives the state machine regardless of what the LLM text says."""
 
     def _setup(self):

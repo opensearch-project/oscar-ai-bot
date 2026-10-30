@@ -1,9 +1,8 @@
-"""Tests for QueryProcessor saw_approval_rejection passthrough."""
+"""Tests for QueryProcessor saw_confirmation_in_trace passthrough."""
 
 from unittest.mock import Mock
 
 import pytest
-
 from bedrock.query_processor import QueryProcessor
 
 

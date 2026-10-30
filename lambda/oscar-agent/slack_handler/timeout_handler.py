@@ -50,7 +50,7 @@ class TimeoutHandler:
             session_attributes: Out-of-band session attributes (identity provenance)
 
         Returns:
-            Tuple of (response, new_session_id, saw_approval_rejection) or (None, None, False) if timeout/error
+            Tuple of (response, new_session_id, saw_confirmation_in_trace) or (None, None, False) if timeout/error
         """
         # Simple system overload protection
         query_id = f"{channel}_{thread_ts}_{int(start_time)}"
@@ -81,11 +81,11 @@ class TimeoutHandler:
                         return
 
                 # Query the agent
-                response, new_session_id, saw_rejection = oscar_agent.query(
+                response, new_session_id, saw_trace_confirmation = oscar_agent.query(
                     query, privilege, session_id=session_id, context_summary=context_summary,
                     session_attributes=session_attributes,
                 )
-                result_queue.put(("success", response, new_session_id, saw_rejection))
+                result_queue.put(("success", response, new_session_id, saw_trace_confirmation))
             except Exception as e:
                 result_queue.put(("error", str(e), None, False))
 
@@ -97,14 +97,14 @@ class TimeoutHandler:
         while thread.is_alive():
             try:
                 # Wait for configured interval for result
-                status, response, new_session_id, saw_rejection = result_queue.get(timeout=config.monitor_interval)
+                status, response, new_session_id, saw_trace_confirmation = result_queue.get(timeout=config.monitor_interval)
 
                 # Clean up on success
                 with self.monitor_lock:
                     self.active_queries.pop(query_id, None)
 
                 if status == "success":
-                    return response, new_session_id, saw_rejection
+                    return response, new_session_id, saw_trace_confirmation
                 elif status == "cancelled":
                     logger.warning(f"Query {query_id} was cancelled")
                     return None, None, False
@@ -155,7 +155,7 @@ class TimeoutHandler:
         # Get final result if thread finished normally
         try:
             if not result_queue.empty():
-                status, response, new_session_id, saw_rejection = result_queue.get_nowait()
+                status, response, new_session_id, saw_trace_confirmation = result_queue.get_nowait()
 
                 # Clean up
                 with self.monitor_lock:
@@ -163,7 +163,7 @@ class TimeoutHandler:
                         self.active_queries.pop(query_id, None)
 
                 if status == "success":
-                    return response, new_session_id, saw_rejection
+                    return response, new_session_id, saw_trace_confirmation
                 elif status == "cancelled":
                     return None, None, False
                 else:

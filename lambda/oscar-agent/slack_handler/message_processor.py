@@ -487,7 +487,7 @@ class MessageProcessor:
                     formatted_context = parent_context + "\n" + formatted_context if formatted_context else parent_context
 
             # Query OSCAR agent with timeout monitoring (using formatted context)
-            response, new_session_id, saw_approval_rejection = self.timeout_handler.query_agent_with_timeout(
+            response, new_session_id, saw_confirmation_in_trace = self.timeout_handler.query_agent_with_timeout(
                 self.oscar_agent, query, privilege, session_id, formatted_context, channel, reaction_ts,
                 start_time, say, thread_ts, user_id, session_attributes=identity_attrs
             )
@@ -502,7 +502,7 @@ class MessageProcessor:
 
             # Approval rejection is detected from Bedrock Agent trace events
             # (deterministic, pre-LLM), not from parsing the LLM output.
-            if saw_approval_rejection:
+            if saw_confirmation_in_trace:
                 consumed = getattr(self, '_consumed_pending', None)
                 if consumed:
                     # Rejected approval consumed the pending state (different
