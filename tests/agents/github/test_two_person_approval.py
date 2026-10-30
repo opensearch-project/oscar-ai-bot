@@ -769,7 +769,7 @@ class TestApprovalGuardExpired(unittest.TestCase):
         self.assertIsNotNone(result)
         self.assertEqual(result['status'], 'error')
         self.assertIn('approval window has expired', result['message'])
-        self.assertIn('[2PR_PENDING]', result['message'])
+        self.assertIn('[CONFIRMATION_REQUIRED]', result['message'])
 
     def test_expired_not_set_returns_generic_error(self):
         from oscar_shared.approval_guard import validate_two_person_approval

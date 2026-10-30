@@ -51,7 +51,7 @@ def validate_two_person_approval(
                 'message': (
                     'SECURITY ERROR: The approval window has expired. '
                     'Please re-request the action to get a new confirmation prompt. '
-                    '[2PR_PENDING]'
+                    '[CONFIRMATION_REQUIRED]'
                 ),
             }
         return {
@@ -59,7 +59,7 @@ def validate_two_person_approval(
             'message': (
                 'SECURITY ERROR: Two-person approval requires both a requester and a distinct '
                 'approver. A second authorized user must confirm this action in the thread. '
-                '[2PR_PENDING]'
+                '[CONFIRMATION_REQUIRED]'
             ),
         }
 
@@ -69,7 +69,7 @@ def validate_two_person_approval(
             'message': (
                 f'SECURITY ERROR: Self-approval is not permitted. The user who requested this action '
                 f'({requester_user_id.strip()}) cannot also approve it. A different authorized user must confirm. '
-                '[2PR_PENDING]'
+                '[CONFIRMATION_REQUIRED]'
             ),
         }
 
@@ -80,7 +80,7 @@ def validate_two_person_approval(
                 'message': (
                     'SECURITY ERROR: This maintainer operation requires approval from an admin. '
                     'Please have an admin reply to confirm. '
-                    '[2PR_PENDING]'
+                    '[CONFIRMATION_REQUIRED]'
                 ),
             }
 
@@ -91,7 +91,7 @@ def validate_two_person_approval(
                 'message': (
                     'SECURITY ERROR: This admin operation requires approval from a different admin. '
                     'Please have another admin reply to confirm. '
-                    '[2PR_PENDING]'
+                    '[CONFIRMATION_REQUIRED]'
                 ),
             }
 

@@ -33,7 +33,7 @@ class TimeoutHandler:
     def query_agent_with_timeout(self, oscar_agent, query: str, privilege: bool, session_id: str, context_summary: str,
                                  channel: str, reaction_ts: str, start_time: float,
                                  say: Callable, thread_ts: str, user_id: str,
-                                 session_attributes: Optional[Dict[str, str]] = None) -> Tuple[Optional[str], Optional[str]]:
+                                 session_attributes: Optional[Dict[str, str]] = None) -> Tuple[Optional[str], Optional[str], bool]:
         """Query the agent with timeout monitoring using simple threading with limits.
 
         Args:
@@ -50,7 +50,7 @@ class TimeoutHandler:
             session_attributes: Out-of-band session attributes (identity provenance)
 
         Returns:
-            Tuple of (response, new_session_id) or (None, None) if timeout/error
+            Tuple of (response, new_session_id, saw_confirmation_in_trace) or (None, None, False) if timeout/error
         """
         # Simple system overload protection
         query_id = f"{channel}_{thread_ts}_{int(start_time)}"
@@ -59,7 +59,7 @@ class TimeoutHandler:
             if len(self.active_queries) >= config.max_active_queries:
                 self.reaction_manager.manage_reactions(channel, reaction_ts, add_reaction="x", remove_reaction="thinking_face")
                 say(text="🚫 System is currently overloaded. Please try again in a few minutes.", thread_ts=thread_ts)
-                return None, None
+                return None, None, False
 
             # Register query for timeout tracking only
             self.active_queries[query_id] = {
@@ -76,18 +76,18 @@ class TimeoutHandler:
                 # Check if cancelled before starting
                 with self.monitor_lock:
                     if self.active_queries.get(query_id, {}).get('cancelled'):
-                        result_queue.put(("cancelled", "Query was cancelled", None))
+                        result_queue.put(("cancelled", "Query was cancelled", None, False))
                         self.active_queries.pop(query_id, None)
                         return
 
                 # Query the agent
-                response, new_session_id = oscar_agent.query(
+                response, new_session_id, saw_trace_confirmation = oscar_agent.query(
                     query, privilege, session_id=session_id, context_summary=context_summary,
                     session_attributes=session_attributes,
                 )
-                result_queue.put(("success", response, new_session_id))
+                result_queue.put(("success", response, new_session_id, saw_trace_confirmation))
             except Exception as e:
-                result_queue.put(("error", str(e), None))
+                result_queue.put(("error", str(e), None, False))
 
         # Start agent in background thread
         thread = threading.Thread(target=agent_worker, daemon=True)
@@ -97,17 +97,17 @@ class TimeoutHandler:
         while thread.is_alive():
             try:
                 # Wait for configured interval for result
-                status, response, new_session_id = result_queue.get(timeout=config.monitor_interval)
+                status, response, new_session_id, saw_trace_confirmation = result_queue.get(timeout=config.monitor_interval)
 
                 # Clean up on success
                 with self.monitor_lock:
                     self.active_queries.pop(query_id, None)
 
                 if status == "success":
-                    return response, new_session_id
+                    return response, new_session_id, saw_trace_confirmation
                 elif status == "cancelled":
                     logger.warning(f"Query {query_id} was cancelled")
-                    return None, None
+                    return None, None, False
                 else:
                     raise Exception(response)
 
@@ -150,12 +150,12 @@ class TimeoutHandler:
                         logger.error(f"FAILED TO HANDLE TIMEOUT: {e}")
 
                     # Break out of monitoring loop and return None
-                    return None, None
+                    return None, None, False
 
         # Get final result if thread finished normally
         try:
             if not result_queue.empty():
-                status, response, new_session_id = result_queue.get_nowait()
+                status, response, new_session_id, saw_trace_confirmation = result_queue.get_nowait()
 
                 # Clean up
                 with self.monitor_lock:
@@ -163,9 +163,9 @@ class TimeoutHandler:
                         self.active_queries.pop(query_id, None)
 
                 if status == "success":
-                    return response, new_session_id
+                    return response, new_session_id, saw_trace_confirmation
                 elif status == "cancelled":
-                    return None, None
+                    return None, None, False
                 else:
                     raise Exception(response)
         except queue.Empty:
@@ -177,4 +177,4 @@ class TimeoutHandler:
 
         # Thread finished but no result - this shouldn't happen
         logger.error(f"Agent thread finished without result for query {query_id}")
-        return None, None
+        return None, None, False

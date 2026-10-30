@@ -133,16 +133,6 @@ class MessageProcessor:
 
         return attrs
 
-    @staticmethod
-    def _is_approval_rejection(response: str) -> bool:
-        """Check if the response indicates a 2PR rejection (approval still pending).
-
-        The Lambda appends [2PR_PENDING] to approval errors. The LLM is
-        instructed to preserve bracketed markers, so we match on the exact
-        tag rather than fuzzy keyword heuristics.
-        """
-        return '[2PR_PENDING]' in response
-
     def _resolve_display_name(self, user_id: str) -> str:
         """Resolve a Slack user id to a display name, asking Slack rather than the model.
 
@@ -228,7 +218,7 @@ class MessageProcessor:
             re.compile(r'<\s*/?system\s*>', re.IGNORECASE),
             re.compile(r'\[INST\]|\[/INST\]', re.IGNORECASE),
             re.compile(r'```\s*system', re.IGNORECASE),
-            re.compile(r'\[(?:2PR_PENDING|CONFIRMATION_REQUIRED)\]', re.IGNORECASE),
+            re.compile(r'\[CONFIRMATION_REQUIRED\]', re.IGNORECASE),
             re.compile(r'(ignore|disregard|override|forget)\s+(all\s+)?(previous|prior|above)\s+(instructions?|rules?|prompts?)', re.IGNORECASE),
             re.compile(r'(new|updated?)\s+system\s+prompt', re.IGNORECASE),
             re.compile(r'you\s+are\s+now', re.IGNORECASE),
@@ -497,7 +487,7 @@ class MessageProcessor:
                     formatted_context = parent_context + "\n" + formatted_context if formatted_context else parent_context
 
             # Query OSCAR agent with timeout monitoring (using formatted context)
-            response, new_session_id = self.timeout_handler.query_agent_with_timeout(
+            response, new_session_id, saw_confirmation_in_trace = self.timeout_handler.query_agent_with_timeout(
                 self.oscar_agent, query, privilege, session_id, formatted_context, channel, reaction_ts,
                 start_time, say, thread_ts, user_id, session_attributes=identity_attrs
             )
@@ -510,20 +500,9 @@ class MessageProcessor:
             confirmation_required = response and '[CONFIRMATION_REQUIRED]' in response
             response = self._handle_confirmation_detection(response, channel, thread_ts)
 
-            # Track who triggered the confirmation for 2PR identity provenance.
-            # Set when a confirmation prompt is emitted; clear after the next
-            # turn (the approval or any non-confirmation response) — UNLESS
-            # the response is a 2PR rejection (e.g. self-approval, non-admin
-            # approver, expired window), which means the prompt is still pending.
-            # Only overwrite an existing requester if the current user is authorized
-            # (matches main's behavior where only admins could interact). This prevents
-            # a non-authorized user providing follow-up from becoming the requester.
-            if confirmation_required:
-                stored_ctx = self.storage.get_context(thread_key)
-                existing_requester = stored_ctx.get('pending_approval_requester') if stored_ctx else None
-                if not existing_requester or self.is_fully_authorized_user(user_id):
-                    self.storage.set_pending_approval_requester(thread_key, user_id)
-            elif response and self._is_approval_rejection(response):
+            # Approval rejection is detected from Bedrock Agent trace events
+            # (deterministic, pre-LLM), not from parsing the LLM output.
+            if saw_confirmation_in_trace:
                 consumed = getattr(self, '_consumed_pending', None)
                 if consumed:
                     # Rejected approval consumed the pending state (different
@@ -534,12 +513,17 @@ class MessageProcessor:
                         expires_at=consumed['expires_at'],
                     )
                 elif not getattr(self, '_had_pending', False):
-                    # No pending state existed — first-time 2PR rejection.
+                    # No pending state existed — first-time rejection.
                     # Record the current user as requester.
                     self.storage.set_pending_approval_requester(thread_key, user_id)
-                # Otherwise: same-user self-approval — pending is still in
-                # storage with its original TTL; nothing to do.
-                response = response.replace('[2PR_PENDING]', '').strip()
+            elif confirmation_required:
+                # Only overwrite an existing requester if the current user is
+                # authorized. This prevents a non-authorized user providing
+                # follow-up from becoming the requester.
+                stored_ctx = self.storage.get_context(thread_key)
+                existing_requester = stored_ctx.get('pending_approval_requester') if stored_ctx else None
+                if not existing_requester or self.is_fully_authorized_user(user_id):
+                    self.storage.set_pending_approval_requester(thread_key, user_id)
             else:
                 self.storage.clear_pending_approval_requester(thread_key)
 
