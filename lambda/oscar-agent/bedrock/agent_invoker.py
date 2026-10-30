@@ -131,7 +131,7 @@ class BedrockAgentCore:
             # Process the streaming response
             response_text = ""
             returned_session_id = None
-            saw_2pr_rejection = False
+            saw_approval_rejection = False
 
             if 'completion' in response:
                 for event in response['completion']:
@@ -150,9 +150,9 @@ class BedrockAgentCore:
                     observation = orch_trace.get('observation', {})
                     action_output = observation.get('actionGroupInvocationOutput', {})
                     action_text = action_output.get('text', '')
-                    if '[2PR_PENDING]' in action_text:
-                        saw_2pr_rejection = True
-                        logger.info("2PR_TRACE: detected [2PR_PENDING] in tool result trace")
+                    if '[CONFIRMATION_REQUIRED]' in action_text:
+                        saw_approval_rejection = True
+                        logger.info("APPROVAL_TRACE: detected [CONFIRMATION_REQUIRED] in tool result trace")
 
                     if 'chunk' in event:
                         chunk = event['chunk']
@@ -182,10 +182,10 @@ class BedrockAgentCore:
 
             logger.info(f"Agent response received, length: {len(response_text)} characters")
             logger.info(f"Final session ID: {returned_session_id}")
-            if saw_2pr_rejection:
-                logger.info("2PR_TRACE: returning saw_2pr_rejection=True")
+            if saw_approval_rejection:
+                logger.info("APPROVAL_TRACE: returning saw_approval_rejection=True")
 
-            return response_text.strip(), returned_session_id, saw_2pr_rejection
+            return response_text.strip(), returned_session_id, saw_approval_rejection
 
         except ClientError as e:
             error_code = e.response['Error']['Code']

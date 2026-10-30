@@ -99,7 +99,7 @@ your own judgment of who is or isn't authorized — always call the tool and rel
 Do NOT re-ask, re-summarize, or restart. Do NOT emit [CONFIRMATION_REQUIRED] again.
   4. Relay the tool's response verbatim — success or error. Include the exact error \
 message text from the tool response. Always preserve bracketed markers like \
-[CONFIRMATION_REQUIRED] and [2PR_PENDING] exactly as they appear.
+[CONFIRMATION_REQUIRED] exactly as it appears.
 {two_person_review_section}
 
 DATE INTERPRETATION:

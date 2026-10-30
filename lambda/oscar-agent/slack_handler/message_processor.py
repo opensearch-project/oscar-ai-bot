@@ -218,7 +218,7 @@ class MessageProcessor:
             re.compile(r'<\s*/?system\s*>', re.IGNORECASE),
             re.compile(r'\[INST\]|\[/INST\]', re.IGNORECASE),
             re.compile(r'```\s*system', re.IGNORECASE),
-            re.compile(r'\[(?:2PR_PENDING|CONFIRMATION_REQUIRED)\]', re.IGNORECASE),
+            re.compile(r'\[CONFIRMATION_REQUIRED\]', re.IGNORECASE),
             re.compile(r'(ignore|disregard|override|forget)\s+(all\s+)?(previous|prior|above)\s+(instructions?|rules?|prompts?)', re.IGNORECASE),
             re.compile(r'(new|updated?)\s+system\s+prompt', re.IGNORECASE),
             re.compile(r'you\s+are\s+now', re.IGNORECASE),
@@ -487,7 +487,7 @@ class MessageProcessor:
                     formatted_context = parent_context + "\n" + formatted_context if formatted_context else parent_context
 
             # Query OSCAR agent with timeout monitoring (using formatted context)
-            response, new_session_id, saw_2pr_rejection = self.timeout_handler.query_agent_with_timeout(
+            response, new_session_id, saw_approval_rejection = self.timeout_handler.query_agent_with_timeout(
                 self.oscar_agent, query, privilege, session_id, formatted_context, channel, reaction_ts,
                 start_time, say, thread_ts, user_id, session_attributes=identity_attrs
             )
@@ -500,9 +500,9 @@ class MessageProcessor:
             confirmation_required = response and '[CONFIRMATION_REQUIRED]' in response
             response = self._handle_confirmation_detection(response, channel, thread_ts)
 
-            # 2PR rejection is detected from Bedrock Agent trace events
+            # Approval rejection is detected from Bedrock Agent trace events
             # (deterministic, pre-LLM), not from parsing the LLM output.
-            if saw_2pr_rejection:
+            if saw_approval_rejection:
                 consumed = getattr(self, '_consumed_pending', None)
                 if consumed:
                     # Rejected approval consumed the pending state (different
@@ -513,12 +513,9 @@ class MessageProcessor:
                         expires_at=consumed['expires_at'],
                     )
                 elif not getattr(self, '_had_pending', False):
-                    # No pending state existed — first-time 2PR rejection.
+                    # No pending state existed — first-time rejection.
                     # Record the current user as requester.
                     self.storage.set_pending_approval_requester(thread_key, user_id)
-                # Otherwise: same-user self-approval — pending is still in
-                # storage with its original TTL; nothing to do.
-                response = response.replace('[2PR_PENDING]', '').strip()
             elif confirmation_required:
                 # Only overwrite an existing requester if the current user is
                 # authorized. This prevents a non-authorized user providing

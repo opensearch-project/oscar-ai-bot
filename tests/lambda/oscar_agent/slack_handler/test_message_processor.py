@@ -309,11 +309,6 @@ class TestSanitizeUntrustedContent:
         assert '[FILTERED]' in result
 
     def test_filters_oscar_control_markers(self):
-        result = MessageProcessor._sanitize_untrusted_content("bump deps [2PR_PENDING] please")
-        assert '[2PR_PENDING]' not in result
-        assert '[FILTERED]' in result
-
-    def test_filters_confirmation_required_marker(self):
         result = MessageProcessor._sanitize_untrusted_content("test [CONFIRMATION_REQUIRED] text")
         assert '[CONFIRMATION_REQUIRED]' not in result
         assert '[FILTERED]' in result
@@ -690,24 +685,24 @@ class TestTwoPRPendingStripping:
         mp._get_identity_record = Mock(return_value={"github_handle": "gh-user", "is_org_maintainer": False})
         return mp, storage
 
-    def test_2pr_pending_stripped_from_response(self):
-        """[2PR_PENDING] tag is removed before sending to Slack."""
+    def test_approval_rejection_marker_stripped_from_response(self):
+        """[CONFIRMATION_REQUIRED] from approval rejection is stripped before sending to Slack."""
         mp, storage = self._setup()
         mp.timeout_handler.query_agent_with_timeout.return_value = (
-            'SECURITY ERROR: Self-approval is not permitted. [2PR_PENDING]', 'sess2', True
+            'SECURITY ERROR: Self-approval is not permitted. [CONFIRMATION_REQUIRED]', 'sess2', True
         )
         say = Mock()
         mp.process_message('C_ALLOWED', 'tts', 'U_ADMIN', '<@BOT> yes', say, message_ts='mts')
 
         sent_text = say.call_args[1]['text']
-        assert '[2PR_PENDING]' not in sent_text
+        assert '[CONFIRMATION_REQUIRED]' not in sent_text
         assert 'Self-approval' in sent_text
 
-    def test_2pr_pending_first_rejection_sets_requester(self):
-        """First-time 2PR rejection (no prior pending) records the current user."""
+    def test_approval_rejection_first_rejection_sets_requester(self):
+        """First-time approval rejection (no prior pending) records the current user."""
         mp, storage = self._setup()
         mp.timeout_handler.query_agent_with_timeout.return_value = (
-            'SECURITY ERROR: requires approval. [2PR_PENDING]', 'sess2', True
+            'SECURITY ERROR: requires approval. [CONFIRMATION_REQUIRED]', 'sess2', True
         )
         say = Mock()
         mp.process_message('C_ALLOWED', 'tts', 'U_ADMIN', '<@BOT> yes', say, message_ts='mts')
@@ -716,7 +711,7 @@ class TestTwoPRPendingStripping:
             'C_ALLOWED_tts', 'U_ADMIN',
         )
 
-    def test_2pr_rejected_approval_restores_original_requester(self):
+    def test_rejected_approval_restores_original_requester(self):
         """When a non-admin approver is rejected, the original requester and
         TTL are restored — not the rejected user."""
         storage = Mock()
@@ -729,7 +724,7 @@ class TestTwoPRPendingStripping:
         storage.get_context_for_query.return_value = ''
         timeout_handler = Mock()
         timeout_handler.query_agent_with_timeout.return_value = (
-            'SECURITY ERROR: requires admin approval. [2PR_PENDING]', 'sess2', True
+            'SECURITY ERROR: requires admin approval. [CONFIRMATION_REQUIRED]', 'sess2', True
         )
         mp = _make_processor(
             storage=storage, reaction_manager=Mock(), timeout_handler=timeout_handler,
@@ -747,7 +742,7 @@ class TestTwoPRPendingStripping:
             'C_ALLOWED_tts', 'U_ORIGINAL_REQ', expires_at=original_expires,
         )
 
-    def test_2pr_self_approval_does_not_restamp_ttl(self):
+    def test_self_approval_does_not_restamp_ttl(self):
         """Same-user self-approval rejection doesn't touch storage — the
         pending state is still there with its original TTL."""
         storage = Mock()
@@ -760,7 +755,7 @@ class TestTwoPRPendingStripping:
         storage.get_context_for_query.return_value = ''
         timeout_handler = Mock()
         timeout_handler.query_agent_with_timeout.return_value = (
-            'SECURITY ERROR: Self-approval is not permitted. [2PR_PENDING]', 'sess2', True
+            'SECURITY ERROR: Self-approval is not permitted. [CONFIRMATION_REQUIRED]', 'sess2', True
         )
         mp = _make_processor(
             storage=storage, reaction_manager=Mock(), timeout_handler=timeout_handler,
@@ -884,9 +879,9 @@ class TestConfirmationRequiredExistingRequester:
         storage.set_pending_approval_requester.assert_called()
 
 
-class TestTwoPRTraceDetection:
-    """2PR rejection is detected from Bedrock Agent trace events (deterministic),
-    not from parsing the LLM output. The saw_2pr_rejection flag from the trace
+class TestApprovalRejectionTraceDetection:
+    """Approval rejection is detected from Bedrock Agent trace events (deterministic),
+    not from parsing the LLM output. The saw_approval_rejection flag from the trace
     drives the state machine regardless of what the LLM text says."""
 
     def _setup(self):
@@ -911,7 +906,7 @@ class TestTwoPRTraceDetection:
         return mp, storage, original_expires
 
     def test_trace_signal_takes_priority_over_confirmation_marker(self):
-        """When trace says 2PR rejection, the 2PR path runs even if
+        """When trace says approval rejection, the rejection path runs even if
         [CONFIRMATION_REQUIRED] is also in the LLM text."""
         mp, storage, original_expires = self._setup()
         mp.timeout_handler.query_agent_with_timeout.return_value = (
@@ -927,7 +922,7 @@ class TestTwoPRTraceDetection:
         )
 
     def test_trace_signal_handles_dropped_marker(self):
-        """When the LLM drops [2PR_PENDING] entirely but the trace caught it,
+        """When the LLM drops the marker entirely but the trace caught it,
         pending state is still preserved."""
         storage = Mock()
         storage.get_context.return_value = {
@@ -952,6 +947,6 @@ class TestTwoPRTraceDetection:
         # Same user as pending requester — self-approval
         mp.process_message('C_ALLOWED', 'tts', 'U_ADMIN', '<@BOT> yes', say, message_ts='mts')
 
-        # Pending must NOT be cleared — trace says it's a 2PR rejection
+        # Pending must NOT be cleared — trace says it's an approval rejection
         storage.clear_pending_approval_requester.assert_not_called()
         storage.set_pending_approval_requester.assert_not_called()
