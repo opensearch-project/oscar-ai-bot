@@ -850,7 +850,8 @@ class TestAllErrorPathsContainMarker(_SharedLayerMixin, unittest.TestCase):
     """Every rejection must contain CONFIRMATION_MARKER for trace detection."""
 
     def test_all_rejections_contain_marker(self):
-        from oscar_shared.approval_guard import CONFIRMATION_MARKER, validate_two_person_approval
+        from oscar_shared.approval_guard import (CONFIRMATION_MARKER,
+                                                 validate_two_person_approval)
         cases = [
             ({'requester_user_id': 'U1'}, None),
             ({'requester_user_id': 'U1', 'approval_expired': 'True'}, None),
