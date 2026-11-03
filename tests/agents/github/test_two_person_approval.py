@@ -846,6 +846,23 @@ class TestApprovalGuardAdminPolicy(_SharedLayerMixin, unittest.TestCase):
         self.assertIsNone(result)
 
 
+class TestAllErrorPathsContainMarker(_SharedLayerMixin, unittest.TestCase):
+    """Every rejection must contain CONFIRMATION_MARKER for trace detection."""
+
+    def test_all_rejections_contain_marker(self):
+        from oscar_shared.approval_guard import CONFIRMATION_MARKER, validate_two_person_approval
+        cases = [
+            ({'requester_user_id': 'U1'}, None),
+            ({'requester_user_id': 'U1', 'approval_expired': 'True'}, None),
+            ({'requester_user_id': 'U1', 'approver_user_id': 'U1'}, None),
+            ({'requester_user_id': 'U1', 'approver_user_id': 'U2', 'approver_is_admin': 'False'}, 'maintainer'),
+            ({'requester_user_id': 'U1', 'approver_user_id': 'U2', 'approver_is_admin': 'False'}, 'admin'),
+        ]
+        for attrs, policy in cases:
+            result = validate_two_person_approval(attrs, True, 'test', auth_policy=policy)
+            self.assertIn(CONFIRMATION_MARKER, result['message'], f'Missing marker for {attrs}')
+
+
 class TestAuthPolicyDeriveTier(_SharedLayerMixin, unittest.TestCase):
     """Cover derive_tier — specifically the maintainer branch (line 74)."""
 

@@ -17,6 +17,7 @@ from typing import Any, Dict, Optional, Tuple
 import boto3
 from botocore.exceptions import ClientError
 from config import config
+from oscar_shared.approval_guard import CONFIRMATION_MARKER
 
 logger = logging.getLogger(__name__)
 
@@ -150,9 +151,9 @@ class BedrockAgentCore:
                     observation = orch_trace.get('observation', {})
                     action_output = observation.get('actionGroupInvocationOutput', {})
                     action_text = action_output.get('text', '')
-                    if '[CONFIRMATION_REQUIRED]' in action_text:
+                    if CONFIRMATION_MARKER in action_text:
                         saw_confirmation_in_trace = True
-                        logger.info("APPROVAL_TRACE: detected [CONFIRMATION_REQUIRED] in tool result trace")
+                        logger.info("APPROVAL_TRACE: detected %s in tool result trace", CONFIRMATION_MARKER)
 
                     if 'chunk' in event:
                         chunk = event['chunk']

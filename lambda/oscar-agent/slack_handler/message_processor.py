@@ -15,6 +15,7 @@ from typing import Callable
 import boto3
 from config import config
 from input_validator import InputValidationError, validate_and_sanitize
+from oscar_shared.approval_guard import CONFIRMATION_MARKER
 from oscar_shared.auth_policy import derive_tier
 from oscar_shared.oauth_state import generate_state
 from slack_sdk import WebClient
@@ -178,9 +179,8 @@ class MessageProcessor:
         Returns:
             Cleaned response with confirmation marker removed
         """
-        if response and '[CONFIRMATION_REQUIRED]' in response:
-            # Remove the marker from the response
-            cleaned_response = response.replace('[CONFIRMATION_REQUIRED]', '').strip()
+        if response and CONFIRMATION_MARKER in response:
+            cleaned_response = response.replace(CONFIRMATION_MARKER, '').strip()
 
             # Add warning reaction to the original user message
             self.reaction_manager.manage_reactions(
@@ -218,7 +218,7 @@ class MessageProcessor:
             re.compile(r'<\s*/?system\s*>', re.IGNORECASE),
             re.compile(r'\[INST\]|\[/INST\]', re.IGNORECASE),
             re.compile(r'```\s*system', re.IGNORECASE),
-            re.compile(r'\[CONFIRMATION_REQUIRED\]', re.IGNORECASE),
+            re.compile(re.escape(CONFIRMATION_MARKER), re.IGNORECASE),
             re.compile(r'(ignore|disregard|override|forget)\s+(all\s+)?(previous|prior|above)\s+(instructions?|rules?|prompts?)', re.IGNORECASE),
             re.compile(r'(new|updated?)\s+system\s+prompt', re.IGNORECASE),
             re.compile(r'you\s+are\s+now', re.IGNORECASE),
@@ -497,7 +497,7 @@ class MessageProcessor:
                 return
 
             # Handle confirmation detection and warning reaction
-            confirmation_required = response and '[CONFIRMATION_REQUIRED]' in response
+            confirmation_required = response and CONFIRMATION_MARKER in response
             response = self._handle_confirmation_detection(response, channel, thread_ts)
 
             # Approval rejection is detected from Bedrock Agent trace events
