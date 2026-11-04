@@ -54,9 +54,49 @@ def lambda_handler(event: Dict[str, Any], context) -> Dict[str, Any]:
             if isinstance(param, dict) and 'name' in param and 'value' in param:
                 params[param['name']] = param['value']
 
+        # Determine access tier from session attributes (set server-side by the
+        # oscar-agent from the caller's GitHub identity). A user is privileged
+        # for Jenkins if they are a global admin OR listed under agents.jenkins.
+        # Being privileged for a different agent does NOT grant Jenkins access.
+        # Falls back to a directly-provided access_tier (e.g. legacy callers,
+        # global-tier agents). Fail closed: absent/unknown attributes -> limited.
+        session_attrs = event.get('sessionAttributes', {}) or {}
+        if 'is_global_admin' in session_attrs or 'authorized_agents' in session_attrs:
+            is_global = session_attrs.get('is_global_admin') == 'true'
+            authorized_agents = [a for a in session_attrs.get('authorized_agents', '').split(',') if a]
+            access_tier = 'privileged' if (is_global or 'jenkins' in authorized_agents) else 'limited'
+        else:
+            access_tier = session_attrs.get('access_tier', 'limited')
+
+        access_tier = (access_tier or '').strip().lower()
+
+        # Select Jenkins token based on access tier
+        try:
+            jenkins_token = config.get_token_for_access_tier(access_tier)
+        except PermissionError as e:
+            logger.warning(f"ACCESS_DENIED: access_tier={access_tier} function={function_name} reason={e}")
+            return create_response(event, {
+                'status': 'error',
+                'message': str(e),
+            })
+
+        logger.info(f"ACCESS: access_tier={access_tier} function={function_name}")
+
+        RESTRICTED_FUNCTIONS = {
+            'limited': ['trigger_job'],
+            'privileged': [],
+        }
+        blocked = RESTRICTED_FUNCTIONS.get(access_tier, RESTRICTED_FUNCTIONS['limited'])
+        if function_name in blocked:
+            logger.warning(f"ACCESS_DENIED: access_tier={access_tier} attempted {function_name}")
+            return create_response(event, {
+                'status': 'error',
+                'message': 'Job triggering requires elevated access. You have read-only permissions. Contact an admin for execution privileges.',
+            })
+
         # Initialize Jenkins client with fetched job registry
         job_registry = get_job_registry()
-        jenkins_client = JenkinsClient(job_registry)
+        jenkins_client = JenkinsClient(job_registry, jenkins_token)
 
         # Route to appropriate handler
         match function_name:

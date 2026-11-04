@@ -60,7 +60,7 @@ class JenkinsAgent(OscarAgent):
         ]
 
     def get_access_level(self):
-        return "privileged"
+        return "both"
 
     def get_monitoring_config(self):
         return [

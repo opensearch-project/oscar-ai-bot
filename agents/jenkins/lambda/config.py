@@ -32,6 +32,7 @@ class JenkinsConfig:
         # Load Jenkins secrets from dedicated secret (JSON format)
         secrets = self._load_jenkins_secret()
         self.jenkins_api_token = secrets.get('jenkins_api_token', '')
+        self.jenkins_readonly_token = secrets.get('jenkins_readonly_token', '')
         self.github_token = secrets.get('github_token', '')
 
         # Jenkins Server Configuration (required)
@@ -88,6 +89,30 @@ class JenkinsConfig:
 
         if not self.jenkins_api_token:
             logger.warning("JENKINS_API_TOKEN is not configured")
+
+        if not self.jenkins_readonly_token:
+            logger.warning("JENKINS_READONLY_TOKEN is not configured — limited users will be denied access")
+
+    def get_token_for_access_tier(self, access_tier: str) -> str:
+        """Return the appropriate Jenkins API token based on access tier.
+
+        Args:
+            access_tier: 'privileged' or 'limited'
+
+        Returns:
+            Token string in 'user:token' format.
+
+        Raises:
+            PermissionError: If the required token is not configured.
+        """
+        if access_tier == "privileged":
+            if not self.jenkins_api_token:
+                raise PermissionError("Admin token not configured.")
+            return self.jenkins_api_token
+        else:
+            if not self.jenkins_readonly_token:
+                raise PermissionError("Read-only access is not configured. Access denied.")
+            return self.jenkins_readonly_token
 
     def get_job_url(self, job_name: str) -> str:
         """Get the full URL for a Jenkins job."""
