@@ -73,6 +73,20 @@ def validate_two_person_approval(
             ),
         }
 
+    if requester_user_id.startswith("github:"):
+        github_requester = requester_user_id[len("github:"):]
+        approver_github_handle = session_attributes.get("approver_github_handle", "")
+        if approver_github_handle and approver_github_handle.lower() == github_requester.lower():
+            return {
+                'status': 'error',
+                'message': (
+                    f'SECURITY ERROR: Self-approval is not permitted. '
+                    f'The GitHub requester (@{github_requester}) cannot also be the Slack approver. '
+                    'A different authorized user must confirm this action. '
+                    '[2PR_PENDING]'
+                ),
+            }
+
     if auth_policy == "maintainer":
         if session_attributes.get('approver_is_admin') != 'True':
             return {

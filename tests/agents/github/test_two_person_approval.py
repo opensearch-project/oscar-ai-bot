@@ -471,21 +471,22 @@ class TestTwoPersonApprovalBulkComment(unittest.TestCase):
         mock_bulk_comment.assert_called_once()
 
 
-def _create_tag_event(session_attrs=None):
-    """Build a create_tag event with optional session attributes."""
+def _create_ref_event(ref_type="tag", ref_name="3.12.0", session_attrs=None):
+    """Build a create_ref event with optional session attributes."""
     params = [
         {'name': 'repo', 'value': 'data-prepper'},
-        {'name': 'tag_name', 'value': '3.12.0'},
+        {'name': 'ref_type', 'value': ref_type},
+        {'name': 'ref_name', 'value': ref_name},
         {'name': 'commit_sha', 'value': '1234abcd' * 5},
     ]
-    event = {'function': 'create_tag', 'parameters': params}
+    event = {'function': 'create_ref', 'parameters': params}
     if session_attrs is not None:
         event['sessionAttributes'] = session_attrs
     return event
 
 
 class TestTwoPersonApprovalCreateTag(unittest.TestCase):
-    """Test 2PR and maintainer authorization in create_tag."""
+    """Test 2PR and maintainer authorization in create_ref (tag)."""
 
     @patch.dict(os.environ, {'ENABLE_2PR': 'true', 'GITHUB_SECRET_NAME': 'test-secret'})
     @patch('boto3.client')
@@ -500,7 +501,7 @@ class TestTwoPersonApprovalCreateTag(unittest.TestCase):
         mod, _ = _load_lambda_handler()
         mock_create_ref = sys.modules['github_api'].create_ref
 
-        result = mod.lambda_handler(_create_tag_event(session_attrs={
+        result = mod.lambda_handler(_create_ref_event(session_attrs={
             'requester_is_admin': 'True', 'requester_is_maintainer': 'True',
         }), None)
         body = result['response']['functionResponse']['responseBody']['TEXT']['body']
@@ -522,7 +523,7 @@ class TestTwoPersonApprovalCreateTag(unittest.TestCase):
         mod, _ = _load_lambda_handler()
         mock_create_ref = sys.modules['github_api'].create_ref
 
-        event = _create_tag_event(session_attrs={
+        event = _create_ref_event(session_attrs={
             'requester_user_id': 'U_SAME', 'approver_user_id': 'U_SAME',
             'requester_is_admin': 'True', 'approver_is_admin': 'True', 'requester_is_maintainer': 'True',
         })
@@ -549,7 +550,7 @@ class TestTwoPersonApprovalCreateTag(unittest.TestCase):
             'status': 'success', 'tag': '3.12.0', 'commit_sha': '1234abcd' * 5,
         })
 
-        event = _create_tag_event(session_attrs={
+        event = _create_ref_event(session_attrs={
             'requester_user_id': 'U_REQ', 'approver_user_id': 'U_APP',
             'requester_is_admin': 'True', 'approver_is_admin': 'True', 'requester_is_maintainer': 'True',
         })
@@ -576,7 +577,7 @@ class TestTwoPersonApprovalCreateTag(unittest.TestCase):
             'status': 'success', 'tag': '3.12.0', 'commit_sha': '1234abcd' * 5,
         })
 
-        result = mod.lambda_handler(_create_tag_event(session_attrs={
+        result = mod.lambda_handler(_create_ref_event(session_attrs={
             'requester_user_id': 'U_ADMIN', 'requester_is_admin': 'True', 'requester_is_maintainer': 'True',
         }), None)
         body = result['response']['functionResponse']['responseBody']['TEXT']['body']
@@ -598,148 +599,7 @@ class TestTwoPersonApprovalCreateTag(unittest.TestCase):
         mod, _ = _load_lambda_handler()
         mock_create_ref = sys.modules['github_api'].create_ref
 
-        event = _create_tag_event(session_attrs={
-            'requester_user_id': 'U_REQ', 'approver_user_id': 'U_APP',
-            'requester_is_admin': 'False', 'approver_is_admin': 'True',
-            'requester_is_maintainer': 'False',
-        })
-        result = mod.lambda_handler(event, None)
-        body = result['response']['functionResponse']['responseBody']['TEXT']['body']
-        parsed = json.loads(body)
-        self.assertEqual(parsed['status'], 'error')
-        self.assertIn('AUTHORIZATION ERROR', parsed['message'])
-        self.assertIn('maintainer', parsed['message'])
-        mock_create_ref.assert_not_called()
-
-
-def _create_branch_event(session_attrs=None):
-    """Build a create_branch event with optional session attributes."""
-    params = [
-        {'name': 'repo', 'value': 'data-prepper'},
-        {'name': 'branch_name', 'value': '3.12'},
-        {'name': 'commit_sha', 'value': '1234abcd' * 5},
-    ]
-    event = {'function': 'create_branch', 'parameters': params}
-    if session_attrs is not None:
-        event['sessionAttributes'] = session_attrs
-    return event
-
-
-class TestTwoPersonApprovalCreateBranch(unittest.TestCase):
-    """Test 2PR and maintainer authorization in create_branch."""
-
-    @patch.dict(os.environ, {'ENABLE_2PR': 'true', 'GITHUB_SECRET_NAME': 'test-secret'})
-    @patch('boto3.client')
-    def test_2pr_enabled_missing_user_ids_rejected(self, mock_boto):
-        mock_boto.return_value.get_secret_value.return_value = {
-            'SecretString': json.dumps({
-                'GITHUB_APP_ID': '123',
-                'GITHUB_PRIVATE_KEY': 'key',
-                'GITHUB_INSTALLATION_ID': '456',
-            })
-        }
-        mod, _ = _load_lambda_handler()
-        mock_create_ref = sys.modules['github_api'].create_ref
-
-        result = mod.lambda_handler(_create_branch_event(session_attrs={
-            'requester_is_admin': 'True', 'requester_is_maintainer': 'True',
-        }), None)
-        body = result['response']['functionResponse']['responseBody']['TEXT']['body']
-        parsed = json.loads(body)
-        self.assertEqual(parsed['status'], 'error')
-        self.assertIn('SECURITY ERROR', parsed['message'])
-        mock_create_ref.assert_not_called()
-
-    @patch.dict(os.environ, {'ENABLE_2PR': 'true', 'GITHUB_SECRET_NAME': 'test-secret'})
-    @patch('boto3.client')
-    def test_2pr_enabled_self_approval_rejected(self, mock_boto):
-        mock_boto.return_value.get_secret_value.return_value = {
-            'SecretString': json.dumps({
-                'GITHUB_APP_ID': '123',
-                'GITHUB_PRIVATE_KEY': 'key',
-                'GITHUB_INSTALLATION_ID': '456',
-            })
-        }
-        mod, _ = _load_lambda_handler()
-        mock_create_ref = sys.modules['github_api'].create_ref
-
-        event = _create_branch_event(session_attrs={
-            'requester_user_id': 'U_SAME', 'approver_user_id': 'U_SAME',
-            'requester_is_admin': 'True', 'approver_is_admin': 'True', 'requester_is_maintainer': 'True',
-        })
-        result = mod.lambda_handler(event, None)
-        body = result['response']['functionResponse']['responseBody']['TEXT']['body']
-        parsed = json.loads(body)
-        self.assertEqual(parsed['status'], 'error')
-        self.assertIn('Self-approval is not permitted', parsed['message'])
-        mock_create_ref.assert_not_called()
-
-    @patch.dict(os.environ, {'ENABLE_2PR': 'true', 'GITHUB_SECRET_NAME': 'test-secret'})
-    @patch('boto3.client')
-    def test_2pr_enabled_distinct_admin_users_proceeds(self, mock_boto):
-        mock_boto.return_value.get_secret_value.return_value = {
-            'SecretString': json.dumps({
-                'GITHUB_APP_ID': '123',
-                'GITHUB_PRIVATE_KEY': 'key',
-                'GITHUB_INSTALLATION_ID': '456',
-            })
-        }
-        mod, _ = _load_lambda_handler()
-        mock_create_ref = sys.modules['github_api'].create_ref
-        mock_create_ref.return_value = json.dumps({
-            'status': 'success', 'branch': '3.12', 'commit_sha': '1234abcd' * 5,
-        })
-
-        event = _create_branch_event(session_attrs={
-            'requester_user_id': 'U_REQ', 'approver_user_id': 'U_APP',
-            'requester_is_admin': 'True', 'approver_is_admin': 'True', 'requester_is_maintainer': 'True',
-        })
-        result = mod.lambda_handler(event, None)
-        body = result['response']['functionResponse']['responseBody']['TEXT']['body']
-        parsed = json.loads(body)
-        self.assertEqual(parsed['status'], 'success')
-        mock_create_ref.assert_called_once()
-
-    @patch.dict(os.environ, {'ENABLE_2PR': 'false', 'GITHUB_SECRET_NAME': 'test-secret'})
-    @patch('boto3.client')
-    def test_2pr_disabled_admin_proceeds(self, mock_boto):
-        """Admin requester proceeds when ENABLE_2PR is off."""
-        mock_boto.return_value.get_secret_value.return_value = {
-            'SecretString': json.dumps({
-                'GITHUB_APP_ID': '123',
-                'GITHUB_PRIVATE_KEY': 'key',
-                'GITHUB_INSTALLATION_ID': '456',
-            })
-        }
-        mod, _ = _load_lambda_handler()
-        mock_create_ref = sys.modules['github_api'].create_ref
-        mock_create_ref.return_value = json.dumps({
-            'status': 'success', 'branch': '3.12', 'commit_sha': '1234abcd' * 5,
-        })
-
-        result = mod.lambda_handler(_create_branch_event(session_attrs={
-            'requester_user_id': 'U_ADMIN', 'requester_is_admin': 'True', 'requester_is_maintainer': 'True',
-        }), None)
-        body = result['response']['functionResponse']['responseBody']['TEXT']['body']
-        parsed = json.loads(body)
-        self.assertEqual(parsed['status'], 'success')
-        mock_create_ref.assert_called_once()
-
-    @patch.dict(os.environ, {'ENABLE_2PR': 'true', 'GITHUB_SECRET_NAME': 'test-secret'})
-    @patch('boto3.client')
-    def test_non_admin_non_maintainer_rejected(self, mock_boto):
-        """Non-admin user without maintainer status is rejected at group gate."""
-        mock_boto.return_value.get_secret_value.return_value = {
-            'SecretString': json.dumps({
-                'GITHUB_APP_ID': '123',
-                'GITHUB_PRIVATE_KEY': 'key',
-                'GITHUB_INSTALLATION_ID': '456',
-            })
-        }
-        mod, _ = _load_lambda_handler()
-        mock_create_ref = sys.modules['github_api'].create_ref
-
-        event = _create_branch_event(session_attrs={
+        event = _create_ref_event(session_attrs={
             'requester_user_id': 'U_REQ', 'approver_user_id': 'U_APP',
             'requester_is_admin': 'False', 'approver_is_admin': 'True',
             'requester_is_maintainer': 'False',
@@ -795,6 +655,37 @@ class TestApprovalGuardExpired(unittest.TestCase):
         )
         self.assertIsNotNone(result)
         self.assertIn('requires approval from an admin', result['message'])
+
+    def test_cross_identity_self_approval_rejected(self):
+        from oscar_shared.approval_guard import validate_two_person_approval
+        result = validate_two_person_approval(
+            session_attributes={
+                'requester_user_id': 'github:alice',
+                'approver_user_id': 'U_SLACK',
+                'approver_github_handle': 'alice',
+                'approver_is_admin': 'True',
+            },
+            enable_2pr=True,
+            action_label='action=test',
+        )
+        self.assertIsNotNone(result)
+        self.assertIn('Self-approval is not permitted', result['message'])
+        self.assertIn('@alice', result['message'])
+        self.assertIn('[2PR_PENDING]', result['message'])
+
+    def test_cross_identity_different_handles_passes(self):
+        from oscar_shared.approval_guard import validate_two_person_approval
+        result = validate_two_person_approval(
+            session_attributes={
+                'requester_user_id': 'github:alice',
+                'approver_user_id': 'U_SLACK',
+                'approver_github_handle': 'bob',
+                'approver_is_admin': 'True',
+            },
+            enable_2pr=True,
+            action_label='action=test',
+        )
+        self.assertIsNone(result)
 
 
 class _SharedLayerMixin:

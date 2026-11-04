@@ -123,49 +123,9 @@ def get_action_groups(lambda_arn: str) -> List[bedrock.CfnAgent.AgentActionGroup
             function_schema=bedrock.CfnAgent.FunctionSchemaProperty(
                 functions=[
                     bedrock.CfnAgent.FunctionProperty(
-                        name="create_tag",
+                        name="create_ref",
                         description=(
-                            "Create a lightweight Git tag on a specific commit in a repository. "
-                            "Requires explicit user confirmation before execution. "
-                            "The commit can be a full or abbreviated SHA. "
-                            "Tag names typically follow semver (e.g., '3.12.0'). "
-                            "When the request originated from a GitHub @mention, pass "
-                            "github_requester, source_repo, and source_issue_number so the "
-                            "bot can verify the requester and respond on the issue."
-                        ),
-                        parameters={
-                            "repo": _param("string", "Repository name", True),
-                            "tag_name": _param("string", "Name for the tag (e.g., '3.12.0')", True),
-                            "commit_sha": _param(
-                                "string",
-                                "Commit SHA (full or abbreviated) or branch name to tag. "
-                                "If omitted, the HEAD of the default branch is used.",
-                                False,
-                            ),
-                            "github_requester": _param(
-                                "string",
-                                "GitHub username of the person who @mentioned the bot on the issue. "
-                                "Required when the request comes from a GitHub webhook notification.",
-                                False,
-                            ),
-                            "source_repo": _param(
-                                "string",
-                                "Repository where the bot was @mentioned (may differ from repo). "
-                                "Required when the request comes from a GitHub webhook notification.",
-                                False,
-                            ),
-                            "source_issue_number": _param(
-                                "string",
-                                "Issue number where the bot was @mentioned. "
-                                "Required when the request comes from a GitHub webhook notification.",
-                                False,
-                            ),
-                        },
-                    ),
-                    bedrock.CfnAgent.FunctionProperty(
-                        name="create_branch",
-                        description=(
-                            "Create a new branch from a specific commit in a repository. "
+                            "Create a lightweight Git tag or branch on a specific commit in a repository. "
                             "Requires explicit user confirmation before execution. "
                             "The commit can be a full or abbreviated SHA; abbreviated SHAs "
                             "are resolved to the full SHA automatically. "
@@ -175,10 +135,11 @@ def get_action_groups(lambda_arn: str) -> List[bedrock.CfnAgent.AgentActionGroup
                         ),
                         parameters={
                             "repo": _param("string", "Repository name", True),
-                            "branch_name": _param("string", "Name for the branch (e.g., '3.12')", True),
+                            "ref_type": _param("string", "Type of ref to create: 'tag' or 'branch'", True),
+                            "ref_name": _param("string", "Name for the tag or branch (e.g., '3.12.0' or '3.12')", True),
                             "commit_sha": _param(
                                 "string",
-                                "Commit SHA (full or abbreviated) or branch name to branch from. "
+                                "Commit SHA (full or abbreviated) to create the ref from. "
                                 "If omitted, the HEAD of the default branch is used.",
                                 False,
                             ),

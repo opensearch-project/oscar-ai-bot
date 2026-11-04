@@ -434,7 +434,7 @@ class TestProcessMessageContextIntegration:
         call_args = timeout_handler.query_agent_with_timeout.call_args[0]
         assert "notification text" in call_args[4]
 
-    def test_webhook_notification_sets_external_requester(self):
+    def _run_webhook_scenario(self, repo_field):
         storage = Mock()
         storage.get_context.return_value = None
         storage.get_context_for_query.return_value = ''
@@ -442,7 +442,8 @@ class TestProcessMessageContextIntegration:
         slack.auth_test.return_value = {"bot_id": "B_OSCAR"}
         slack.conversations_replies.return_value = {"messages": [{"bot_id": "B_OSCAR", "blocks": [
             {"type": "section", "fields": [
-                {"type": "mrkdwn", "text": "*Repo:*\norg/repo"},
+                {"type": "mrkdwn", "text": f"*Repo:*\n{repo_field}"},
+                {"type": "mrkdwn", "text": "*Issue:*\n#99 Tag request"},
                 {"type": "mrkdwn", "text": "*From:*\ngh-author"},
             ]},
         ]}]}
@@ -453,9 +454,16 @@ class TestProcessMessageContextIntegration:
         mp._has_identity_mapping = Mock(return_value=True)
         mp._get_identity_record = Mock(return_value={"github_handle": "x", "is_org_maintainer": False})
         mp.process_message('C_ALLOWED', 'thread_ts', 'U_ADMIN', '<@BOT> hi', Mock(), message_ts='msg_ts')
-        attrs = timeout_handler.query_agent_with_timeout.call_args[1].get('session_attributes', {})
+        return timeout_handler.query_agent_with_timeout.call_args[1].get('session_attributes', {})
+
+    def test_webhook_notification_sets_external_requester(self):
+        attrs = self._run_webhook_scenario("opensearch-project/.github")
         assert attrs.get("external_requester") == "true"
         assert attrs.get("requester_user_id") == "github:gh-author"
+
+    def test_webhook_from_non_dotgithub_repo_no_external_requester(self):
+        attrs = self._run_webhook_scenario("opensearch-project/OpenSearch")
+        assert "external_requester" not in attrs
 
 
 class TestFetchThreadParentContextAuthor:
@@ -474,25 +482,37 @@ class TestFetchThreadParentContextAuthor:
             slack.conversations_replies.return_value = {"messages": [msg]}
             return _make_processor(slack_client=slack)
 
-        # Own bot with From field → author extracted
-        fields = [{"type": "mrkdwn", "text": "*From:*\nuser1"},
-                  {"type": "mrkdwn", "text": "*Repo:*\norg/repo"}]
-        mp = _make("B_OSCAR", fields)
+        dot_github_fields = [
+            {"type": "mrkdwn", "text": "*From:*\nuser1"},
+            {"type": "mrkdwn", "text": "*Repo:*\norg/.github"},
+            {"type": "mrkdwn", "text": "*Issue:*\n#1 Tag request"}]
+
+        # Bot message on .github issue → author extracted
+        mp = _make("B_ANY", dot_github_fields)
         ctx, author = mp._fetch_thread_parent_context("C1", "ts1")
         assert author == "user1" and "user1" in ctx
 
-        # Different bot → author empty
-        mp = _make("B_OTHER", fields)
+        # Bot message on non-.github repo → author empty
+        mp = _make("B_ANY", [{"type": "mrkdwn", "text": "*From:*\nuser1"},
+                              {"type": "mrkdwn", "text": "*Repo:*\norg/other-repo"},
+                              {"type": "mrkdwn", "text": "*Issue:*\n#1 Title"}])
         _, author = mp._fetch_thread_parent_context("C1", "ts1")
         assert author == ""
 
-        # No bot_id (user message) → author empty
-        mp = _make(None, [], "fake")
+        # Bot message on .github but PR (not issue) → author empty
+        mp = _make("B_ANY", [{"type": "mrkdwn", "text": "*From:*\nuser1"},
+                              {"type": "mrkdwn", "text": "*Repo:*\norg/.github"},
+                              {"type": "mrkdwn", "text": "*PR:*\n#5 Some PR"}])
         _, author = mp._fetch_thread_parent_context("C1", "ts1")
         assert author == ""
 
-        # Own bot, no blocks, no text → both empty
-        mp = _make("B_OSCAR")
+        # No bot_id (human message) → author empty even with .github fields
+        mp = _make(None, dot_github_fields)
+        _, author = mp._fetch_thread_parent_context("C1", "ts1")
+        assert author == ""
+
+        # Bot, no blocks, no text → both empty
+        mp = _make("B_ANY")
         ctx, author = mp._fetch_thread_parent_context("C1", "ts1")
         assert ctx == "" and author == ""
 
@@ -519,16 +539,6 @@ class TestExternalRequesterIdentity:
         assert "approver_user_id" not in attrs
         assert "external_requester" not in attrs
 
-    def test_get_own_bot_id(self):
-        slack = Mock()
-        slack.auth_test.return_value = {"bot_id": "B_TEST"}
-        mp = _make_processor(slack_client=slack)
-        assert mp._get_own_bot_id() == "B_TEST"
-        mp._get_own_bot_id()
-        slack.auth_test.assert_called_once()
-        slack2 = Mock()
-        slack2.auth_test.side_effect = Exception("fail")
-        assert _make_processor(slack_client=slack2)._get_own_bot_id() == ""
 
 
 class TestProcessMessage:

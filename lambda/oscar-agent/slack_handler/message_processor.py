@@ -258,16 +258,6 @@ class MessageProcessor:
             text = pattern.sub('[FILTERED]', text)
         return text
 
-    def _get_own_bot_id(self) -> str:
-        """Return our own bot_id, cached after the first call."""
-        if not hasattr(self, '_own_bot_id'):
-            try:
-                resp = self.slack_client.auth_test()
-                self._own_bot_id = resp.get("bot_id", "")
-            except Exception:
-                self._own_bot_id = ""
-        return self._own_bot_id
-
     def _fetch_thread_parent_context(self, channel: str, thread_ts: str):
         """Fetch the thread parent message and return (context_str, github_author).
 
@@ -289,7 +279,7 @@ class MessageProcessor:
                 return "", ""
 
             parent = messages[0]
-            is_own_bot = parent.get("bot_id") == self._get_own_bot_id()
+            is_bot_message = bool(parent.get("bot_id"))
 
             # Parse Block Kit blocks (webhook notifications) into structured fields
             header = ""
@@ -308,10 +298,13 @@ class MessageProcessor:
                     if section_text:
                         body = self._strip_mrkdwn(section_text)
 
-            github_author = fields.get("From", "") if is_own_bot else ""
+            repo_field = fields.get("Repo", "")
+            repo_name = repo_field.split("/")[-1] if "/" in repo_field else repo_field
+            is_dot_github_issue = repo_name == ".github" and "Issue" in fields
+            github_author = fields.get("From", "") if (is_bot_message and is_dot_github_issue) else ""
 
             if fields:
-                repo = fields.get("Repo", "")
+                repo = repo_field
                 issue_field = fields.get("Issue", fields.get("PR", ""))
                 owner, name = (repo.split("/", 1) + [""])[:2] if "/" in repo else ("", repo)
 

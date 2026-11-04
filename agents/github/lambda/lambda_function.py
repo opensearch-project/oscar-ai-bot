@@ -9,7 +9,6 @@ import os
 import re
 import traceback
 import uuid
-from functools import partial
 from typing import Any, Dict, Optional
 
 import boto3
@@ -236,22 +235,6 @@ def _resolve_commit_sha(token: str, repo: str, commit_sha: str) -> str:
 # Authorization helpers
 # ---------------------------------------------------------------------------
 
-def _is_repo_maintainer(token: str, repo: str, github_handle: str, is_admin_flag: str) -> bool:
-    """Check if a user is an admin or a maintainer of the given repo.
-
-    Uses the github_handle from session attributes (enriched by oscar-agent)
-    rather than querying DynamoDB directly.
-    """
-    if is_admin_flag == "True":
-        return True
-    if not github_handle:
-        return False
-    maintainers_result = json.loads(get_repo_maintainers(token, ORG, repo))
-    if maintainers_result.get("status") != "success":
-        return False
-    return github_handle in [m["github_id"] for m in maintainers_result.get("maintainers", [])]
-
-
 def _validate_admin_only(session_attributes: Dict[str, str], action_label: str) -> Optional[Dict[str, Any]]:
     """Gate 4b: reject non-admin requesters. Returns error dict or None if authorized.
 
@@ -269,52 +252,25 @@ def _validate_admin_only(session_attributes: Dict[str, str], action_label: str) 
     return None
 
 
-def _validate_maintainer_authorization(
-    token: str, repo: str, session_attributes: Dict[str, str], action_label: str,
-) -> Optional[Dict[str, Any]]:
-    """Gate 4b for maintainer ops: live per-repo MAINTAINERS.md check.
-
-    Verifies the requester is an admin or a maintainer of the specific repo
-    (not just any repo). Uses requester_github_handle from session attributes.
-    Approver authorization is handled by the centralized 2PR check.
-    """
-    attrs = session_attributes or {}
-    requester_id = attrs.get("requester_user_id", "")
-    requester_admin = attrs.get("requester_is_admin", "False")
-    github_handle = attrs.get("requester_github_handle", "")
-
-    if not requester_id:
-        return {
-            "status": "error",
-            "message": (
-                f"AUTHORIZATION ERROR: {action_label} requires a requester "
-                "who is an admin or maintainer of this repository."
-            ),
-        }
-
-    if not _is_repo_maintainer(token, repo, github_handle, requester_admin):
-        return {
-            "status": "error",
-            "message": (
-                f"AUTHORIZATION ERROR: Requester is not an admin or maintainer of {repo}. "
-                f"Only admins and repo maintainers can request {action_label}."
-            ),
-        }
-
-    logger.info(
-        "MAINTAINER_AUTH: %s authorized — requester=%s repo=%s",
-        action_label, requester_id, repo,
-    )
-    return None
-
-
-def _is_github_repo_admin(token: str, repo: str, username: str) -> bool:
-    """Check if a GitHub user has admin permission on a repo."""
+def _get_repo_role(token: str, repo: str, username: str) -> str:
+    """Return the GitHub role_name for a user on a repo (admin, maintain, write, read, none)."""
+    if not username:
+        return ""
     try:
         result = get(token, f"/repos/{ORG}/{repo}/collaborators/{username}/permission")
-        return result.get("permission") == "admin"
+        return result.get("role_name", "")
     except Exception:
-        return False
+        return ""
+
+
+def _is_repo_admin(token: str, repo: str, username: str) -> bool:
+    """Check if a GitHub user has admin role on a repo."""
+    return _get_repo_role(token, repo, username) == "admin"
+
+
+def _is_repo_maintainer_or_admin(token: str, repo: str, username: str) -> bool:
+    """Check if a GitHub user has maintain or admin role on a repo."""
+    return _get_repo_role(token, repo, username) in ("admin", "maintain")
 
 
 def _post_issue_comment_safe(token: str, repo: str, issue_number: int, body: str) -> None:
@@ -329,12 +285,20 @@ def _post_issue_comment_safe(token: str, repo: str, issue_number: int, body: str
 
 def _handle_create_ref(
     token: str, params: Dict[str, str], request_id: str,
-    session_attributes: Dict[str, str] = None, *, ref_type: str,
+    session_attributes: Dict[str, str] = None,
 ) -> Any:
-    """Shared handler for create_tag and create_branch."""
+    """Unified handler for create_ref (tag or branch)."""
     repo = params.get("repo", "")
+    ref_type_param = params.get("ref_type", "")
+    _REF_TYPE_MAP = {"tag": "tags", "branch": "heads"}
+    ref_type = _REF_TYPE_MAP.get(ref_type_param, "")
+    if not ref_type:
+        return json.dumps({
+            "status": "error",
+            "message": "VALIDATION ERROR: ref_type must be 'tag' or 'branch'.",
+        })
     is_tag = ref_type == "tags"
-    name = params.get("tag_name" if is_tag else "branch_name", "")
+    name = params.get("ref_name", "")
     label = "tag" if is_tag else "branch"
 
     github_requester = params.get("github_requester", "")
@@ -358,11 +322,9 @@ def _handle_create_ref(
     if validation_error:
         return json.dumps(validation_error)
 
-    if is_github_mention:
-        # GitHub @mention flow: auth the GitHub user, not the Slack user.
-        # Slack approver is verified by 2PR in the lambda handler pipeline.
-        attrs = session_attributes or {}
+    attrs = session_attributes or {}
 
+    if is_github_mention:
         # Verify github_requester (from LLM params) matches the trusted
         # external requester set by the message_processor from the webhook
         # notification. Prevents prompt injection from spoofing the username.
@@ -378,52 +340,46 @@ def _handle_create_ref(
                 "message": "SECURITY ERROR: GitHub requester identity could not be verified.",
             })
 
-        # Reject self-approval: Slack approver's GitHub handle must differ
-        # from the GitHub requester who @mentioned.
+    # --- Requester auth: OSCAR admin OR maintain+ permission on the repo ---
+    requester_handle = github_requester if is_github_mention else attrs.get("requester_github_handle", "")
+    requester_is_oscar_admin = attrs.get("requester_is_admin", "False") == "True"
+    if not requester_is_oscar_admin and not _is_repo_maintainer_or_admin(token, repo, requester_handle):
+        logger.warning(
+            "GITHUB [%s]: requester %s is not a maintainer or admin of %s",
+            request_id, requester_handle or attrs.get("requester_user_id", ""), repo,
+        )
+        _notify_issue(
+            f"Unable to create {label} `{name}` on `{ORG}/{repo}`. "
+            f"Only repository maintainers and admins can request {label} creation. "
+            "Please reach out to a repository admin for assistance.",
+        )
+        return json.dumps({
+            "status": "error",
+            "message": (
+                f"AUTHORIZATION ERROR: Requester is not a maintainer or admin of {repo}. "
+                f"Only admins and repo maintainers can create {label}s."
+            ),
+        })
+
+    # --- Approver auth: OSCAR admin OR repo admin (when 2PR is active) ---
+    approver_id = attrs.get("approver_user_id", "")
+    if approver_id:
+        approver_is_oscar_admin = attrs.get("approver_is_admin", "False") == "True"
         approver_handle = attrs.get("approver_github_handle", "")
-        if approver_handle and approver_handle.lower() == github_requester.lower():
-            _notify_issue(
-                f"Unable to create {label} `{name}` on `{ORG}/{repo}`. "
-                "Please check with your Slack admin.",
-            )
+        if not approver_is_oscar_admin and not _is_repo_admin(token, repo, approver_handle):
             return json.dumps({
                 "status": "error",
                 "message": (
-                    "AUTHORIZATION ERROR: Self-approval is not permitted. "
-                    f"The GitHub requester (@{github_requester}) cannot also be the Slack approver. "
-                    "A different authorized user must confirm this action."
+                    "AUTHORIZATION ERROR: Approver must be an admin "
+                    f"(OSCAR admin or GitHub admin on {repo})."
                 ),
             })
-        is_admin = _is_github_repo_admin(token, repo, github_requester)
-        if not _is_repo_maintainer(token, repo, github_requester, str(is_admin)):
-            logger.warning(
-                "GITHUB [%s]: GitHub requester %s is not a maintainer or admin of %s",
-                request_id, github_requester, repo,
-            )
-            _notify_issue(
-                f"Unable to create {label} `{name}` on `{ORG}/{repo}`. "
-                f"Only repository maintainers and admins can request {label} creation. "
-                "Please reach out to a repository admin for assistance.",
-            )
-            return json.dumps({
-                "status": "error",
-                "message": (
-                    f"GitHub requester @{github_requester} is not a maintainer or admin of {repo}. "
-                    f"A comment has been posted on issue #{source_issue}."
-                ),
-            })
-        logger.info(
-            "GITHUB [%s]: GitHub requester %s authorized on %s (reason=%s)",
-            request_id, github_requester, repo,
-            "repo_admin" if is_admin else "maintainers_md",
-        )
-    else:
-        # Slack flow: check the Slack user is a maintainer/admin of the repo.
-        auth_error = _validate_maintainer_authorization(
-            token, repo, session_attributes or {}, f'create_{label} on {repo}',
-        )
-        if auth_error:
-            return json.dumps(auth_error)
+
+    logger.info(
+        "GITHUB [%s]: requester=%s approver=%s authorized on %s",
+        request_id, requester_handle or attrs.get("requester_user_id", ""),
+        approver_id or "none", repo,
+    )
 
     try:
         commit_sha = _resolve_commit_sha(token, repo, params.get("commit_sha", ""))
@@ -482,17 +438,11 @@ FUNCTIONS: Dict[str, FunctionDef] = {
     ),
 
     # Maintainer operations (direct API, per-repo authorization)
-    "create_tag": FunctionDef(
+    "create_ref": FunctionDef(
         write=True,
         tier="maintainer",
-        auth_policy="maintainer",
-        handler=partial(_handle_create_ref, ref_type="tags"),
-    ),
-    "create_branch": FunctionDef(
-        write=True,
-        tier="maintainer",
-        auth_policy="maintainer",
-        handler=partial(_handle_create_ref, ref_type="heads"),
+        auth_policy="handler",
+        handler=_handle_create_ref,
     ),
 
     # Admin operations (MCP)
@@ -653,8 +603,8 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
 
         # --- Group gate: coarse tier check (no I/O, pre-token) ---
         # For external requester flows (GitHub @mention), skip the group gate
-        # only for maintainer-tier functions — the lambda handler verifies
-        # the GitHub requester directly via _is_repo_maintainer.
+        # only for maintainer-tier functions — the handler verifies
+        # the requester directly via _is_repo_maintainer_or_admin.
         is_external = session_attributes.get("external_requester") == "true"
         skip_group_gate = is_external and func_def.tier == "maintainer"
         if not skip_group_gate:
