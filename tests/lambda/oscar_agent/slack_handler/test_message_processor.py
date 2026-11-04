@@ -493,16 +493,18 @@ class TestFetchThreadParentContextAuthor:
         assert author == "user1" and "user1" in ctx
 
         # Bot message on non-.github repo → author empty
-        mp = _make("B_ANY", [{"type": "mrkdwn", "text": "*From:*\nuser1"},
-                              {"type": "mrkdwn", "text": "*Repo:*\norg/other-repo"},
-                              {"type": "mrkdwn", "text": "*Issue:*\n#1 Title"}])
+        other_fields = [{"type": "mrkdwn", "text": "*From:*\nuser1"},
+                        {"type": "mrkdwn", "text": "*Repo:*\norg/other-repo"},
+                        {"type": "mrkdwn", "text": "*Issue:*\n#1 Title"}]
+        mp = _make("B_ANY", other_fields)
         _, author = mp._fetch_thread_parent_context("C1", "ts1")
         assert author == ""
 
         # Bot message on .github but PR (not issue) → author empty
-        mp = _make("B_ANY", [{"type": "mrkdwn", "text": "*From:*\nuser1"},
-                              {"type": "mrkdwn", "text": "*Repo:*\norg/.github"},
-                              {"type": "mrkdwn", "text": "*PR:*\n#5 Some PR"}])
+        pr_fields = [{"type": "mrkdwn", "text": "*From:*\nuser1"},
+                     {"type": "mrkdwn", "text": "*Repo:*\norg/.github"},
+                     {"type": "mrkdwn", "text": "*PR:*\n#5 Some PR"}]
+        mp = _make("B_ANY", pr_fields)
         _, author = mp._fetch_thread_parent_context("C1", "ts1")
         assert author == ""
 
@@ -538,7 +540,6 @@ class TestExternalRequesterIdentity:
         assert attrs["requester_user_id"] == "U_SLACK"
         assert "approver_user_id" not in attrs
         assert "external_requester" not in attrs
-
 
 
 class TestProcessMessage:
