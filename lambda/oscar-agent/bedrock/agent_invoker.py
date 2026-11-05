@@ -17,6 +17,7 @@ from typing import Any, Dict, Optional, Tuple
 import boto3
 from botocore.exceptions import ClientError
 from config import config
+from oscar_shared.approval_guard import CONFIRMATION_MARKER
 
 logger = logging.getLogger(__name__)
 
@@ -131,6 +132,7 @@ class BedrockAgentCore:
             # Process the streaming response
             response_text = ""
             returned_session_id = None
+            saw_confirmation_in_trace = False
 
             if 'completion' in response:
                 for event in response['completion']:
@@ -142,6 +144,16 @@ class BedrockAgentCore:
                     if guardrail_trace and guardrail_trace.get('action') == 'INTERVENED':
                         assessments = guardrail_trace.get('inputAssessments', [])
                         logger.warning(f"GUARDRAIL_INTERVENED: assessments={assessments}")
+
+                    # Detect 2PR rejections from raw tool results in
+                    # orchestration traces — before the LLM reformulates them.
+                    orch_trace = trace_data.get('orchestrationTrace', {})
+                    observation = orch_trace.get('observation', {})
+                    action_output = observation.get('actionGroupInvocationOutput', {})
+                    action_text = action_output.get('text', '')
+                    if CONFIRMATION_MARKER in action_text:
+                        saw_confirmation_in_trace = True
+                        logger.info("APPROVAL_TRACE: detected %s in tool result trace", CONFIRMATION_MARKER)
 
                     if 'chunk' in event:
                         chunk = event['chunk']
@@ -171,8 +183,10 @@ class BedrockAgentCore:
 
             logger.info(f"Agent response received, length: {len(response_text)} characters")
             logger.info(f"Final session ID: {returned_session_id}")
+            if saw_confirmation_in_trace:
+                logger.info("APPROVAL_TRACE: returning saw_confirmation_in_trace=True")
 
-            return response_text.strip(), returned_session_id
+            return response_text.strip(), returned_session_id, saw_confirmation_in_trace
 
         except ClientError as e:
             error_code = e.response['Error']['Code']

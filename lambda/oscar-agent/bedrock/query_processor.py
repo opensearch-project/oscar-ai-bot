@@ -47,7 +47,7 @@ class QueryProcessor:
         session_id: Optional[str] = None,
         context_summary: Optional[str] = None,
         session_attributes: Optional[Dict[str, str]] = None,
-    ) -> Tuple[str, Optional[str]]:
+    ) -> Tuple[str, Optional[str], bool]:
         """
         Process a query with intelligent routing and context management.
 
@@ -68,7 +68,7 @@ class QueryProcessor:
             session_attributes: Out-of-band session attributes (identity provenance)
 
         Returns:
-            A tuple containing (response_text, session_id)
+            A tuple containing (response_text, session_id, saw_confirmation_in_trace)
         """
         query = f"[TODAY: {date.today().isoformat()}] {query}"
         logger.info(f"AGENT_QUERY: Starting query - query_len={len(query)}, session_id='{session_id}', context_len={len(context_summary) if context_summary else 0}")
@@ -96,17 +96,17 @@ class QueryProcessor:
                     enhanced_query = f"Previous conversation context:\n{context_summary}\n\nCurrent question: {query}"
                     logger.info(f"AGENT_QUERY: Attempting enhanced query WITH session_id: {session_id}, context_len={len(context_summary)}")
                     logger.info(f"AGENT_QUERY: Enhanced query length: {len(enhanced_query)} characters")
-                    response, returned_session_id = self.bedrock_agent.invoke_agent(enhanced_query, privilege, session_id, session_attributes)
+                    response, returned_session_id, saw_trace_confirmation = self.bedrock_agent.invoke_agent(enhanced_query, privilege, session_id, session_attributes)
                 else:
                     # No context available, use plain query with session_id
                     logger.info(f"AGENT_QUERY: Attempting plain query with session_id: {session_id} (no context available)")
-                    response, returned_session_id = self.bedrock_agent.invoke_agent(query, privilege, session_id, session_attributes)
+                    response, returned_session_id, saw_trace_confirmation = self.bedrock_agent.invoke_agent(query, privilege, session_id, session_attributes)
 
                 # Ensure we return the session ID (either returned or original)
                 final_session_id = returned_session_id or session_id
                 logger.info(f"AGENT_QUERY: Session-based query succeeded with session_id: {final_session_id}")
                 logger.info(f"AGENT_QUERY: Response length: {len(response)} characters")
-                return response, final_session_id
+                return response, final_session_id, saw_trace_confirmation
             except Exception as e:
                 logger.warning(f"AGENT_QUERY: Session-based query failed (possibly expired session): {e}")
 
@@ -116,10 +116,10 @@ class QueryProcessor:
             enhanced_query = f"Previous conversation context:\n{context_summary}\n\nCurrent question: {query}"
             logger.info(f"AGENT_QUERY: Enhanced query length: {len(enhanced_query)} characters")
             try:
-                response, new_session_id = self.bedrock_agent.invoke_agent(enhanced_query, privilege, None, session_attributes)
+                response, new_session_id, saw_trace_confirmation = self.bedrock_agent.invoke_agent(enhanced_query, privilege, None, session_attributes)
                 logger.info(f"AGENT_QUERY: Context-enhanced query succeeded with new session: {new_session_id}")
                 logger.info(f"AGENT_QUERY: Response length: {len(response)} characters")
-                return response, new_session_id
+                return response, new_session_id, saw_trace_confirmation
             except Exception as e:
                 logger.warning(f"AGENT_QUERY: Context-enhanced query failed: {e}")
         else:
@@ -128,14 +128,14 @@ class QueryProcessor:
         # Third attempt: Just use the plain query as last resort
         logger.info("AGENT_QUERY: Using plain query without context or session")
         try:
-            response, new_session_id = self.bedrock_agent.invoke_agent(query, privilege, None, session_attributes)
+            response, new_session_id, saw_trace_confirmation = self.bedrock_agent.invoke_agent(query, privilege, None, session_attributes)
             logger.info(f"AGENT_QUERY: Plain query succeeded with new session: {new_session_id}")
             logger.info(f"AGENT_QUERY: Response length: {len(response)} characters")
-            return response, new_session_id
+            return response, new_session_id, saw_trace_confirmation
         except Exception as e:
             logger.error(f"AGENT_QUERY: All query attempts failed: {e}", exc_info=True)
             error_message = self.error_handler.handle_agent_error(e, query)
-            return error_message, original_session_id  # Return original session ID to preserve context
+            return error_message, original_session_id, False
 
     @staticmethod
     def _strip_advisory_content(context_summary: str) -> str:
