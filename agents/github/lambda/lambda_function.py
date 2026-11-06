@@ -120,6 +120,7 @@ def _parse_issue_targets(issues_str: str) -> list:
 
 
 def _handle_transfer_issue(token: str, params: Dict[str, str], request_id: str, session_attributes: Dict[str, str] = None) -> Any:
+    # TODO: evaluate limiting transfer_issue to .github repo to reduce org-wide event monitoring scope.
     repo = params.get("repo", "")
     target_repo = params.get("target_repo", "")
     issue_number = int(params.get("issue_number", "0"))

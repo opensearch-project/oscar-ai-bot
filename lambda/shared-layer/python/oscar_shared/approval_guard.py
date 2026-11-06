@@ -85,7 +85,7 @@ def validate_two_person_approval(
                     f'SECURITY ERROR: Self-approval is not permitted. '
                     f'The GitHub requester (@{github_requester}) cannot also be the Slack approver. '
                     'A different authorized user must confirm this action. '
-                    '[2PR_PENDING]'
+                    f'{CONFIRMATION_MARKER}'
                 ),
             }
 

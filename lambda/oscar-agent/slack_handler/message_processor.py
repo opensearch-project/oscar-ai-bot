@@ -290,6 +290,7 @@ class MessageProcessor:
 
             repo_field = fields.get("Repo", "")
             repo_name = repo_field.split("/")[-1] if "/" in repo_field else repo_field
+            # TODO: make the repo filter configurable; currently hardcoded to .github issues only.
             is_dot_github_issue = repo_name == ".github" and "Issue" in fields
             github_author = fields.get("From", "") if (is_bot_message and is_dot_github_issue) else ""
 

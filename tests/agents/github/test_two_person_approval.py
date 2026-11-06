@@ -671,7 +671,7 @@ class TestApprovalGuardExpired(unittest.TestCase):
         self.assertIsNotNone(result)
         self.assertIn('Self-approval is not permitted', result['message'])
         self.assertIn('@alice', result['message'])
-        self.assertIn('[2PR_PENDING]', result['message'])
+        self.assertIn('[CONFIRMATION_REQUIRED]', result['message'])
 
     def test_cross_identity_different_handles_passes(self):
         from oscar_shared.approval_guard import validate_two_person_approval
