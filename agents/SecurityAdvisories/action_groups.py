@@ -145,10 +145,10 @@ def _privileged_action_group(
                     name="list_affected_repositories",
                     description=(
                         "List the OpenSearch project repositories that a specific CVE "
-                        "affects on the main branch. Call this FIRST when the user asks "
-                        "to remediate a CVE: use the returned list to resolve which "
-                        "repository the user means before calling remediate_cve. Do NOT "
-                        "guess or hardcode repository names."
+                        "affects on a given branch (defaults to main). Call this FIRST "
+                        "when the user asks to remediate a CVE: use the returned list to "
+                        "resolve which repository the user means before calling "
+                        "remediate_cve. Do NOT guess or hardcode repository names."
                     ),
                     parameters={
                         "cve_id": bedrock.CfnAgent.ParameterDetailProperty(
@@ -157,6 +157,15 @@ def _privileged_action_group(
                                 "The CVE identifier to look up (e.g., 'CVE-2026-1225')."
                             ),
                             required=True,
+                        ),
+                        "branch": bedrock.CfnAgent.ParameterDetailProperty(
+                            type="string",
+                            description=(
+                                "Branch or version to scope the lookup "
+                                "(e.g., '2.19', 'origin/2.19'). "
+                                "Defaults to main if omitted."
+                            ),
+                            required=False,
                         ),
                     },
                 ),
@@ -188,6 +197,69 @@ def _privileged_action_group(
                                 "repositories that CVE affects."
                             ),
                             required=True,
+                        ),
+                        "branch": bedrock.CfnAgent.ParameterDetailProperty(
+                            type="string",
+                            description=(
+                                "Branch or version to remediate on "
+                                "(e.g., '2.19', 'origin/2.19'). "
+                                "Defaults to main if omitted. Must match the branch "
+                                "used in list_affected_repositories."
+                            ),
+                            required=False,
+                        ),
+                    },
+                ),
+                bedrock.CfnAgent.FunctionProperty(
+                    name="remediate_project",
+                    description=(
+                        "Remediate multiple CVEs for one OpenSearch project in a "
+                        "single pull request (one PR per project, per ecosystem). "
+                        "Use this when the user asks to remediate several CVEs at "
+                        "once, or 'all' CVEs, for a project. Call list_projects "
+                        "first to resolve the exact canonical project name. It "
+                        "gathers the project's affected CVEs, deduplicates them per "
+                        "package (bumping each to the highest patched version), and "
+                        "skips any that already have an open fix PR. Prefer this "
+                        "over calling remediate_cve repeatedly for the same project."
+                    ),
+                    parameters={
+                        "project_name": bedrock.CfnAgent.ParameterDetailProperty(
+                            type="string",
+                            description=(
+                                "The exact canonical project name, as returned by "
+                                "list_projects (e.g., 'OpenSearch Dashboards')."
+                            ),
+                            required=True,
+                        ),
+                        "cve_ids": bedrock.CfnAgent.ParameterDetailProperty(
+                            type="string",
+                            description=(
+                                "Optional comma-separated list of the specific CVE "
+                                "IDs to remediate (e.g., 'CVE-2026-1225,CVE-2026-1300'). "
+                                "Omit to remediate every CVE the project is affected by."
+                            ),
+                            required=False,
+                        ),
+                        "mode": bedrock.CfnAgent.ParameterDetailProperty(
+                            type="string",
+                            description=(
+                                "How to group the fixes into pull requests. "
+                                "'project' (default) opens one PR per project per "
+                                "ecosystem containing all the fixes; 'per_cve' opens "
+                                "a separate PR per package. Valid values: 'project', "
+                                "'per_cve'."
+                            ),
+                            required=False,
+                        ),
+                        "branch": bedrock.CfnAgent.ParameterDetailProperty(
+                            type="string",
+                            description=(
+                                "Branch or version to remediate on "
+                                "(e.g., '2.19', 'origin/2.19'). "
+                                "Defaults to main if omitted."
+                            ),
+                            required=False,
                         ),
                     },
                 ),

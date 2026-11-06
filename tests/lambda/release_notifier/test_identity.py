@@ -170,21 +170,50 @@ class TestLoadHandleMap:
 class TestRenderReleaseManager:
 
     def test_linked_manager_is_mentioned(self, identity):
-        assert identity.render_release_manager('gaiksaya', {'gaiksaya': 'U111'}) == '<@U111>'
+        assert identity.render_release_manager(
+            ['Foo Bar'], {'foo': 'U111'}, ['foo'],
+        ) == '<@U111>'
 
     def test_lookup_ignores_casing(self, identity):
-        assert identity.render_release_manager('@GaikSaya', {'gaiksaya': 'U111'}) == '<@U111>'
+        assert identity.render_release_manager(['Foo Bar'], {'foo': 'U111'}, ['@Foo']) == '<@U111>'
 
-    def test_unlinked_manager_falls_back_to_profile_link(self, identity):
-        assert identity.render_release_manager('gaiksaya', {'other': 'U111'}) == (
-            '<https://github.com/gaiksaya|@gaiksaya>'
-        )
+    def test_unlinked_manager_falls_back_to_their_name(self, identity):
+        """A handle is an identifier - a reader should never have to translate one."""
+        assert identity.render_release_manager(['Foo Bar'], {'other': 'U111'}, ['foo']) == 'Foo Bar'
 
-    def test_missing_map_falls_back_to_profile_link(self, identity):
-        assert identity.render_release_manager('gaiksaya') == (
-            '<https://github.com/gaiksaya|@gaiksaya>'
-        )
+    def test_missing_map_falls_back_to_their_name(self, identity):
+        assert identity.render_release_manager(['Foo Bar'], None, ['foo']) == 'Foo Bar'
 
-    @pytest.mark.parametrize('raw', [None, '', '  '])
+    def test_schedule_doc_without_handles_falls_back_to_names(self, identity):
+        """Schedule docs indexed before the handle was scraped carry names only."""
+        assert identity.render_release_manager(['Foo Bar'], {'foo': 'U111'}) == 'Foo Bar'
+
+    def test_every_manager_is_resolved_independently(self, identity):
+        """One manager who has not linked their account must not cost the others their mention."""
+        assert identity.render_release_manager(
+            ['Foo Bar', 'Baz Qux'], {'foo': 'U222'}, ['foo', 'baz'],
+        ) == '<@U222>, Baz Qux'
+
+    def test_all_managers_mentioned_when_all_linked(self, identity):
+        assert identity.render_release_manager(
+            ['Foo Bar', 'Baz Qux'], {'foo': 'U222', 'baz': 'U333'}, ['foo', 'baz'],
+        ) == '<@U222>, <@U333>'
+
+    def test_mismatched_handles_name_everyone_rather_than_guess(self, identity):
+        """Pairing is positional, so an unusable length must not tag the wrong person."""
+        assert identity.render_release_manager(
+            ['Foo Bar', 'Baz Qux'], {'baz': 'U333'}, ['baz'],
+        ) == 'Foo Bar, Baz Qux'
+
+    def test_a_repeated_manager_is_rendered_once(self, identity):
+        assert identity.render_release_manager(
+            ['Foo Bar', 'Foo Bar'], {'foo': 'U111'}, ['foo', 'foo'],
+        ) == '<@U111>'
+
+    def test_a_scalar_manager_is_accepted(self, identity):
+        """Manual registrations pass a single name rather than a list."""
+        assert identity.render_release_manager('Foo Bar', {}, 'foo') == 'Foo Bar'
+
+    @pytest.mark.parametrize('raw', [None, '', '  ', []])
     def test_no_manager_renders_nothing(self, identity, raw):
-        assert identity.render_release_manager(raw, {'gaiksaya': 'U111'}) == ''
+        assert identity.render_release_manager(raw, {'foo': 'U111'}) == ''

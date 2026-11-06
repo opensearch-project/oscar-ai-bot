@@ -15,7 +15,7 @@ between Bedrock agents and the Jenkins client, handling job triggers and status 
 
 import json
 import logging
-from typing import Any, Dict
+from typing import Any, Dict, Optional, Set
 
 from config import config
 from jenkins_client import JenkinsClient
@@ -135,6 +135,54 @@ def format_parameters_as_bullets(parameter_definitions: Dict[str, Dict[str, Any]
     return "\n".join(lines)
 
 
+IDENTITY_INJECTED_PARAMS = {
+    'DECIDED_BY_SLACK_USER': 'requester_user_id',
+    'DECIDED_BY_DISPLAY_NAME': 'requester_display_name',
+}
+
+
+def _inject_authenticated_requester(
+    job_name: str,
+    job_params: Dict[str, Any],
+    session_attributes: Dict[str, str],
+    declared_params: Optional[Set[str]] = None,
+) -> Dict[str, Any]:
+    """Overwrite identity-bearing job parameters with the authenticated Slack requester.
+
+    A job that records who asked for something cannot take that identity from an action-group
+    parameter: those are populated by the model from conversation text, so anything there is a
+    claim, not a fact. Every trigger also authenticates to Jenkins with the same shared token,
+    so the Jenkins user identifies nothing either. The values in session_attributes are the only
+    trustworthy identity available - they come out-of-band from Slack's signed event metadata and
+    from users.info (see oscar_shared.approval_guard) - so they replace whatever the model supplied.
+
+    Both the id and the display name are injected: a readable name the model could edit would let
+    a decision record name the wrong person while the id says otherwise.
+
+    Injection is keyed on what the job declares, not on what the caller sent. The model is told never
+    to populate these, so keying on the supplied value would inject nothing in exactly the case this
+    exists for, and the job would refuse an unattributable request.
+
+    Jobs declaring none of these parameters are untouched.
+    """
+    candidates = declared_params if declared_params is not None else set(job_params)
+    present = [param for param in IDENTITY_INJECTED_PARAMS if param in candidates]
+    if not present:
+        return job_params
+
+    injected = dict(job_params)
+    for param in present:
+        authenticated = (session_attributes.get(IDENTITY_INJECTED_PARAMS[param]) or '').strip()
+        supplied = str(job_params.get(param) or '').strip()
+        if supplied and supplied != authenticated:
+            logger.warning(
+                f'JENKINS_IDENTITY_OVERRIDDEN: job={job_name} discarded a model-supplied '
+                f'{param} in favour of the authenticated requester'
+            )
+        injected[param] = authenticated
+    return injected
+
+
 def handle_trigger_job(jenkins_client: JenkinsClient, params: Dict[str, Any], session_attributes: Dict[str, str] = None) -> Dict[str, Any]:
     """
     Handle generic job triggering with mandatory confirmation check.
@@ -220,6 +268,16 @@ def handle_trigger_job(jenkins_client: JenkinsClient, params: Dict[str, Any], se
                 'message': 'Invalid JSON in job_parameters field',
                 'job_name': job_name
             }
+
+    # On a registry miss, fall back to overwriting only what the caller actually supplied. Adding
+    # the identity parameters instead would push them at every job, none of which declares them;
+    # this way a model-supplied identity still cannot survive, and nothing else is touched.
+    job_definition = jenkins_client.job_registry.get_job(job_name)
+    declared_params = ({p.name for p in job_definition.parameters} if job_definition
+                       else set(job_params))
+    job_params = _inject_authenticated_requester(
+        job_name, job_params, session_attributes or {}, declared_params,
+    )
 
     result = jenkins_client.trigger_job(job_name, job_params)
 

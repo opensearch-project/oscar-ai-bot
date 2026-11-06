@@ -10,9 +10,16 @@ reads those env vars into an event dict and calls ``remediation.handle``.
 Expected environment variables:
     REPO_NAME, CVE_ID, PACKAGE, PATCHED_VERSION   (the core inputs)
     INSTALLED_VERSION, BASE_BRANCH                (optional; base defaults main)
+    DECLARATION_CLASS, ORIGIN_FILES               (optional; maven routing signals)
     SLACK_CHANNEL, SLACK_THREAD_TS                (optional; empty => log only)
+
+ORIGIN_FILES is a JSON-encoded list of the distinct build.gradle files the
+coordinate resolves in (distilled from the scan's ``package.origin`` by the Lambda);
+it decodes to ``event['origin_files']`` for force-target selection. Absent/blank
+=> ``[]``.
 """
 
+import json
 import logging
 import os
 import sys
@@ -40,15 +47,50 @@ _ENV_TO_EVENT = {
 }
 
 
+def _parse_origin_files(raw):
+    """Decode the JSON ORIGIN_FILES env into a list of build.gradle paths.
+
+    Env vars are strings, so it arrives JSON-encoded (see remediation_handler
+    payload). A blank/missing var or unparseable JSON yields ``[]`` — the worker
+    then behaves as if origin were absent (keeps its declaration-scan behavior /
+    root fallback), never crashing on the transport.
+    """
+    if not raw:
+        return []
+    try:
+        value = json.loads(raw)
+    except (ValueError, TypeError):
+        logger.warning("ORIGIN_FILES env is not valid JSON; treating as absent.")
+        return []
+    return value if isinstance(value, list) else []
+
+
 def _event_from_env():
     """Build the remediation event dict from environment variables."""
-    return {key: os.environ.get(env, "") for env, key in _ENV_TO_EVENT.items()}
+    event = {key: os.environ.get(env, "") for env, key in _ENV_TO_EVENT.items()}
+    event["origin_files"] = _parse_origin_files(os.environ.get("ORIGIN_FILES", ""))
+    # CVE_BATCH (project remediation): a JSON list of per-package entries. When
+    # present, remediation.handle takes the batch path (one PR, many CVEs) and
+    # the scalar PACKAGE/PATCHED_VERSION vars above are unused. Left as the raw
+    # JSON string; remediation._batch_entries decodes it. Blank => single-CVE.
+    event["cve_batch"] = os.environ.get("CVE_BATCH", "")
+    return event
 
 
 def main():
     event = _event_from_env()
-    logger.info("maven remediation (ECS) invoked: cve_id=%s repo_name=%s package=%s",
-                event.get("cve_id"), event.get("repo_name"), event.get("package"))
+    # Batch (project) invocations carry a CVE_BATCH instead of the scalar
+    # cve_id/package; log the full CVE set so the entry breadcrumb is meaningful.
+    batch = remediation._batch_entries(event)
+    if batch:
+        cves = sorted({c for e in batch for c in (e.get("cve_ids") or [])})
+        logger.info("maven remediation (ECS) invoked (batch): repo_name=%s "
+                    "packages=%s cves=%s",
+                    event.get("repo_name"),
+                    [e.get("package") for e in batch], cves)
+    else:
+        logger.info("maven remediation (ECS) invoked: cve_id=%s repo_name=%s package=%s",
+                    event.get("cve_id"), event.get("repo_name"), event.get("package"))
     result = remediation.handle(event, maven)
     # Surface the outcome via the task exit code for observability (the Slack
     # post-back is the user-facing signal).

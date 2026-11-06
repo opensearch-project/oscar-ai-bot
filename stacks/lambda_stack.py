@@ -210,6 +210,31 @@ class OscarLambdaStack(Stack):
         )
         rule.add_target(targets.LambdaFunction(function))
 
+        # Daily EventBridge schedule for maintainer sync
+        # Reuses the same cross-account role and metrics secret as the metrics agent
+        metrics_role_arn = os.environ.get("METRICS_CROSS_ACCOUNT_ROLE_ARN", "")
+        metrics_secret = self.secrets_stack.get_agent_secret("metrics", "env")
+        if metrics_role_arn and metrics_secret:
+            function.add_environment("METRICS_CROSS_ACCOUNT_ROLE_ARN", metrics_role_arn)
+            function.add_environment("METRICS_SECRET_NAME", metrics_secret.secret_name)
+            metrics_secret.grant_read(role)
+
+            role.add_to_policy(iam.PolicyStatement(
+                actions=["sts:AssumeRole"],
+                resources=[metrics_role_arn],
+            ))
+
+            sync_rule = events.Rule(
+                self, "MaintainerSyncSchedule",
+                rule_name=f"oscar-maintainer-sync-{self.env_name}",
+                schedule=events.Schedule.rate(Duration.days(1)),
+                description="Daily maintainer sync from OpenSearch metrics cluster",
+            )
+            sync_rule.add_target(targets.LambdaFunction(
+                function,
+                event=events.RuleTargetInput.from_object({"action": "maintainer_sync"}),
+            ))
+
         self.lambda_functions["identity"] = function
 
     # --------------------------------------------------- release notifier
@@ -316,15 +341,20 @@ class OscarLambdaStack(Stack):
         # prod sets BASE_OWNER to the upstream org and WRITE_OWNER to the bot fork.
         write_owner = os.environ.get("REMEDIATION_WRITE_OWNER")
         base_owner = os.environ.get("REMEDIATION_BASE_OWNER")
-        if not write_owner or not base_owner:
+        git_name = os.environ.get("REMEDIATION_GIT_NAME")
+        git_email = os.environ.get("REMEDIATION_GIT_EMAIL")
+        if not write_owner or not base_owner or not git_name or not git_email:
             raise ValueError(
-                "REMEDIATION_WRITE_OWNER (push-target fork) and "
-                "REMEDIATION_BASE_OWNER (clone/PR-target repo) must both be set. "
-                "Set them in the deploy env / .env."
+                "REMEDIATION_WRITE_OWNER (push-target fork), "
+                "REMEDIATION_BASE_OWNER (clone/PR-target repo), "
+                "REMEDIATION_GIT_NAME and REMEDIATION_GIT_EMAIL (commit identity) "
+                "must all be set. Set them in the deploy env / .env."
             )
         env = {
             "REMEDIATION_WRITE_OWNER": write_owner,
             "REMEDIATION_BASE_OWNER": base_owner,
+            "REMEDIATION_GIT_NAME": git_name,
+            "REMEDIATION_GIT_EMAIL": git_email,
             # Unbuffered stdout so logs reach CloudWatch: a short Fargate task
             # exits before block-buffered Python output flushes to the awslogs
             # driver, otherwise leaving an empty log stream.
@@ -586,6 +616,11 @@ class OscarLambdaStack(Stack):
 
             self.lambda_functions[agent.name] = function
             created_entries[config.entry] = function
+
+            # Grant identity table read access to agents that need maintainer lookups
+            if agent.name == "github" and self.storage_stack.identity_table:
+                function.add_environment("IDENTITY_TABLE_NAME", self.storage_stack.identity_table.table_name)
+                self.storage_stack.identity_table.grant_read_data(role)
 
     # ------------------------------------------------------------- env vars
 

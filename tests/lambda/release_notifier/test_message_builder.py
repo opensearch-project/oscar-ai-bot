@@ -17,7 +17,8 @@ WINDOW = {
     'days_to_rc': 4,
     'days_to_release': 18,
     'cadence_phase': 'pre_rc_frequent',
-    'release_manager': 'someone',
+    'release_manager': ['Foo Bar'],
+    'release_manager_gh_handle': ['foo'],
     'release_issue': 'https://github.com/opensearch-project/opensearch-build/issues/6426',
 }
 
@@ -234,13 +235,13 @@ class TestDeltaAndFooter:
 
     def test_manager_and_issue_included(self, message_builder):
         text = message_builder.build_message('3.9.0', WINDOW, status())
-        assert 'Release manager: <https://github.com/someone|@someone>' in text
+        assert 'Release manager: Foo Bar' in text
         assert 'issues/6426' in text
 
     def test_linked_manager_is_tagged(self, message_builder):
         """The one person who has to act on this gets a real Slack ping."""
         text = message_builder.build_message(
-            '3.9.0', WINDOW, status(), None, {'someone': 'U111'})
+            '3.9.0', WINDOW, status(), None, {'foo': 'U111'})
         assert 'Release manager: <@U111>' in text
 
     def test_unknown_manager_is_omitted(self, message_builder):

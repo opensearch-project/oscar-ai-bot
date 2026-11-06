@@ -175,6 +175,12 @@ class TokenManager:
             json=body if body else None,
             timeout=30,
         )
+        if resp.status_code >= 400:
+            scope_desc = f"repos={repositories}" if repositories else "org-wide"
+            logger.error(
+                "Token request failed (%s): %d %s",
+                scope_desc, resp.status_code, resp.text[:500],
+            )
         resp.raise_for_status()
         data = resp.json()
 

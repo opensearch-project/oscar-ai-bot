@@ -79,7 +79,7 @@ class JenkinsfileParser:
         if not job_name:
             raise ValueError(f"No @job-name annotation found in {jenkinsfile_path}")
 
-        description = self._extract_annotation(content, self.DESCRIPTION_PATTERN) or ""
+        description = self._extract_annotation(content, self.DESCRIPTION_PATTERN, multiline=True) or ""
 
         params_block = self._extract_parameters_block(content)
         parameters = self._parse_parameters_block(params_block) if params_block else []
@@ -98,9 +98,37 @@ class JenkinsfileParser:
     # ------------------------------------------------------------------
 
     @staticmethod
-    def _extract_annotation(content: str, pattern: re.Pattern) -> Optional[str]:
-        match = pattern.search(content)
-        return match.group(1).strip() if match else None
+    def _extract_annotation(content: str, pattern: re.Pattern, multiline: bool = False) -> Optional[str]:
+        """Extract an annotation's value, optionally continuing onto following comment lines.
+
+        A description long enough to be useful does not fit on one line, and authors naturally wrap
+        it across several `//` comments. Reading only the first line dropped the rest silently, so
+        the registry described jobs by their opening clause alone.
+
+        Continuation stops at the first line that is not a plain comment, is blank, or starts a new
+        `@annotation` - a job name must never absorb the description that follows it, which is why
+        this is opt-in per annotation rather than the default.
+        """
+        lines = content.splitlines()
+        for index, line in enumerate(lines):
+            match = pattern.search(line)
+            if not match:
+                continue
+            value = match.group(1).strip()
+            if not multiline:
+                return value
+
+            parts = [value]
+            for following in lines[index + 1:]:
+                stripped = following.strip()
+                if not stripped.startswith('//'):
+                    break
+                text = stripped[2:].strip()
+                if not text or text.startswith('@'):
+                    break
+                parts.append(text)
+            return ' '.join(parts)
+        return None
 
     # ------------------------------------------------------------------
     # Parameters block extraction (brace-depth counting)

@@ -195,7 +195,9 @@ def build_message(
     if rc_progress:
         lines.append(f"\n{rc_progress}")
 
-    manager = render_release_manager(window.get('release_manager'), handle_map)
+    manager = render_release_manager(
+        window.get('release_manager'), handle_map, window.get('release_manager_gh_handle'),
+    )
     if manager:
         lines.append(f"\nRelease manager: {manager}")
 

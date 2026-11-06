@@ -197,7 +197,7 @@ _FORCE_SYSTEM = (
 )
 
 _FORCE_PROMPT = """\
-Pin the maven dependency {coordinate} so it resolves to EXACTLY {patched_version}
+Pin the maven dependency {coordinate} so it resolves to EXACTLY {version}
 in this Gradle module. It is a TRANSITIVE dependency (not declared directly), so it
 must be added to the module's dependency-resolution config.
 
@@ -206,10 +206,10 @@ verbatim from the file, and "new_string" is that same snippet with the pin added
 matching the file's EXISTING idiom:
 - if there is a ``resolutionStrategy {{ force "g:a:v" }}`` block (or ``force("g:a:v")``,
   or ``resolutionStrategy.force "g:a:v"``): make old_string an existing force line in
-  it and new_string that line plus one more for {coordinate}:{patched_version}, same
+  it and new_string that line plus one more for {coordinate}:{version}, same
   spelling/indentation;
 - if there is a ``resolutionStrategy {{ eachDependency {{ ... }} }}`` block: extend it
-  with a matching case that sets {coordinate} to {patched_version};
+  with a matching case that sets {coordinate} to {version};
 - only if there is no such block: old_string = the last line of the file, new_string =
   that line plus a minimal
   ``allprojects {{ configurations.all {{ resolutionStrategy {{ force 'g:a:v' }} }} }}``.
@@ -218,26 +218,31 @@ STRICT RULES:
 - old_string must appear EXACTLY ONCE in the file and be copied byte-for-byte.
 - new_string must contain old_string unchanged plus ONLY the addition — do not modify,
   remove, or reformat any existing text.
-- Pin ONLY {coordinate}, and use NO version other than {patched_version}.
+- Pin ONLY {coordinate}, and use NO version other than {version}.
+- If {version} contains ``${{...}}`` it is a Groovy GString variable — it MUST be
+  inside DOUBLE quotes (e.g. ``force "g:a:${{versions.x}}"``), never single quotes.
 
 File `{path}`:
 {gradle_source}
 """
 
 
-def write_force_edit(ctx, path, gradle_source):
+def write_force_edit(ctx, path, gradle_source, version=None):
     """LLM: return a minimal ``{old_string, new_string}`` edit that pins ``coordinate``.
 
     Relaxes the classify-only rule for the transitive-force case: the coordinate and
-    patched version are fixed (from ``ctx``, not the model), and the caller applies the
-    replace then VERIFIES the result adds only that pin — so the model only shapes the
-    surrounding Groovy in the file's idiom. Returns the edit dict, or ``None`` on any
-    Bedrock/parse failure (caller falls back to a deterministic appended block).
-    Emitting a small snippet (not the whole file) keeps it fast and within the read
-    timeout. Logs token usage + wall-clock time for cost/latency evaluation.
+    the version to pin to are fixed (from the caller, not the model), and the caller
+    applies the replace then VERIFIES the result adds only that pin — so the model
+    only shapes the surrounding Groovy in the file's idiom. ``version`` is the token
+    to pin to: the literal patched version (default) OR a core-managed
+    ``${versions.X}`` the caller chose to re-assert (the model copies the file's
+    quoting idiom — the neighbouring forces use double quotes for such GStrings).
+    Returns the edit dict, or ``None`` on any Bedrock/parse failure (caller falls
+    back to a deterministic appended block). Emitting a small snippet (not the whole
+    file) keeps it fast and within the read timeout. Logs token usage + wall time.
     """
     prompt = _FORCE_PROMPT.format(
-        coordinate=ctx["coordinate"], patched_version=ctx["patched_version"],
+        coordinate=ctx["coordinate"], version=version or ctx["patched_version"],
         path=path, gradle_source=gradle_source,
     )
     start = time.perf_counter()

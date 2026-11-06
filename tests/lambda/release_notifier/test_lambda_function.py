@@ -28,7 +28,8 @@ ACTIVE_RELEASE = {
     'release_date': '2026-09-29',
     'days_to_rc': 4,
     'days_to_release': 18,
-    'release_manager': 'someone',
+    'release_manager': ['Foo Bar'],
+    'release_manager_gh_handle': ['foo'],
 }
 
 RELEASE_STATUS = {
@@ -273,15 +274,40 @@ class TestPosting:
 class TestReleaseManagerMention:
 
     def test_linked_manager_is_tagged_in_the_post(self, harness):
-        with patch.object(harness.module, 'load_handle_map', return_value={'someone': 'U111'}):
+        with patch.object(harness.module, 'load_handle_map', return_value={'foo': 'U111'}):
             harness.module.lambda_handler({}, None)
         assert '<@U111>' in harness.slack.chat_postMessage.call_args.kwargs['text']
 
-    def test_falls_back_to_a_profile_link_without_identity_mapping(self, harness):
+    def test_falls_back_to_the_managers_name_without_identity_mapping(self, harness):
         """No IDENTITY_TABLE_NAME here - the same as a deployment with no identity table."""
         harness.module.lambda_handler({}, None)
         text = harness.slack.chat_postMessage.call_args.kwargs['text']
-        assert '<https://github.com/someone|@someone>' in text
+        assert 'Release manager: Foo Bar' in text
+
+    def test_both_managers_of_a_co_managed_release_are_tagged(self, harness):
+        """Both are accountable for the release, so a post must ping both, not just the first."""
+        harness.responses['list_active_releases'] = {'releases': [{
+            **ACTIVE_RELEASE,
+            'release_manager': ['Foo Bar', 'Baz Qux'],
+            'release_manager_gh_handle': ['foo', 'baz'],
+        }]}
+        with patch.object(harness.module, 'load_handle_map',
+                          return_value={'foo': 'U111', 'baz': 'U222'}):
+            harness.module.lambda_handler({}, None)
+        text = harness.slack.chat_postMessage.call_args.kwargs['text']
+        assert 'Release manager: <@U111>, <@U222>' in text
+
+    def test_a_co_manager_who_has_not_linked_their_account_is_named(self, harness):
+        """One unlinked manager must not cost the other their mention, or hide their own name."""
+        harness.responses['list_active_releases'] = {'releases': [{
+            **ACTIVE_RELEASE,
+            'release_manager': ['Foo Bar', 'Baz Qux'],
+            'release_manager_gh_handle': ['foo', 'baz'],
+        }]}
+        with patch.object(harness.module, 'load_handle_map', return_value={'foo': 'U111'}):
+            harness.module.lambda_handler({}, None)
+        text = harness.slack.chat_postMessage.call_args.kwargs['text']
+        assert 'Release manager: <@U111>, Baz Qux' in text
 
     def test_table_is_read_once_per_run_not_once_per_release(self, harness):
         harness.responses['list_active_releases'] = {'releases': [

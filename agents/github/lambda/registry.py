@@ -28,11 +28,24 @@ class FunctionDef:
     # Whether the MCP tool needs owner/repo injected
     needs_owner: bool = False
 
+    # Authorization policy: None = no pre-check, "admin" = admin-only,
+    # "maintainer" = live per-repo MAINTAINERS.md check
+    auth_policy: Optional[str] = None
+
+    # Authorization tier for group gate: "contributor", "maintainer", "admin"
+    tier: str = "contributor"
+
     # Transform function: (params) -> mcp_args (only for MCP-routed functions)
     transform: Optional[Callable[[Dict[str, str]], Dict[str, Any]]] = None
 
     # Direct API handler: (token, params, request_id) -> result
     handler: Optional[Callable] = None
+
+    def __post_init__(self):
+        if self.write and self.auth_policy is None:
+            raise ValueError(
+                "write functions must declare an explicit auth_policy"
+            )
 
     @property
     def is_direct_api(self) -> bool:

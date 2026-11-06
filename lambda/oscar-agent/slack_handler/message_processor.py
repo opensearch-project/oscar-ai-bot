@@ -15,6 +15,8 @@ from typing import Callable
 import boto3
 from config import config
 from input_validator import InputValidationError, validate_and_sanitize
+from oscar_shared.approval_guard import CONFIRMATION_MARKER
+from oscar_shared.auth_policy import derive_tier
 from oscar_shared.oauth_state import generate_state
 from slack_sdk import WebClient
 
@@ -25,6 +27,8 @@ logger = logging.getLogger(__name__)
 
 class MessageProcessor:
     """Processes Slack messages and generates agent responses."""
+
+    DISPLAY_NAME_CACHE_LIMIT = 500
 
     def __init__(self, storage, oscar_agent, reaction_manager, timeout_handler,
                  slack_client=None) -> None:
@@ -42,6 +46,7 @@ class MessageProcessor:
         self.reaction_manager = reaction_manager
         self.timeout_handler = timeout_handler
         self.slack_client = slack_client
+        self._display_names: dict = {}
 
     def extract_query(self, text: str) -> str:
         """Extract the query from the message text by removing mentions.
@@ -56,6 +61,19 @@ class MessageProcessor:
         query = re.sub(config.patterns['mention'], '', text).strip()
         return query
 
+    def _enrich_user_attrs(self, attrs: dict, user_id: str, prefix: str) -> None:
+        """Add admin, github_handle, is_maintainer, and tier for a user."""
+        is_admin = self.is_fully_authorized_user(user_id)
+        attrs[f'{prefix}_is_admin'] = str(is_admin)
+
+        record = self._get_identity_record(user_id)
+        github_handle = record.get("github_handle", "")
+        is_maintainer = record.get("is_org_maintainer", False)
+
+        attrs[f'{prefix}_github_handle'] = github_handle
+        attrs[f'{prefix}_is_maintainer'] = str(bool(is_maintainer))
+        attrs[f'{prefix}_tier'] = derive_tier(is_admin, bool(is_maintainer))
+
     def _build_identity_attributes(self, thread_key: str, current_user_id: str) -> dict:
         """Build out-of-band session attributes for identity provenance.
 
@@ -63,26 +81,92 @@ class MessageProcessor:
         - Requester = user whose message triggered a [CONFIRMATION_REQUIRED] response
         - Approver = a *different* user who speaks after that prompt
 
-        This prevents stale thread participants from being treated as implicit
-        requesters for actions they never initiated.
+        Enriches each with github_handle, is_maintainer, and tier for
+        downstream group gate and function gate enforcement.
 
-        The current_user_id is the authenticated Slack user from the signed event.
+        Pending approvals expire after PENDING_APPROVAL_TTL_SECONDS seconds
+        and are single-use: once an approver is paired with a requester the
+        pending state is consumed.
         """
         attrs = {'current_user_id': current_user_id}
+
+        # Track pending-state disposition so the rejection path in
+        # process_message can decide whether to restore, skip, or create.
+        self._consumed_pending = None
+        self._had_pending = False
 
         stored_context = self.storage.get_context(thread_key)
         if stored_context:
             pending_requester = stored_context.get('pending_approval_requester')
+            expires_at = stored_context.get('pending_approval_expires_at', 0)
+
+            if pending_requester and time.time() > expires_at:
+                logger.warning(
+                    "Pending approval expired for thread %s (requester=%s)",
+                    thread_key, pending_requester,
+                )
+                self.storage.clear_pending_approval_requester(thread_key)
+                pending_requester = None
+                attrs['approval_expired'] = 'True'
+
             if pending_requester:
+                self._had_pending = True
                 attrs['requester_user_id'] = pending_requester
+                self._enrich_user_attrs(attrs, pending_requester, 'requester')
                 if current_user_id != pending_requester:
                     attrs['approver_user_id'] = current_user_id
+                    self._enrich_user_attrs(attrs, current_user_id, 'approver')
+                    self._consumed_pending = {
+                        'requester': pending_requester,
+                        'expires_at': expires_at,
+                    }
+                    self.storage.clear_pending_approval_requester(thread_key)
             else:
                 attrs['requester_user_id'] = current_user_id
+                self._enrich_user_attrs(attrs, current_user_id, 'requester')
         else:
             attrs['requester_user_id'] = current_user_id
+            self._enrich_user_attrs(attrs, current_user_id, 'requester')
+
+        display_name = self._resolve_display_name(attrs['requester_user_id'])
+        if display_name:
+            attrs['requester_display_name'] = display_name
 
         return attrs
+
+    def _resolve_display_name(self, user_id: str) -> str:
+        """Resolve a Slack user id to a display name, asking Slack rather than the model.
+
+        A record of who asked for something is only worth keeping if it names the right person, so
+        the name has to come from the same authenticated source as the id. Slack's event payload
+        carries the id alone, which leaves users.info as the way to get a label for it.
+
+        Returns an empty string when it cannot be resolved: a missing label costs readability, and
+        must never cost the action itself. Cached per execution environment, since a display name
+        changes rarely and one call per message would be paid for nothing.
+        """
+        if not user_id or not self.slack_client:
+            return ''
+        if user_id in self._display_names:
+            return self._display_names[user_id]
+
+        name = ''
+        try:
+            user = self.slack_client.users_info(user=user_id)['user']
+            name = (user.get('profile', {}).get('display_name')
+                    or user.get('real_name')
+                    or user.get('name')
+                    or '')
+        except Exception as e:
+            logger.warning(f'SLACK_DISPLAY_NAME_LOOKUP_FAILED: user={user_id} error={e}')
+
+        # Bounded so a long-lived container serving many users cannot grow this without limit.
+        # Dropping the whole cache rather than evicting one entry keeps it to a single branch; the
+        # cost of a refill is one API call per user, and a name is only ever a label.
+        if len(self._display_names) >= self.DISPLAY_NAME_CACHE_LIMIT:
+            self._display_names.clear()
+        self._display_names[user_id] = name
+        return name
 
     def _handle_confirmation_detection(self, response: str, channel: str, thread_ts: str) -> str:
         """Handle confirmation detection and warning reaction management.
@@ -95,9 +179,8 @@ class MessageProcessor:
         Returns:
             Cleaned response with confirmation marker removed
         """
-        if response and '[CONFIRMATION_REQUIRED]' in response:
-            # Remove the marker from the response
-            cleaned_response = response.replace('[CONFIRMATION_REQUIRED]', '').strip()
+        if response and CONFIRMATION_MARKER in response:
+            cleaned_response = response.replace(CONFIRMATION_MARKER, '').strip()
 
             # Add warning reaction to the original user message
             self.reaction_manager.manage_reactions(
@@ -135,6 +218,7 @@ class MessageProcessor:
             re.compile(r'<\s*/?system\s*>', re.IGNORECASE),
             re.compile(r'\[INST\]|\[/INST\]', re.IGNORECASE),
             re.compile(r'```\s*system', re.IGNORECASE),
+            re.compile(re.escape(CONFIRMATION_MARKER), re.IGNORECASE),
             re.compile(r'(ignore|disregard|override|forget)\s+(all\s+)?(previous|prior|above)\s+(instructions?|rules?|prompts?)', re.IGNORECASE),
             re.compile(r'(new|updated?)\s+system\s+prompt', re.IGNORECASE),
             re.compile(r'you\s+are\s+now', re.IGNORECASE),
@@ -246,15 +330,33 @@ class MessageProcessor:
             self._identity_table = dynamodb_resource.Table(table_name)
         return self._identity_table
 
-    def _has_identity_mapping(self, user_id: str) -> bool:
+    def _get_identity_record(self, user_id: str) -> dict:
+        """Look up the active identity record for a Slack user.
+
+        Returns the full DynamoDB item or an empty dict if not found.
+        Results are cached per user_id for the lifetime of this instance.
+        """
+        cache = getattr(self, '_identity_cache', None)
+        if cache is None:
+            self._identity_cache = cache = {}
+        if user_id in cache:
+            return cache[user_id]
         table = self._get_identity_table()
         resp = table.query(
             IndexName="slack-user-index",
             KeyConditionExpression="slack_user_id = :uid",
             ExpressionAttributeValues={":uid": user_id},
         )
-        items = resp.get("Items", [])
-        return any(i.get("status") == "active" for i in items)
+        record = {}
+        for item in resp.get("Items", []):
+            if item.get("status") == "active":
+                record = item
+                break
+        cache[user_id] = record
+        return record
+
+    def _has_identity_mapping(self, user_id: str) -> bool:
+        return bool(self._get_identity_record(user_id))
 
     def _handle_link_github_via_dm(self, user_id: str, channel: str, thread_ts: str, reaction_ts: str, say: Callable) -> None:
         """Handle link-github request by sending OAuth link via DM."""
@@ -352,6 +454,7 @@ class MessageProcessor:
                 say(text=e.user_message, thread_ts=thread_ts)
                 return
 
+            self._identity_cache = {}
             if not self._has_identity_mapping(user_id):
                 self._handle_link_github_via_dm(user_id, channel, thread_ts, reaction_ts, say)
                 return
@@ -384,7 +487,7 @@ class MessageProcessor:
                     formatted_context = parent_context + "\n" + formatted_context if formatted_context else parent_context
 
             # Query OSCAR agent with timeout monitoring (using formatted context)
-            response, new_session_id = self.timeout_handler.query_agent_with_timeout(
+            response, new_session_id, saw_confirmation_in_trace = self.timeout_handler.query_agent_with_timeout(
                 self.oscar_agent, query, privilege, session_id, formatted_context, channel, reaction_ts,
                 start_time, say, thread_ts, user_id, session_attributes=identity_attrs
             )
@@ -394,17 +497,33 @@ class MessageProcessor:
                 return
 
             # Handle confirmation detection and warning reaction
-            confirmation_required = response and '[CONFIRMATION_REQUIRED]' in response
+            confirmation_required = response and CONFIRMATION_MARKER in response
             response = self._handle_confirmation_detection(response, channel, thread_ts)
 
-            # Track who triggered the confirmation for 2PR identity provenance.
-            # Set when a confirmation prompt is emitted; clear after the next turn
-            # (the approval or any non-confirmation response) — UNLESS the response
-            # is a self-approval rejection, which means the prompt is still pending.
-            if confirmation_required:
-                self.storage.set_pending_approval_requester(thread_key, user_id)
-            elif response and 'SECURITY ERROR' in response:
-                pass
+            # Approval rejection is detected from Bedrock Agent trace events
+            # (deterministic, pre-LLM), not from parsing the LLM output.
+            if saw_confirmation_in_trace:
+                consumed = getattr(self, '_consumed_pending', None)
+                if consumed:
+                    # Rejected approval consumed the pending state (different
+                    # user was paired as approver). Restore the original
+                    # requester with the original TTL — don't re-stamp.
+                    self.storage.set_pending_approval_requester(
+                        thread_key, consumed['requester'],
+                        expires_at=consumed['expires_at'],
+                    )
+                elif not getattr(self, '_had_pending', False):
+                    # No pending state existed — first-time rejection.
+                    # Record the current user as requester.
+                    self.storage.set_pending_approval_requester(thread_key, user_id)
+            elif confirmation_required:
+                # Only overwrite an existing requester if the current user is
+                # authorized. This prevents a non-authorized user providing
+                # follow-up from becoming the requester.
+                stored_ctx = self.storage.get_context(thread_key)
+                existing_requester = stored_ctx.get('pending_approval_requester') if stored_ctx else None
+                if not existing_requester or self.is_fully_authorized_user(user_id):
+                    self.storage.set_pending_approval_requester(thread_key, user_id)
             else:
                 self.storage.clear_pending_approval_requester(thread_key)
 

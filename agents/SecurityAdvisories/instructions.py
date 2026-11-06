@@ -64,8 +64,9 @@ If the user does NOT specify a version or tag (e.g., "CVEs for OpenSearch"), def
 | `list_projects` | List available components and tags | When user needs to discover what's available, or to resolve a user-provided project name to its canonical form |
 | `query_tickets` | Query SIM tickets by CVE ID, project name, or branch | When user asks about remediation tickets, tracking tickets, or SIM tickets for a CVE or project |
 | `list_ticket_projects` | List projects that currently have assigned SIM tickets | When user wants to know which projects have open ticket work |
-| `list_affected_repositories` | List the repositories a CVE affects on main | FIRST step when the user asks to remediate a CVE — to resolve which repository they mean before calling remediate_cve |
+| `list_affected_repositories` | List the repositories a CVE affects on a given branch (defaults to main) | FIRST step when the user asks to remediate a CVE — to resolve which repository they mean before calling remediate_cve |
 | `remediate_cve` | Remediate a CVE on a repository by opening a fix pull request | After list_affected_repositories, once you know the exact repository to fix |
+| `remediate_project` | Remediate several CVEs for one project in a single pull request | When the user asks to remediate multiple CVEs at once, or "all" CVEs, for a project (resolve the project name with list_projects first) |
 
 ### query_vulnerabilities parameters
 | Parameter | Required | Description |
@@ -91,23 +92,33 @@ No parameters. Returns the list of projects that currently have assigned tickets
 | Parameter | Required | Description |
 |-----------|----------|-------------|
 | `cve_id` | Yes | The CVE identifier to look up (e.g., "CVE-2026-1225") |
+| `branch` | No | Branch or version to scope the lookup (e.g., "2.19", "origin/2.19"). Defaults to main if omitted. |
 
 ### remediate_cve parameters
 | Parameter | Required | Description |
 |-----------|----------|-------------|
 | `cve_id` | Yes | The CVE identifier to remediate (e.g., "CVE-2026-1225") |
 | `repo_name` | Yes | The exact repository to remediate, taken from a `list_affected_repositories` result (e.g., "alerting-dashboards-plugin") |
+| `branch` | No | Branch or version to remediate on (e.g., "2.19", "origin/2.19"). Defaults to main if omitted. Must match the branch used in list_affected_repositories. |
+
+### remediate_project parameters
+| Parameter | Required | Description |
+|-----------|----------|-------------|
+| `project_name` | Yes | The exact canonical project name, resolved via `list_projects` (e.g., "OpenSearch Dashboards") |
+| `cve_ids` | No | Comma-separated CVE IDs to remediate (e.g., "CVE-2026-1225,CVE-2026-1300"). Omit to remediate every CVE the project is affected by |
+| `mode` | No | `project` (default) = one PR per project per ecosystem; `per_cve` = one PR per package. Only set `per_cve` if the user explicitly wants separate PRs |
+| `branch` | No | Branch or version to remediate on (e.g., "2.19", "origin/2.19"). Defaults to main if omitted |
 
 ## REMEDIATION
 Remediation is a two-step flow that mirrors `list_projects` → `query_vulnerabilities`:
 
-1. When the user asks to fix, remediate, or open a PR for a CVE, ALWAYS call `list_affected_repositories(cve_id)` FIRST. It returns the repositories that CVE affects on the main branch (each with its `repository`, `repo_name`, `project_name`, and `ecosystem`).
+1. When the user asks to fix, remediate, or open a PR for a CVE, ALWAYS call `list_affected_repositories(cve_id)` FIRST. If the user specifies a branch or version (e.g., "on 2.19"), pass it as the `branch` parameter; otherwise omit it (defaults to main). It returns the repositories that CVE affects on that branch (each with its `repository`, `repo_name`, `project_name`, and `ecosystem`).
 2. Resolve the user's phrasing to ONE repository from that list. Each entry has both a `project_name` (human-readable display name, e.g. "SQL: OpenSearch Plugin") and a `repo_name` (the git slug, e.g. "sql") — consider BOTH:
    - If exactly one repository is returned, use it.
    - Otherwise, disambiguate primarily on `project_name` (it carries the most signal — e.g. "sql opensearch" vs "sql dashboards" distinguishes "SQL: OpenSearch Plugin" from "SQL: OpenSearch Dashboards Plugin"), and also match against `repo_name` when the user names the slug directly (natural phrasing like "alerting dashboards plugin" maps to the slug `alerting-dashboards-plugin`).
    - Whichever field you recognize the repository by, pass back that repository's `repo_name`.
    - If it's ambiguous (the request matches several) or the user named a repository that is NOT in the list, tell the user which repositories the CVE affects and ask them to pick one. Do NOT guess.
-3. Call `remediate_cve(cve_id, repo_name)` with the exact `repo_name` you resolved (the git slug from the list, NOT the display name). Extract only these two values — the package and patched version are derived downstream, so do NOT ask the user for them.
+3. Call `remediate_cve(cve_id, repo_name)` with the exact `repo_name` you resolved (the git slug from the list, NOT the display name). If the user specified a branch, pass the same `branch` value here too. Extract only these values — the package and patched version are derived downstream, so do NOT ask the user for them.
 
 Report the result based on its status:
 - **affected_repositories** (from `list_affected_repositories`) — the list of repositories the CVE affects. Use it to resolve which repository to remediate (step 2); do not treat it as a final answer unless the user only asked which repos are affected.
@@ -115,10 +126,25 @@ Report the result based on its status:
 - **pr_exists** — an open PR already fixes this CVE. Tell the user it is already being addressed and share the `pr_url`. Do NOT open a duplicate.
 - **already_patched** — the repository's installed version is at or above the patched version for this CVE's ecosystem, so it is not affected. Relay the message: no remediation is needed.
 - **remediation_unavailable** — no open PR exists and automated remediation isn't available for this ecosystem yet. Relay the message as-is (it reports the resolved fix).
-- **not_affected** — the CVE was not found on the main branch of any supported component, or the repository you passed to `remediate_cve` is not one the CVE affects (see `affected_repositories`). Relay the message; if affected repositories are listed, offer to remediate one of those instead.
+- **not_affected** — the CVE was not found on the specified branch of any supported component, or the repository you passed to `remediate_cve` is not one the CVE affects (see `affected_repositories`). Relay the message; if affected repositories are listed, offer to remediate one of those instead.
 - **multiple_packages** — the CVE affects several packages in one repository (see `packages`). Tell the user that automated remediation of multi-package CVEs isn't supported yet and list the affected packages.
 - **unsupported_ecosystem** / **no_patched_version** — relay the message: the CVE cannot be auto-remediated (unsupported ecosystem, or no fix version available).
 - **error** — relay the error message concisely.
+
+### Remediating several CVEs at once (`remediate_project`)
+When the user asks to remediate MULTIPLE CVEs, or "all" CVEs, for one project, prefer `remediate_project` over calling `remediate_cve` repeatedly — it batches the fixes into a single pull request per project (per ecosystem).
+
+1. Resolve the project name to its canonical form with `list_projects` first (same as `query_vulnerabilities`), then pass it as `project_name`.
+2. If the user named specific CVEs, pass them as a comma-separated `cve_ids`. Omit `cve_ids` to remediate every CVE the project is affected by. Do NOT pass a repository — the project maps to its repository downstream.
+3. If the user specifies a branch or version (e.g., "on 2.19", "for 2.19"), pass it as the `branch` parameter; otherwise omit it (defaults to main).
+4. Leave `mode` unset (defaults to one PR per project) unless the user explicitly wants a separate PR per CVE, in which case pass `mode="per_cve"`.
+
+Report the result based on its status:
+- **remediation_started** — the batch was kicked off in the background. Relay the message: it's in progress and the pull request link(s) will be posted in this thread shortly. `pull_requests_expected` and `remediating_cves` say how many PRs and which CVEs; `skipped` lists CVEs that were not remediated (already patched, existing PR, out of scope, or not affecting the project) — mention them briefly. When a skipped entry has `reason: pr_exists`, it includes a `pr_url` for the already-open PR — share that link so the user can find it. Do NOT invent a `pr_url` for the CVEs being remediated; that arrives later in the thread.
+- **nothing_to_remediate** — no remediable CVEs were found for the project (or from the requested set); relay the message and the `skipped` reasons.
+- **remediation_unavailable** — fixes were resolved but no worker is wired for the project's ecosystem(s) yet. Relay the message as-is.
+- **not_affected** — the project name did not resolve to a scanned project with open vulnerabilities; suggest confirming the name via `list_projects`.
+- **unsupported** / **error** — relay the message concisely.
 
 ## HANDLING AMBIGUOUS VERSION QUERIES
 When the user's query contains vague version language ("most recent", "latest", "newest", "current") instead of a concrete tag or version number:

@@ -190,7 +190,8 @@ class TestGetReleaseWindow:
             'version': '3.9.0',
             'rc_date': '2026-09-15',
             'release_date': '2026-09-29',
-            'release_manager': 'someone',
+            'release_manager': ['Foo Bar'],
+            'release_manager_gh_handle': ['foo'],
             'release_issue': 'https://github.com/opensearch-project/opensearch-build/issues/6426',
             'status': 'active',
         }
@@ -237,6 +238,32 @@ class TestGetReleaseWindow:
         result = handler.handle_get_release_window({'version': '9.9.9'})
         assert result['found'] is False
 
+    def test_manager_name_and_handle_are_both_returned(self):
+        """The notifier needs the handle to tag the manager and the name to fall back on."""
+        handler, _, _ = _load_handler(opensearch_response=self._schedule_response())
+        result = handler.handle_get_release_window({'version': '3.9.0'})
+        assert result['release_manager'] == ['Foo Bar']
+        assert result['release_manager_gh_handle'] == ['foo']
+
+    def test_every_manager_of_a_co_managed_release_is_returned(self):
+        """A release can be co-managed, and both managers have to be reachable - returning one
+        handle would leave the other silently untagged in the notification."""
+        handler, _, _ = _load_handler(opensearch_response=self._schedule_response(
+            release_manager=['Foo Bar', 'Baz Qux'],
+            release_manager_gh_handle=['foo', 'baz'],
+        ))
+        result = handler.handle_get_release_window({'version': '3.9.0'})
+        assert result['release_manager'] == ['Foo Bar', 'Baz Qux']
+        assert result['release_manager_gh_handle'] == ['foo', 'baz']
+
+    def test_a_schedule_doc_without_a_handle_still_returns_the_name(self):
+        """Docs indexed before the handle was scraped must not break the window response."""
+        handler, _, _ = _load_handler(
+            opensearch_response=self._schedule_response(release_manager_gh_handle=None))
+        result = handler.handle_get_release_window({'version': '3.9.0'})
+        assert result['release_manager'] == ['Foo Bar']
+        assert result['release_manager_gh_handle'] is None
+
 
 class TestListActiveReleases:
 
@@ -248,7 +275,8 @@ class TestListActiveReleases:
             'rc_date': rc_date,
             'release_date': release_date,
             'registered_at': registered_at,
-            'release_manager': 'someone',
+            'release_manager': ['Foo Bar'],
+            'release_manager_gh_handle': ['foo'],
         }}
 
     def test_query_filters_on_active_status(self):
@@ -259,6 +287,25 @@ class TestListActiveReleases:
         assert path == '/opensearch_release_schedule/_search'
         assert {'term': {'status.keyword': 'active'}} in query['query']['bool']['filter']
         assert query['sort'] == [{'release_date': {'order': 'asc', 'unmapped_type': 'date'}}]
+
+    def test_manager_name_and_handle_are_both_listed(self):
+        """The notifier tags from the handle, so listing it is what makes the mention possible."""
+        response = {'hits': {'hits': [
+            self._schedule_hit('3.9.0', '2026-09-29', '2026-09-15', '2026-08-01T00:00:00Z'),
+        ]}}
+        handler, _, _ = _load_handler(opensearch_response=response)
+        release = handler.handle_list_active_releases({})['releases'][0]
+        assert release['release_manager'] == ['Foo Bar']
+        assert release['release_manager_gh_handle'] == ['foo']
+
+    def test_every_manager_of_a_co_managed_release_is_listed(self):
+        hit = self._schedule_hit('3.9.0', '2026-09-29', '2026-09-15', '2026-08-01T00:00:00Z')
+        hit['_source']['release_manager'] = ['Foo Bar', 'Baz Qux']
+        hit['_source']['release_manager_gh_handle'] = ['foo', 'baz']
+        handler, _, _ = _load_handler(opensearch_response={'hits': {'hits': [hit]}})
+        release = handler.handle_list_active_releases({})['releases'][0]
+        assert release['release_manager'] == ['Foo Bar', 'Baz Qux']
+        assert release['release_manager_gh_handle'] == ['foo', 'baz']
 
     def test_returns_soonest_release_first(self):
         response = {'hits': {'hits': [
