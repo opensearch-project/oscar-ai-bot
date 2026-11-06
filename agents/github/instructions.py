@@ -99,7 +99,7 @@ your own judgment of who is or isn't authorized — always call the tool and rel
 Do NOT re-ask, re-summarize, or restart. Do NOT emit [CONFIRMATION_REQUIRED] again.
   4. Relay the tool's response verbatim — success or error. Include the exact error \
 message text from the tool response. Always preserve bracketed markers like \
-[CONFIRMATION_REQUIRED] and [2PR_PENDING] exactly as they appear.
+[CONFIRMATION_REQUIRED] exactly as it appears.
 {two_person_review_section}
 
 DATE INTERPRETATION:
@@ -151,6 +151,11 @@ COLLABORATOR_INSTRUCTION = """Route to this agent when the user asks about:
 - Searching or listing PRs and issues
 - Looking up who maintains a specific repository
 - Approving or confirming a GitHub operation from a notification thread
+This agent handles GitHub operations requested by the user. If the user's request \
+is fulfilled by a Jenkins job that happens to write to GitHub (e.g., posting \
+automated comments on release issues via release chores), route to the Jenkins \
+Specialist instead. If the user needs live build data, artifact details, or build \
+numbers, route to the Metrics Specialist instead.
 All operations are scoped to the {org} organization. \
 Bulk merge operations validate PRs against safety guardrails before merging. \
 Only call bulk_merge_prs or bulk_comment after user confirmation. \

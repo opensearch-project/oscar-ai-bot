@@ -37,7 +37,7 @@ class OSCARAgentInterface(ABC):
         query: str,
         session_id: Optional[str] = None,
         context_summary: Optional[str] = None
-    ) -> Tuple[str, Optional[str]]:
+    ) -> Tuple[str, Optional[str], bool]:
         """Query the OSCAR agent with automatic routing.
 
         Args:
@@ -46,7 +46,7 @@ class OSCARAgentInterface(ABC):
             context_summary: Optional summary of previous conversation context
 
         Returns:
-            Tuple containing (response_text, session_id)
+            Tuple containing (response_text, session_id, saw_confirmation_in_trace)
         """
 
 
@@ -82,7 +82,7 @@ class EnhancedBedrockOSCARAgent(OSCARAgentInterface):
         session_id: Optional[str] = None,
         context_summary: Optional[str] = None,
         session_attributes: Optional[Dict[str, str]] = None,
-    ) -> Tuple[str, Optional[str]]:
+    ) -> Tuple[str, Optional[str], bool]:
         """
         Query the enhanced OSCAR agent with automatic routing and coordination.
 
@@ -96,7 +96,7 @@ class EnhancedBedrockOSCARAgent(OSCARAgentInterface):
             session_attributes: Out-of-band session attributes (identity provenance)
 
         Returns:
-            A tuple containing (response_text, session_id)
+            A tuple containing (response_text, session_id, saw_confirmation_in_trace)
         """
         return self.query_processor.process_query(query, privilege, session_id, context_summary, session_attributes)
 

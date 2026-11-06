@@ -145,9 +145,10 @@ class TestInvokeAgent:
             ],
             'sessionId': 'sess-1',
         }
-        text, session_id = core.invoke_agent('hi', privilege=True)
+        text, session_id, saw_trace_confirmation = core.invoke_agent('hi', privilege=True)
         assert text == 'Hello world'
         assert session_id == 'sess-1'
+        assert saw_trace_confirmation is False
 
     def test_session_id_from_top_level(self, agent_core):
         """Top-level sessionId takes precedence."""
@@ -156,7 +157,7 @@ class TestInvokeAgent:
             'completion': [{'chunk': {'bytes': b'response'}}],
             'sessionId': 'top-level-sess',
         }
-        _, session_id = core.invoke_agent('hi', privilege=True)
+        _, session_id, _ = core.invoke_agent('hi', privilege=True)
         assert session_id == 'top-level-sess'
 
     def test_session_id_from_request_when_not_in_response(self, agent_core):
@@ -165,7 +166,7 @@ class TestInvokeAgent:
         mock_client.invoke_agent.return_value = {
             'completion': [{'chunk': {'bytes': b'response'}}],
         }
-        _, session_id = core.invoke_agent('hi', privilege=True, session_id='req-sess')
+        _, session_id, _ = core.invoke_agent('hi', privilege=True, session_id='req-sess')
         assert session_id == 'req-sess'
 
     def test_client_error_reraised(self, agent_core):
@@ -189,5 +190,40 @@ class TestInvokeAgent:
             'completion': [],
             'sessionId': 'sess',
         }
-        text, _ = core.invoke_agent('hi', privilege=True, session_id='sess')
+        text, _, _ = core.invoke_agent('hi', privilege=True, session_id='sess')
         assert text == ''
+
+    def test_approval_rejection_detected_from_action_group_trace(self, agent_core):
+        """[CONFIRMATION_REQUIRED] in actionGroupInvocationOutput trace sets saw_confirmation_in_trace."""
+        core, mock_client = agent_core
+        mock_client.invoke_agent.return_value = {
+            'completion': [
+                {'trace': {'trace': {'orchestrationTrace': {'observation': {
+                    'actionGroupInvocationOutput': {
+                        'text': 'SECURITY ERROR: Self-approval is not permitted. [CONFIRMATION_REQUIRED]'
+                    }
+                }}}}},
+                {'chunk': {'bytes': b'You cannot approve your own request.'}},
+            ],
+            'sessionId': 'sess-1',
+        }
+        text, session_id, saw_trace_confirmation = core.invoke_agent('yes', privilege=True)
+        assert saw_trace_confirmation is True
+        assert text == 'You cannot approve your own request.'
+
+    def test_approval_rejection_not_detected_without_marker_in_trace(self, agent_core):
+        """Normal tool result without [CONFIRMATION_REQUIRED] does not set the flag."""
+        core, mock_client = agent_core
+        mock_client.invoke_agent.return_value = {
+            'completion': [
+                {'trace': {'trace': {'orchestrationTrace': {'observation': {
+                    'actionGroupInvocationOutput': {
+                        'text': 'SUCCESS! Message sent to #general'
+                    }
+                }}}}},
+                {'chunk': {'bytes': b'Message sent.'}},
+            ],
+            'sessionId': 'sess-1',
+        }
+        _, _, saw_trace_confirmation = core.invoke_agent('send it', privilege=True)
+        assert saw_trace_confirmation is False
