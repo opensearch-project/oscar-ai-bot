@@ -2115,6 +2115,33 @@ class TestResolveRemediation:
             'jetty-security-9.4.63.pom'
         )
 
+    def test_maven_429_falls_back_to_ci_mirror(self):
+        """When Maven Central returns 429, retry against ci.opensearch.org."""
+        mod, _ = _load_remediation_handler()
+        resp_429 = MagicMock()
+        resp_429.status_code = 429
+        resp_200 = MagicMock()
+        resp_200.status_code = 200
+        fake_requests = MagicMock()
+        fake_requests.head = MagicMock(side_effect=[resp_429, resp_200])
+        mod.requests = fake_requests
+
+        result = mod._verify_version_exists(
+            'maven', 'org.eclipse.jetty:jetty-security', '9.4.57', 'test-req')
+
+        assert result is True
+        assert fake_requests.head.call_count == 2
+        first_url = fake_requests.head.call_args_list[0][0][0]
+        second_url = fake_requests.head.call_args_list[1][0][0]
+        assert 'repo1.maven.org' in first_url
+        assert 'ci.opensearch.org' in second_url
+
+    def test_npm_empty_package_name_fails_open(self):
+        """Empty npm package name returns True (fail-open)."""
+        mod, _ = _load_remediation_handler()
+        result = mod._verify_version_exists('npm', '  ', '1.0.0', 'test-req')
+        assert result is True
+
 
 class TestChunkSearchTerms:
     """Unit tests for _chunk_search_terms (CVE ID chunking for bulk search)."""
