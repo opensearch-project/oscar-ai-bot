@@ -511,10 +511,11 @@ class TestGroupGate:
         }
         mod = _load_lambda()
         result = mod.lambda_handler({
-            "function": "create_tag",
+            "function": "create_ref",
             "parameters": [
                 {"name": "repo", "value": "OpenSearch"},
-                {"name": "tag_name", "value": "3.0.0"},
+                {"name": "ref_type", "value": "tag"},
+                {"name": "ref_name", "value": "3.0.0"},
             ],
             "sessionAttributes": {
                 "requester_user_id": "U_ADM",
@@ -536,10 +537,11 @@ class TestGroupGate:
         }
         mod = _load_lambda()
         result = mod.lambda_handler({
-            "function": "create_tag",
+            "function": "create_ref",
             "parameters": [
                 {"name": "repo", "value": "OpenSearch"},
-                {"name": "tag_name", "value": "3.0.0"},
+                {"name": "ref_type", "value": "tag"},
+                {"name": "ref_name", "value": "3.0.0"},
             ],
             "sessionAttributes": {
                 "requester_user_id": "U_CONTRIB",
@@ -726,39 +728,32 @@ class TestResolveCommitSha:
         assert result == full
 
 
-class TestIsRepoMaintainer:
-    """Cover _is_repo_maintainer: admin, no handle, in maintainers, not in maintainers."""
+class TestRepoPermissionChecks:
+    """Cover _is_repo_admin and _is_repo_maintainer_or_admin."""
 
-    def test_admin_always_true(self):
+    @patch.dict(os.environ, {'GITHUB_SECRET_NAME': 'test'})
+    def test_is_repo_admin(self):
         mod = _load_lambda()
-        assert mod._is_repo_maintainer("tok", "repo", "", "True") is True
+        sys.modules['http_client'].get.return_value = {"role_name": "admin"}
+        assert mod._is_repo_admin("tok", "repo", "user") is True
+        sys.modules['http_client'].get.return_value = {"role_name": "maintain"}
+        assert mod._is_repo_admin("tok", "repo", "user") is False
+        assert mod._is_repo_admin("tok", "repo", "") is False
+        sys.modules['http_client'].get.side_effect = Exception("err")
+        assert mod._is_repo_admin("tok", "repo", "user") is False
 
-    def test_no_handle_returns_false(self):
+    @patch.dict(os.environ, {'GITHUB_SECRET_NAME': 'test'})
+    def test_is_repo_maintainer_or_admin(self):
         mod = _load_lambda()
-        assert mod._is_repo_maintainer("tok", "repo", "", "False") is False
-
-    def test_maintainer_in_list(self):
-        mod = _load_lambda()
-        sys.modules['github_api'].get_repo_maintainers.return_value = json.dumps({
-            "status": "success",
-            "maintainers": [{"github_id": "alice"}, {"github_id": "bob"}],
-        })
-        assert mod._is_repo_maintainer("tok", "repo", "alice", "False") is True
-
-    def test_not_in_maintainer_list(self):
-        mod = _load_lambda()
-        sys.modules['github_api'].get_repo_maintainers.return_value = json.dumps({
-            "status": "success",
-            "maintainers": [{"github_id": "alice"}],
-        })
-        assert mod._is_repo_maintainer("tok", "repo", "bob", "False") is False
-
-    def test_maintainer_lookup_failure(self):
-        mod = _load_lambda()
-        sys.modules['github_api'].get_repo_maintainers.return_value = json.dumps({
-            "status": "error",
-        })
-        assert mod._is_repo_maintainer("tok", "repo", "alice", "False") is False
+        sys.modules['http_client'].get.return_value = {"role_name": "admin"}
+        assert mod._is_repo_maintainer_or_admin("tok", "repo", "user") is True
+        sys.modules['http_client'].get.return_value = {"role_name": "maintain"}
+        assert mod._is_repo_maintainer_or_admin("tok", "repo", "user") is True
+        sys.modules['http_client'].get.return_value = {"role_name": "write"}
+        assert mod._is_repo_maintainer_or_admin("tok", "repo", "user") is False
+        sys.modules['http_client'].get.return_value = {"role_name": "read"}
+        assert mod._is_repo_maintainer_or_admin("tok", "repo", "user") is False
+        assert mod._is_repo_maintainer_or_admin("tok", "repo", "") is False
 
 
 class TestValidateAdminOnly:
@@ -776,53 +771,26 @@ class TestValidateAdminOnly:
         assert result is None
 
 
-class TestValidateMaintainerAuthorization:
-    """Cover _validate_maintainer_authorization: missing requester, non-maintainer, passes."""
-
-    def test_missing_requester_rejected(self):
-        mod = _load_lambda()
-        result = mod._validate_maintainer_authorization("tok", "repo", {}, "create_tag")
-        assert result["status"] == "error"
-        assert "requester" in result["message"]
-
-    def test_non_maintainer_rejected(self):
-        mod = _load_lambda()
-        sys.modules['github_api'].get_repo_maintainers.return_value = json.dumps({
-            "status": "success",
-            "maintainers": [{"github_id": "alice"}],
-        })
-        result = mod._validate_maintainer_authorization(
-            "tok", "repo",
-            {"requester_user_id": "U1", "requester_is_admin": "False", "requester_github_handle": "bob"},
-            "create_tag on repo",
-        )
-        assert result["status"] == "error"
-        assert "not an admin or maintainer" in result["message"]
-
-    def test_maintainer_passes(self):
-        mod = _load_lambda()
-        sys.modules['github_api'].get_repo_maintainers.return_value = json.dumps({
-            "status": "success",
-            "maintainers": [{"github_id": "alice"}],
-        })
-        result = mod._validate_maintainer_authorization(
-            "tok", "repo",
-            {"requester_user_id": "U1", "requester_is_admin": "False", "requester_github_handle": "alice"},
-            "create_tag on repo",
-        )
-        assert result is None
-
-
 class TestHandleCreateRef:
     """Cover _handle_create_ref: validation error, auth error."""
+
+    @patch.dict(os.environ, {'GITHUB_SECRET_NAME': 'test'})
+    def test_invalid_ref_type_returns_error(self):
+        mod = _load_lambda()
+        result = mod._handle_create_ref(
+            "tok", {"repo": "OpenSearch", "ref_type": "invalid", "ref_name": "v1.0"}, "req1",
+            {"requester_user_id": "U1", "requester_is_admin": "True"},
+        )
+        parsed = json.loads(result)
+        assert parsed["status"] == "error"
+        assert "ref_type" in parsed["message"]
 
     @patch.dict(os.environ, {'GITHUB_SECRET_NAME': 'test'})
     def test_invalid_ref_name_returns_error(self):
         mod = _load_lambda()
         result = mod._handle_create_ref(
-            "tok", {"repo": "OpenSearch", "tag_name": ""}, "req1",
+            "tok", {"repo": "OpenSearch", "ref_type": "tag", "ref_name": ""}, "req1",
             {"requester_user_id": "U1", "requester_is_admin": "True"},
-            ref_type="tags",
         )
         parsed = json.loads(result)
         assert parsed["status"] == "error"
@@ -831,17 +799,136 @@ class TestHandleCreateRef:
     @patch.dict(os.environ, {'GITHUB_SECRET_NAME': 'test'})
     def test_auth_error_returns_error(self):
         mod = _load_lambda()
-        sys.modules['github_api'].get_repo_maintainers.return_value = json.dumps({
-            "status": "success", "maintainers": [],
-        })
+        sys.modules['http_client'].get.return_value = {"role_name": "read"}
         result = mod._handle_create_ref(
-            "tok", {"repo": "OpenSearch", "tag_name": "v1.0.0"}, "req1",
+            "tok", {"repo": "OpenSearch", "ref_type": "tag", "ref_name": "v1.0.0"}, "req1",
             {"requester_user_id": "U1", "requester_is_admin": "False", "requester_github_handle": "nobody"},
-            ref_type="tags",
         )
         parsed = json.loads(result)
         assert parsed["status"] == "error"
-        assert "not an admin or maintainer" in parsed["message"]
+        assert "not a maintainer or admin" in parsed["message"]
+
+
+class TestHandleCreateRefGitHubMention:
+    """Cover the GitHub @mention flow in _handle_create_ref."""
+
+    @patch.dict(os.environ, {'GITHUB_SECRET_NAME': 'test'})
+    def test_github_mention_error_paths(self):
+        mod = _load_lambda()
+        params = {"repo": "OpenSearch", "ref_type": "tag", "ref_name": "v1.0.0",
+                  "github_requester": "user1", "source_repo": "obs", "source_issue_number": "1"}
+        base_attrs = {"requester_user_id": "github:user1", "approver_user_id": "U_SLACK"}
+
+        # Requester mismatch (prompt injection prevention)
+        r = json.loads(mod._handle_create_ref(
+            "tok", params, "r1",
+            {"requester_user_id": "github:legit-user"}))
+        assert "identity could not be verified" in r["message"]
+
+        # Non-maintainer denied
+        sys.modules['http_client'].get.return_value = {"role_name": "read"}
+        nobody_params = {**params, "github_requester": "nobody"}
+        nobody_attrs = {**base_attrs, "requester_user_id": "github:nobody",
+                        "approver_github_handle": "other"}
+        r = json.loads(mod._handle_create_ref(
+            "tok", nobody_params, "r1", nobody_attrs))
+        assert "not a maintainer or admin" in r["message"]
+
+    @patch.dict(os.environ, {'GITHUB_SECRET_NAME': 'test'})
+    def test_github_mention_authorized(self):
+        mod = _load_lambda()
+        sys.modules['mcp_client'].MCPClient.return_value.get_token.return_value = "tok2"
+        attrs = {"requester_user_id": "github:user1", "approver_user_id": "U_SLACK",
+                 "approver_is_admin": "True", "approver_github_handle": "other"}
+
+        # Admin requester + OSCAR admin approver
+        sys.modules['http_client'].get.side_effect = [
+            {"role_name": "admin"}, {"default_branch": "main"},
+            {"commit": {"sha": "a" * 40}}]
+        sys.modules['github_api'].create_ref.return_value = json.dumps({"status": "success"})
+        tag_params = {"repo": "R", "ref_type": "tag", "ref_name": "1.0", "github_requester": "user1",
+                      "source_repo": "obs", "source_issue_number": "1"}
+        r = json.loads(mod._handle_create_ref("tok", tag_params, "r1", attrs))
+        assert r["status"] == "success"
+
+        # Maintain-access requester + repo-admin approver (not OSCAR admin)
+        sys.modules['http_client'].get.side_effect = [
+            {"role_name": "maintain"}, {"role_name": "admin"},
+            {"default_branch": "main"}, {"commit": {"sha": "b" * 40}}]
+        br_attrs = {**attrs, "requester_user_id": "github:m1",
+                    "approver_is_admin": "False"}
+        br_params = {"repo": "R", "ref_type": "branch", "ref_name": "3.0", "github_requester": "m1",
+                     "source_repo": "obs", "source_issue_number": "1"}
+        r = json.loads(mod._handle_create_ref("tok", br_params, "r1", br_attrs))
+        assert r["status"] == "success"
+
+    @patch.dict(os.environ, {'GITHUB_SECRET_NAME': 'test'})
+    def test_approver_must_be_admin(self):
+        mod = _load_lambda()
+        sys.modules['http_client'].get.side_effect = [
+            {"role_name": "maintain"}, {"role_name": "write"}]
+        r = json.loads(mod._handle_create_ref(
+            "tok", {"repo": "R", "ref_type": "tag", "ref_name": "1.0",
+                    "github_requester": "user1", "source_repo": "obs", "source_issue_number": "1"},
+            "r1", {"requester_user_id": "github:user1", "approver_user_id": "U_SLACK",
+                   "approver_is_admin": "False", "approver_github_handle": "nonadmin"}))
+        assert "Approver must be an admin" in r["message"]
+
+
+class TestGitHubMentionHelpers:
+
+    @patch.dict(os.environ, {'GITHUB_SECRET_NAME': 'test'})
+    def test_post_issue_comment_safe(self):
+        mod = _load_lambda()
+        sys.modules['github_api'].screen_outbound_body.return_value = "body"
+        mod._post_issue_comment_safe("tok", "repo", 1, "body")
+        sys.modules['http_client'].post.assert_called_once()
+        sys.modules['http_client'].post.side_effect = Exception("fail")
+        mod._post_issue_comment_safe("tok", "repo", 1, "body")
+
+
+class TestGroupGateBypassForExternal:
+
+    @patch.dict(os.environ, {'ENABLE_2PR': 'false', 'GITHUB_SECRET_NAME': 'test'})
+    @patch('boto3.client')
+    def test_group_gate_skipped_for_external_maintainer_tier(self, mock_boto):
+        mock_boto.return_value.get_secret_value.return_value = {
+            'SecretString': json.dumps({
+                'GITHUB_APP_ID': '1', 'GITHUB_PRIVATE_KEY': 'k', 'GITHUB_INSTALLATION_ID': '2',
+            })
+        }
+        mod = _load_lambda()
+        sys.modules['http_client'].get.side_effect = [
+            {"role_name": "admin"},
+            {"default_branch": "main"},
+            {"commit": {"sha": "abc" + "0" * 37}},
+        ]
+        sys.modules['github_api'].create_ref.return_value = json.dumps({"status": "success"})
+        sys.modules['mcp_client'].MCPClient.return_value.get_token.return_value = "tok"
+        result = mod.lambda_handler({
+            "function": "create_ref",
+            "parameters": [
+                {"name": "repo", "value": "OpenSearch"},
+                {"name": "ref_type", "value": "tag"},
+                {"name": "ref_name", "value": "v1.0.0"},
+                {"name": "github_requester", "value": "user1"},
+                {"name": "source_repo", "value": "obs"},
+                {"name": "source_issue_number", "value": "1"},
+            ],
+            "sessionAttributes": {
+                "requester_user_id": "github:user1",
+                "requester_is_admin": "False",
+                "requester_is_maintainer": "False",
+                "requester_tier": "contributor",
+                "approver_user_id": "U_SLACK",
+                "approver_is_admin": "True",
+                "approver_github_handle": "other",
+                "external_requester": "true",
+            },
+        }, None)
+        body = result['response']['functionResponse']['responseBody']['TEXT']['body']
+        parsed = json.loads(body)
+        assert parsed["status"] == "success"
 
 
 class TestFunctionGateAdminPolicy:

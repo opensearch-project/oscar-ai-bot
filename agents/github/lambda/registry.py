@@ -29,7 +29,8 @@ class FunctionDef:
     needs_owner: bool = False
 
     # Authorization policy: None = no pre-check, "admin" = admin-only,
-    # "maintainer" = live per-repo MAINTAINERS.md check
+    # "maintainer" = approver must be OSCAR admin,
+    # "handler" = handler manages approver auth via GitHub API
     auth_policy: Optional[str] = None
 
     # Authorization tier for group gate: "contributor", "maintainer", "admin"

@@ -329,13 +329,12 @@ class TestGitHubAgentWriteOperations:
             assert name in func_names, f"Missing admin function: {name}"
 
     def test_github_maintainer_ops_functions_defined(self):
-        """Maintainer ops group should have create_tag and create_branch."""
+        """Maintainer ops group should have create_ref."""
         agent = GitHubAgent()
         groups = agent.get_action_groups("arn:aws:lambda:us-east-1:123456789012:function:placeholder")
         maint_group = next(g for g in groups if g.action_group_name == "githubMaintainerOps")
         func_names = [f.name for f in maint_group.function_schema.functions]
-        assert "create_tag" in func_names
-        assert "create_branch" in func_names
+        assert "create_ref" in func_names
 
     def test_github_contributor_ops_functions_defined(self):
         """Contributor ops group should have read-only ops."""

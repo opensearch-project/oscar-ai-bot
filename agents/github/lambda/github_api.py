@@ -21,7 +21,7 @@ logger.setLevel(logging.INFO)
 _OUTBOUND_INJECTION_PATTERNS = STRUCTURAL_INJECTION_PATTERNS
 
 
-def _screen_outbound_body(body: str) -> str:
+def screen_outbound_body(body: str) -> str:
     """Screen outbound comment body for prompt injection patterns.
 
     Raises GitHubAPIError if suspicious content is detected, preventing
@@ -111,7 +111,7 @@ def bulk_comment(
         issue_targets: List of (repo, issue_number) tuples
         body: Comment body text
     """
-    _screen_outbound_body(body)
+    screen_outbound_body(body)
     results = []
     for repo, num in issue_targets:
         try:
@@ -140,12 +140,13 @@ def create_ref(
         "sha": commit_sha,
     })
     label = "tag" if ref_type == "tags" else "branch"
+    web_path = f"releases/tag/{name}" if ref_type == "tags" else f"tree/{name}"
     return json.dumps({
         "status": "success",
         label: name,
         "commit_sha": commit_sha,
         "ref": result.get("ref", ref),
-        "url": result.get("url", ""),
+        "url": f"https://github.com/{owner}/{repo}/{web_path}",
         "repo": f"{owner}/{repo}",
     })
 
