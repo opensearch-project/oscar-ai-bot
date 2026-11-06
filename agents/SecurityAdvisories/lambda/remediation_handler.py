@@ -1797,7 +1797,7 @@ def _verify_version_exists(
             if not group_path or not artifact:
                 return True
             pom_path = f'{group_path}/{artifact}/{version}/{artifact}-{version}.pom'
-            url = f'https://repo1.maven.org/maven2/{pom_path}'
+            url = f'https://repo.maven.apache.org/maven2/{pom_path}'
             resp = requests.head(url, timeout=10, allow_redirects=True)
             if resp.status_code == 429:
                 url = f'https://ci.opensearch.org/maven2/{pom_path}'
