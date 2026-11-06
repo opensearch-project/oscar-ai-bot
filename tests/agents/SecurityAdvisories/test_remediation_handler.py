@@ -182,7 +182,7 @@ def _install_fake_github(
         return _FakeResp({})
 
     def _head(url, timeout=None, allow_redirects=True):
-        if 'ci.opensearch.org/maven2' in url:
+        if 'repo1.maven.org/maven2' in url or 'ci.opensearch.org/maven2' in url:
             if registry_versions is not None:
                 # URL: .../group/artifact/version/artifact-version.pom
                 # Extract artifact@version from the URL path.
@@ -2083,7 +2083,7 @@ class TestResolveRemediation:
         original_get = fake.get.side_effect
 
         def _get_that_breaks_registry(url, **kwargs):
-            if 'registry.npmjs.org' in url or 'ci.opensearch.org/maven2' in url:
+            if 'registry.npmjs.org' in url or 'repo1.maven.org/maven2' in url:
                 raise ConnectionError('down')
             return original_get(url, **kwargs)
 
@@ -2110,7 +2110,7 @@ class TestResolveRemediation:
         fake_requests.head.assert_called_once()
         called_url = fake_requests.head.call_args[0][0]
         assert called_url == (
-            'https://ci.opensearch.org/maven2/'
+            'https://repo1.maven.org/maven2/'
             'org/eclipse/jetty/jetty-security/9.4.63/'
             'jetty-security-9.4.63.pom'
         )

@@ -1796,12 +1796,12 @@ def _verify_version_exists(
             artifact = coord.rsplit('/', 1)[-1] if '/' in coord else coord
             if not group_path or not artifact:
                 return True
-            url = (
-                f'https://ci.opensearch.org/maven2/'
-                f'{group_path}/{artifact}/{version}/'
-                f'{artifact}-{version}.pom'
-            )
+            pom_path = f'{group_path}/{artifact}/{version}/{artifact}-{version}.pom'
+            url = f'https://repo1.maven.org/maven2/{pom_path}'
             resp = requests.head(url, timeout=10, allow_redirects=True)
+            if resp.status_code == 429:
+                url = f'https://ci.opensearch.org/maven2/{pom_path}'
+                resp = requests.head(url, timeout=10, allow_redirects=True)
             if resp.status_code == 404:
                 logger.warning(
                     f"[{request_id}] VERSION_CHECK_404: {url}"
