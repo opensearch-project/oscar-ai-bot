@@ -724,6 +724,8 @@ def _push_branch(work_dir, remote, branch_name, env):
     if result.returncode == 0:
         return
     stderr = result.stderr or ""
+    logger.warning("git push rejected for %s (rc=%d): %s",
+                   branch_name, result.returncode, stderr[-500:])
     ref_exists_markers = (
         "[rejected]", "[remote rejected]", "reference already exists",
         "cannot lock ref", "fetch first", "non-fast-forward",
