@@ -42,6 +42,10 @@ class EventHandlers:
         text = event.get("text")
         event_ts = event.get("ts")  # Use ts for the specific message, not thread_ts
 
+        if not user_id:
+            logger.info("Ignoring app_mention with no user (ts=%s)", event_ts)
+            return
+
         logger.info(f"Processing app_mention event: channel={channel}, ts={event_ts}, thread_ts={thread_ts}")
 
         # Process the message
