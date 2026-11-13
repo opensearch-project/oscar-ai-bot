@@ -61,6 +61,24 @@ class TestHandleAppMention:
         kwargs = processor.process_message.call_args[1]
         assert kwargs.get('message_ts') == 'ets'
 
+    def test_missing_user_ignored(self):
+        processor = Mock()
+        handler = EventHandlers(processor)
+
+        event = {'channel': 'C_ALLOWED', 'ts': 'ets', 'text': 'hi'}
+        handler.handle_app_mention(event, Mock())
+
+        processor.process_message.assert_not_called()
+
+    def test_none_user_ignored(self):
+        processor = Mock()
+        handler = EventHandlers(processor)
+
+        event = {'channel': 'C_ALLOWED', 'ts': 'ets', 'user': None, 'text': 'hi'}
+        handler.handle_app_mention(event, Mock())
+
+        processor.process_message.assert_not_called()
+
 
 class TestHandleMessage:
 

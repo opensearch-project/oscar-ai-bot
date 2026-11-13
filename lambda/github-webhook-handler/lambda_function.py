@@ -170,7 +170,7 @@ _FOOTER_BLOCKS = [
         "type": "context",
         "elements": [{
             "type": "mrkdwn",
-            "text": "Reply in this thread by mentioning @oscar with the action you'd like to take.",
+            "text": "Reply in this thread to take action.",
         }],
     },
 ]
