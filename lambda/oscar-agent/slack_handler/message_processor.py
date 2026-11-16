@@ -66,7 +66,11 @@ class MessageProcessor:
         is_admin = self.is_fully_authorized_user(user_id)
         attrs[f'{prefix}_is_admin'] = str(is_admin)
 
-        record = self._get_identity_record(user_id)
+        if user_id.startswith("github:"):
+            # External requester: not in the Slack identity table.
+            record = {"github_handle": user_id[len("github:"):]}
+        else:
+            record = self._get_identity_record(user_id)
         github_handle = record.get("github_handle", "")
         is_maintainer = record.get("is_org_maintainer", False)
 
@@ -155,6 +159,22 @@ class MessageProcessor:
 
         return attrs
 
+    def _approval_context(self, attrs: dict) -> str:
+        """State who is speaking relative to a pending approval.
+
+        Identity only reaches the action-group Lambdas, so without this the
+        model sees "yes" after an earlier 2PR rejection and repeats the
+        rejection instead of calling the tool.
+        """
+        if attrs.get('approver_user_id'):
+            if (attrs.get('external_requester') == 'true'
+                    and attrs.get('requester_github_handle', '').lower() == attrs.get('approver_github_handle', '').lower()):
+                return ""
+            return "\n[Note: the current message is from a different user than the one who requested the pending action.]\n"
+        if attrs.get('approval_expired') == 'True':
+            return "\n[Note: the earlier pending approval in this thread has expired.]\n"
+        return ""
+
     def _resolve_display_name(self, user_id: str) -> str:
         """Resolve a Slack user id to a display name, asking Slack rather than the model.
 
@@ -166,7 +186,7 @@ class MessageProcessor:
         must never cost the action itself. Cached per execution environment, since a display name
         changes rarely and one call per message would be paid for nothing.
         """
-        if not user_id or not self.slack_client:
+        if not user_id or not self.slack_client or user_id.startswith('github:'):
             return ''
         if user_id in self._display_names:
             return self._display_names[user_id]
@@ -523,6 +543,8 @@ class MessageProcessor:
             formatted_context = self.storage.get_context_for_query(thread_key, privileged=privilege)
             if parent_context:
                 formatted_context = parent_context + "\n" + formatted_context if formatted_context else parent_context
+            # Prepended: the advisory filter for limited users can drop trailing lines.
+            formatted_context = self._approval_context(identity_attrs) + formatted_context
 
             # Query OSCAR agent with timeout monitoring (using formatted context)
             response, new_session_id, saw_confirmation_in_trace = self.timeout_handler.query_agent_with_timeout(
@@ -563,7 +585,16 @@ class MessageProcessor:
                 if not existing_requester or self.is_fully_authorized_user(user_id):
                     requester_to_store = external_requester if external_requester else user_id
                     self.storage.set_pending_approval_requester(thread_key, requester_to_store)
-            else:
+            elif not (config.enable_2pr and getattr(self, '_had_pending', False)
+                      and not getattr(self, '_consumed_pending', None)):
+                # Under 2PR the requester's own turns cannot execute anything,
+                # so a follow-up question from them keeps the approval open.
+                # TODO: if the approver asks a question before saying "yes", the approval
+                # is still cleared, so their "yes" makes them the requester and the
+                # original requester must confirm again. Not fixed here because this code
+                # can't tell "asked a question" from "approved and the action ran".
+                # Fix needs approval_guard to clear the approval when it passes, plus
+                # approvals tied to the exact action requested.
                 self.storage.clear_pending_approval_requester(thread_key)
 
             # Validate response - handle None, empty, or whitespace-only responses
