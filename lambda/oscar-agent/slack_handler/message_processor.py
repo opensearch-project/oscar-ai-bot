@@ -167,8 +167,9 @@ class MessageProcessor:
         rejection instead of calling the tool.
         """
         if attrs.get('approver_user_id'):
-            if (attrs.get('external_requester') == 'true'
-                    and attrs.get('requester_github_handle', '').lower() == attrs.get('approver_github_handle', '').lower()):
+            requester_gh = attrs.get('requester_github_handle', '').lower()
+            approver_gh = attrs.get('approver_github_handle', '').lower()
+            if attrs.get('external_requester') == 'true' and requester_gh and requester_gh == approver_gh:
                 return ""
             return "\n[Note: the current message is from a different user than the one who requested the pending action.]\n"
         if attrs.get('approval_expired') == 'True':
@@ -543,7 +544,8 @@ class MessageProcessor:
             formatted_context = self.storage.get_context_for_query(thread_key, privileged=privilege)
             if parent_context:
                 formatted_context = parent_context + "\n" + formatted_context if formatted_context else parent_context
-            # Prepended: the advisory filter for limited users can drop trailing lines.
+            # Placed first so it isn't mistaken for part of an assistant answer that the
+            # limited-user advisory filter strips. Contains only fixed text, never user or model content.
             formatted_context = self._approval_context(identity_attrs) + formatted_context
 
             # Query OSCAR agent with timeout monitoring (using formatted context)
