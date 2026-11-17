@@ -274,6 +274,7 @@ class OscarPolicyDefinitions:
                 actions=["secretsmanager:GetSecretValue"],
                 resources=[
                     f"arn:aws:secretsmanager:{self.region}:{self.account_id}:secret:oscar-github-webhook-{self.env_name}*",
+                    f"arn:aws:secretsmanager:{self.region}:{self.account_id}:secret:oscar-github-env-{self.env_name}*",
                 ],
             ),
         ]

@@ -307,6 +307,18 @@ def _handle_create_ref(
     source_issue_str = params.get("source_issue_number", "")
     source_issue = int(source_issue_str) if source_issue_str else 0
     is_github_mention = bool(github_requester and source_repo and source_issue)
+    source_comment_id = (session_attributes or {}).get("source_comment_id", "")
+
+    def _react_to_source_comment(content: str) -> None:
+        """Best-effort reaction on the GitHub comment that triggered this action."""
+        if not (is_github_mention and source_comment_id):
+            return
+        try:
+            t = _get_mcp_client().get_token(repositories=[source_repo])
+            post(t, f"/repos/{ORG}/{source_repo}/issues/comments/{source_comment_id}/reactions",
+                 json_body={"content": content})
+        except Exception as e:
+            logger.warning("Failed to react to source comment: %s", e)
 
     # TODO: Post timeout comment when pending approval expires (needs background job).
     def _notify_issue(body: str) -> None:
@@ -354,6 +366,7 @@ def _handle_create_ref(
             f"Only repository maintainers and admins can request {label} creation. "
             "Please reach out to a repository admin for assistance.",
         )
+        _react_to_source_comment("confused")
         return json.dumps({
             "status": "error",
             "message": (
@@ -368,6 +381,7 @@ def _handle_create_ref(
         approver_is_oscar_admin = attrs.get("approver_is_admin", "False") == "True"
         approver_handle = attrs.get("approver_github_handle", "")
         if not approver_is_oscar_admin and not _is_repo_admin(token, repo, approver_handle):
+            _react_to_source_comment("confused")
             return json.dumps({
                 "status": "error",
                 "message": (
@@ -395,11 +409,13 @@ def _handle_create_ref(
             f"Unable to create {label} `{name}` on `{ORG}/{repo}`. "
             "Please check with your Slack admin.",
         )
+        _react_to_source_comment("confused")
         raise
 
     _notify_issue(
         f"Created {label} `{name}` on `{ORG}/{repo}` pointing to commit `{commit_sha[:7]}`.",
     )
+    _react_to_source_comment("rocket")
 
     return result
 
