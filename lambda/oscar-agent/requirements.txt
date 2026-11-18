@@ -13,7 +13,7 @@ opensearch-py==2.4.2
 aws-requests-auth==0.4.3
 
 # Ensure we have all transitive dependencies
-certifi>=2023.7.22
+certifi>=2026.10.19
 charset-normalizer>=3.0.0
 idna>=3.0.0
 python-dateutil>=2.8.0
