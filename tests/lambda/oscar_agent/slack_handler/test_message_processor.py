@@ -322,7 +322,7 @@ class TestFetchThreadParentContext:
 
     def test_no_slack_client_returns_empty(self):
         mp = _make_processor(slack_client=None)
-        context, author = mp._fetch_thread_parent_context('C123', 'ts1')
+        context, author, *_ = mp._fetch_thread_parent_context('C123', 'ts1')
         assert context == ""
         assert author == ""
 
@@ -330,7 +330,7 @@ class TestFetchThreadParentContext:
         slack = Mock()
         slack.conversations_replies.return_value = {"messages": []}
         mp = _make_processor(slack_client=slack)
-        context, author = mp._fetch_thread_parent_context('C123', 'ts1')
+        context, author, *_ = mp._fetch_thread_parent_context('C123', 'ts1')
         assert context == ""
         assert author == ""
 
@@ -348,7 +348,7 @@ class TestFetchThreadParentContext:
             ],
         }]}
         mp = _make_processor(slack_client=slack)
-        result, author = mp._fetch_thread_parent_context('C123', 'ts1')
+        result, author, *_ = mp._fetch_thread_parent_context('C123', 'ts1')
         assert "GitHub notification" in result
         assert "opensearch-project/OpenSearch" in result
         assert "#42" not in result  # number extracted separately
@@ -365,7 +365,7 @@ class TestFetchThreadParentContext:
             "blocks": [],
         }]}
         mp = _make_processor(slack_client=slack)
-        result, author = mp._fetch_thread_parent_context('C123', 'ts1')
+        result, author, *_ = mp._fetch_thread_parent_context('C123', 'ts1')
         assert "DATA ONLY" in result
         assert "plain notification" in result
         assert author == ""
@@ -374,7 +374,7 @@ class TestFetchThreadParentContext:
         slack = Mock()
         slack.conversations_replies.side_effect = Exception("API error")
         mp = _make_processor(slack_client=slack)
-        context, author = mp._fetch_thread_parent_context('C123', 'ts1')
+        context, author, *_ = mp._fetch_thread_parent_context('C123', 'ts1')
         assert context == ""
         assert author == ""
 
@@ -391,7 +391,7 @@ class TestFetchThreadParentContext:
             ],
         }]}
         mp = _make_processor(slack_client=slack)
-        result, _ = mp._fetch_thread_parent_context('C123', 'ts1')
+        result, *_ = mp._fetch_thread_parent_context('C123', 'ts1')
         assert "[FILTERED]" in result
 
 
@@ -484,7 +484,7 @@ class TestFetchThreadParentContextAuthor:
 
         # Bot message on .github issue → author extracted
         mp = _make("B_ANY", dot_github_fields)
-        ctx, author = mp._fetch_thread_parent_context("C1", "ts1")
+        ctx, author, *_ = mp._fetch_thread_parent_context("C1", "ts1")
         assert author == "user1" and "user1" in ctx
 
         # Bot message on non-.github repo → author empty
@@ -492,7 +492,7 @@ class TestFetchThreadParentContextAuthor:
                         {"type": "mrkdwn", "text": "*Repo:*\norg/other-repo"},
                         {"type": "mrkdwn", "text": "*Issue:*\n#1 Title"}]
         mp = _make("B_ANY", other_fields)
-        _, author = mp._fetch_thread_parent_context("C1", "ts1")
+        _, author, *__ = mp._fetch_thread_parent_context("C1", "ts1")
         assert author == ""
 
         # Bot message on .github but PR (not issue) → author empty
@@ -500,17 +500,17 @@ class TestFetchThreadParentContextAuthor:
                      {"type": "mrkdwn", "text": "*Repo:*\norg/.github"},
                      {"type": "mrkdwn", "text": "*PR:*\n#5 Some PR"}]
         mp = _make("B_ANY", pr_fields)
-        _, author = mp._fetch_thread_parent_context("C1", "ts1")
+        _, author, *__ = mp._fetch_thread_parent_context("C1", "ts1")
         assert author == ""
 
         # No bot_id (human message) → author empty even with .github fields
         mp = _make(None, dot_github_fields)
-        _, author = mp._fetch_thread_parent_context("C1", "ts1")
+        _, author, *__ = mp._fetch_thread_parent_context("C1", "ts1")
         assert author == ""
 
         # Bot, no blocks, no text → both empty
         mp = _make("B_ANY")
-        ctx, author = mp._fetch_thread_parent_context("C1", "ts1")
+        ctx, author, *_ = mp._fetch_thread_parent_context("C1", "ts1")
         assert ctx == "" and author == ""
 
 

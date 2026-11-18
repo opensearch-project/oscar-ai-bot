@@ -14,10 +14,12 @@ import json
 import logging
 import os
 import re
+import time
 from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 
 import boto3
+import jwt
 import requests
 from oscar_shared.injection_patterns import STRUCTURAL_INJECTION_PATTERNS
 
@@ -108,6 +110,57 @@ def _verify_signature(payload_body: str, signature_header: str) -> bool:
         secret.encode(), payload_body.encode(), hashlib.sha256
     ).hexdigest()
     return hmac.compare_digest(expected, signature_header)
+
+
+_cached_github_creds: Optional[Dict[str, str]] = None
+
+
+def _github_creds() -> Dict[str, str]:
+    """Load GitHub App credentials from the agent env secret."""
+    global _cached_github_creds
+    if _cached_github_creds is None:
+        secret_name = os.environ.get("GITHUB_ENV_SECRET_NAME", "")
+        if not secret_name:
+            return {}
+        sm = boto3.client("secretsmanager")
+        resp = sm.get_secret_value(SecretId=secret_name)
+        _cached_github_creds = json.loads(resp["SecretString"])
+    return _cached_github_creds
+
+
+def _react_to_comment(payload: Dict[str, Any]) -> None:
+    """Best-effort eyes reaction on the comment that mentioned the bot."""
+    try:
+        creds = _github_creds()
+        app_id = creds.get("GITHUB_APP_ID")
+        pk = creds.get("GITHUB_PRIVATE_KEY")
+        inst_id = creds.get("GITHUB_INSTALLATION_ID")
+        if not (app_id and pk and inst_id):
+            return
+
+        now = int(time.time())
+        token_jwt = jwt.encode(
+            {"iat": now - 60, "exp": now + 600, "iss": app_id}, pk, algorithm="RS256",
+        )
+        gh_headers = {"Accept": "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28"}
+        resp = requests.post(
+            f"https://api.github.com/app/installations/{inst_id}/access_tokens",
+            headers={**gh_headers, "Authorization": f"Bearer {token_jwt}"},
+            timeout=5,
+        )
+        if resp.status_code >= 400:
+            return
+        token = resp.json()["token"]
+
+        requests.post(
+            f"https://api.github.com/repos/{payload['repository']['full_name']}"
+            f"/issues/comments/{payload['comment']['id']}/reactions",
+            headers={**gh_headers, "Authorization": f"Bearer {token}"},
+            json={"content": "eyes"},
+            timeout=5,
+        )
+    except Exception:
+        logger.warning("Comment reaction skipped", exc_info=True)
 
 
 def _post_to_slack(payload: Dict[str, Any]) -> None:
@@ -204,6 +257,7 @@ def _build_slack_message(event_type: str, payload: Dict[str, Any]) -> Optional[D
                     {"type": "mrkdwn", "text": f"*{issue_type}:*\n<{issue.get('html_url', '')}|#{issue.get('number', '')} {issue.get('title', '')}>"},
                     {"type": "mrkdwn", "text": f"*From:*\n{sender.get('login', '')}"},
                     {"type": "mrkdwn", "text": f"*Comment:*\n<{comment.get('html_url', '')}|View comment>"},
+                    {"type": "mrkdwn", "text": f"*Comment-ID:*\n{comment.get('id', '')}"},
                 ],
             },
             *_screened_body_blocks(body, repo.get("full_name", ""), issue.get("number", ""), sender.get("login", "")),
@@ -310,6 +364,8 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     slack_message = _build_slack_message(event_type, payload)
     if slack_message:
         _post_to_slack(slack_message)
+        if event_type == "issue_comment":
+            _react_to_comment(payload)
         logger.info("Slack notification sent for %s event", event_type)
     else:
         logger.info("No notification needed for %s event (action=%s)", event_type, payload.get("action", ""))
