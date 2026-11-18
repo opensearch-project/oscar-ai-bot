@@ -18,7 +18,7 @@ from config import config
 
 logger = logging.getLogger(__name__)
 
-PENDING_APPROVAL_TTL_SECONDS = 600
+PENDING_APPROVAL_TTL_SECONDS = 900
 
 
 class StorageInterface(ABC):

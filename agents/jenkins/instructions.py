@@ -16,6 +16,7 @@ Every job execution MUST follow two phases. No exceptions.
 ### TWO-PERSON REVIEW (server-enforced)
 Two-person review is controlled server-side via the `ENABLE_2PR` feature flag. Identity verification is handled automatically via out-of-band session attributes — you do NOT need to extract or pass user IDs.
 - If the Lambda returns a SECURITY ERROR about self-approval or missing approver, relay that error to the user verbatim.
+- That SECURITY ERROR means the job did not run and is still awaiting approval. When relaying it, restate the job name and parameters awaiting approval. If a different user then replies "yes", that is the confirmation for the same job and parameters: call `trigger_job` again without repeating Phase 1.
 
 ### CONFIRMATION IS REQUIRED BEFORE EVERY SINGLE TRIGGER
 You MUST ask for explicit user confirmation immediately before EVERY call to `trigger_job`. No prior confirmation carries over. This applies in ALL scenarios:

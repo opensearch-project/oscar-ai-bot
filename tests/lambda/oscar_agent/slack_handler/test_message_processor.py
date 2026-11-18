@@ -525,6 +525,9 @@ class TestExternalRequesterIdentity:
         assert attrs["requester_user_id"] == "github:gh-user"
         assert attrs["approver_user_id"] == "U_SLACK"
         assert attrs["external_requester"] == "true"
+        # GitHub requester's handle comes from the ID; only the Slack approver is looked up.
+        assert attrs["requester_github_handle"] == "gh-user"
+        mp._get_identity_record.assert_called_once_with("U_SLACK")
 
     def test_build_identity_without_external_requester(self):
         storage = Mock()
@@ -1066,3 +1069,46 @@ class TestApprovalRejectionTraceDetection:
         # Pending must NOT be cleared — trace says it's an approval rejection
         storage.clear_pending_approval_requester.assert_not_called()
         storage.set_pending_approval_requester.assert_not_called()
+
+
+def _run_with_pending(user, text, enable_2pr=True):
+    """Process one message in a thread with a pending approval from U_REQ."""
+    storage = Mock()
+    storage.get_context.return_value = {
+        'session_id': 's', 'history': [],
+        'pending_approval_requester': 'U_REQ', 'pending_approval_expires_at': int(time.time()) + 200,
+    }
+    storage.get_context_for_query.return_value = ''
+    th = Mock()
+    th.query_agent_with_timeout.return_value = ('ok', 's2', False)
+    mp = _make_processor(storage=storage, reaction_manager=Mock(), timeout_handler=th)
+    mp._has_identity_mapping = Mock(return_value=True)
+    mp._get_identity_record = Mock(return_value={"github_handle": "gh", "is_org_maintainer": False})
+    with patch.object(mock_config, 'enable_2pr', enable_2pr):
+        mp.process_message('C_ALLOWED', 'tts', user, f'<@BOT> {text}', Mock(), message_ts='mts')
+    return storage, th
+
+
+class TestRequesterFollowUp:
+
+    def test_keeps_pending_under_2pr_only(self):
+        _run_with_pending('U_REQ', 'how long?')[0].clear_pending_approval_requester.assert_not_called()
+        _run_with_pending('U_REQ', 'how long?', enable_2pr=False)[0].clear_pending_approval_requester.assert_called_once()
+
+
+class TestApprovalNote:
+
+    def test_note_whenever_a_different_user_is_paired(self):
+        ctx = _make_processor()._approval_context
+        assert 'different user' in ctx({'requester_user_id': 'github:gh-user', 'approver_user_id': 'U_APP'})
+        assert ctx({'requester_user_id': 'U_REQ'}) == ''
+        assert ctx({'requester_user_id': 'github:GH-User', 'external_requester': 'true',
+                    'requester_github_handle': 'GH-User', 'approver_user_id': 'U_P',
+                    'approver_github_handle': 'gh-user'}) == ''
+        assert 'has expired' in ctx({'requester_user_id': 'U_REQ', 'approval_expired': 'True'})
+
+    def test_note_reaches_agent_but_not_stored_history(self):
+        storage, th = _run_with_pending('U_APP', 'yes')
+        args = th.query_agent_with_timeout.call_args[0]
+        assert args[1] == 'yes' and 'different user' in args[4]
+        assert storage.update_context.call_args[0][1] == 'yes'
