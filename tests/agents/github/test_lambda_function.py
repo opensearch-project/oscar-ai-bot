@@ -815,6 +815,9 @@ class TestHandleCreateRefGitHubMention:
     @patch.dict(os.environ, {'GITHUB_SECRET_NAME': 'test'})
     def test_github_mention_error_paths(self):
         mod = _load_lambda()
+        mock_mcp = sys.modules['mcp_client'].MCPClient.return_value
+        mock_mcp.get_token.return_value = "tok2"
+        mod._mcp_client = mock_mcp
         params = {"repo": "OpenSearch", "ref_type": "tag", "ref_name": "v1.0.0",
                   "github_requester": "user1", "source_repo": "obs", "source_issue_number": "1"}
         base_attrs = {"requester_user_id": "github:user1", "approver_user_id": "U_SLACK",
@@ -838,7 +841,9 @@ class TestHandleCreateRefGitHubMention:
     @patch.dict(os.environ, {'GITHUB_SECRET_NAME': 'test'})
     def test_github_mention_authorized(self):
         mod = _load_lambda()
-        sys.modules['mcp_client'].MCPClient.return_value.get_token.return_value = "tok2"
+        mock_mcp = sys.modules['mcp_client'].MCPClient.return_value
+        mock_mcp.get_token.return_value = "tok2"
+        mod._mcp_client = mock_mcp
         attrs = {"requester_user_id": "github:user1", "approver_user_id": "U_SLACK",
                  "approver_is_admin": "True", "approver_github_handle": "other",
                  "source_comment_id": "99999"}
@@ -867,6 +872,9 @@ class TestHandleCreateRefGitHubMention:
     @patch.dict(os.environ, {'GITHUB_SECRET_NAME': 'test'})
     def test_approver_must_be_admin(self):
         mod = _load_lambda()
+        mock_mcp = sys.modules['mcp_client'].MCPClient.return_value
+        mock_mcp.get_token.return_value = "tok2"
+        mod._mcp_client = mock_mcp
         sys.modules['http_client'].get.side_effect = [
             {"role_name": "maintain"}, {"role_name": "write"}]
         r = json.loads(mod._handle_create_ref(
